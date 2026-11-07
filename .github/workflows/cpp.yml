@@ -42,6 +42,18 @@ jobs:
       - name: test
         run: ctest --test-dir build --output-on-failure -C Release
 
+  # Every public header must compile standalone — apple-libc++ hides missing
+  # std includes (cstdint, functional, ...) that libstdc++/MSVC reject.
+  headers:
+    name: every header compiles standalone (linux/gcc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: standalone header check
+        run: ./tools/check_headers.sh
+        env:
+          CXX: g++
+
   # Compile-only smoke for the windowing/GL backends: they self-gate on
   # __has_include(<GLFW/glfw3.h>), so without dev headers installed they
   # silently compile to nothing and rot. Install them and force the check.
@@ -56,7 +68,6 @@ jobs:
         shell: bash
         run: |
           cat > /tmp/backends.cpp <<'EOF'
-          #define GL_GLEXT_PROTOTYPES
           #include <slikui/backends/glfw/glfw_window.hpp>
           #include <slikui/backends/opengl/opengl.hpp>
           int main() { return 0; }

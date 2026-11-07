@@ -9,6 +9,7 @@
 
 #include "slikui/core/math.hpp"
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 

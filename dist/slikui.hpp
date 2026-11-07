@@ -337,6 +337,7 @@ inline std::uint32_t utf8_next(std::string_view s, size_t& i) {
 
 // (already included above: slikui/core/math.hpp)
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -7546,6 +7547,8 @@ inline void Context::handle_event(const Event& e) {
 // (already included above: slikui/style/theme.hpp)
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
+
+#include <functional>
 
 namespace slikui {
 
