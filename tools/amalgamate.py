@@ -16,6 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 INCLUDE = ROOT / "include"
 OUT = ROOT / "dist" / "slikui.hpp"
+FONT_SRC = INCLUDE / "slikui" / "text" / "default_font.hpp"
+FONT_OUT = ROOT / "dist" / "slikui_default_font.hpp"
 
 ORDER = [
     "slikui/core/math.hpp",
@@ -121,6 +123,12 @@ def main() -> None:
     OUT.write_text(header + "\n".join(parts) + footer)
     lines = OUT.read_text().count("\n")
     print(f"wrote {OUT.relative_to(ROOT)} ({lines} lines, {OUT.stat().st_size // 1024} KB)")
+
+    # The bundled font stays opt-in for single-header users too: it is
+    # self-contained, so it ships as a sibling file rather than inflating
+    # slikui.hpp.
+    FONT_OUT.write_text(FONT_SRC.read_text())
+    print(f"wrote {FONT_OUT.relative_to(ROOT)} ({FONT_OUT.stat().st_size // 1024} KB)")
 
 
 if __name__ == "__main__":

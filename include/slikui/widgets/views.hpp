@@ -209,7 +209,14 @@ private:
         return idx < long(items_.size()) ? idx : -1;
     }
     void refresh_metrics() const {
-        if (valid_ || !ctx || !ctx->font().valid()) return;
+        if (valid_ || !ctx) return;
+        if (!ctx->font().valid()) {
+            // Fontless: paint() indexes layouts_[i] per item, so keep one
+            // (empty) layout per row. valid_ stays false so a font loaded
+            // later still rebuilds real layouts.
+            if (layouts_.size() != items_.size()) layouts_.assign(items_.size(), {});
+            return;
+        }
         const Theme& t = ctx->theme();
         float px = t.s(t.base_font_px);
         cached_line_height_ = ctx->font().line_height(px);
@@ -309,7 +316,13 @@ private:
         return size_t(-1);
     }
     void refresh_metrics() const {
-        if (valid_ || !ctx || !ctx->font().valid()) return;
+        if (valid_ || !ctx) return;
+        if (!ctx->font().valid()) {
+            // Fontless: see ListView::refresh_metrics — one empty layout per
+            // tab keeps paint()'s layouts_[i] in bounds.
+            if (layouts_.size() != labels_.size()) layouts_.assign(labels_.size(), {});
+            return;
+        }
         const Theme& t = ctx->theme();
         float px = t.s(t.base_font_px);
         cached_line_height_ = ctx->font().line_height(px);

@@ -9429,7 +9429,14 @@ private:
         return idx < long(items_.size()) ? idx : -1;
     }
     void refresh_metrics() const {
-        if (valid_ || !ctx || !ctx->font().valid()) return;
+        if (valid_ || !ctx) return;
+        if (!ctx->font().valid()) {
+            // Fontless: paint() indexes layouts_[i] per item, so keep one
+            // (empty) layout per row. valid_ stays false so a font loaded
+            // later still rebuilds real layouts.
+            if (layouts_.size() != items_.size()) layouts_.assign(items_.size(), {});
+            return;
+        }
         const Theme& t = ctx->theme();
         float px = t.s(t.base_font_px);
         cached_line_height_ = ctx->font().line_height(px);
@@ -9529,7 +9536,13 @@ private:
         return size_t(-1);
     }
     void refresh_metrics() const {
-        if (valid_ || !ctx || !ctx->font().valid()) return;
+        if (valid_ || !ctx) return;
+        if (!ctx->font().valid()) {
+            // Fontless: see ListView::refresh_metrics — one empty layout per
+            // tab keeps paint()'s layouts_[i] in bounds.
+            if (layouts_.size() != labels_.size()) layouts_.assign(labels_.size(), {});
+            return;
+        }
         const Theme& t = ctx->theme();
         float px = t.s(t.base_font_px);
         cached_line_height_ = ctx->font().line_height(px);
@@ -18000,6 +18013,9 @@ public:
         auto* tex = find(cmd.tex_id);
         if (!tex || cmd.uv.empty()) return;
         Rect clip = clips_.back().intersect(cmd.rect);
+        // Fully clipped: the loop below would still visit row int(clip.y)
+        // when clip.y is fractional, painting a sliver outside the clip.
+        if (clip.empty()) return;
         for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
             for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
                 float fx = float(x) + .5f, fy = float(y) + .5f;
@@ -18018,6 +18034,7 @@ public:
         auto* tex = find(cmd.tex_id);
         if (!tex) return;
         Rect clip = clips_.back().intersect(cmd.rect);
+        if (clip.empty()) return; // see draw_glyph
         for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
             for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
                 float u = cmd.uv.x + (float(x) + .5f - cmd.rect.x) / cmd.rect.w * cmd.uv.w;

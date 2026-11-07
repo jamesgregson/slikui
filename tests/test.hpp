@@ -81,6 +81,14 @@ inline bool skip(const char* reason) {
 
 #define CHECK_NEAR(a, b, eps) CHECK(std::fabs((a) - (b)) < (eps))
 
+// CHECK, and stop the test on failure (later steps depend on `cond`).
+#define REQUIRE(cond)                                                     \
+    do {                                                                  \
+        bool require_ok_ = bool(cond);                                    \
+        CHECK(require_ok_ && #cond);                                      \
+        if (!require_ok_) return;                                         \
+    } while (0)
+
 // Skip the rest of the test when `cond` is unavailable (e.g. no system font).
 #define SKIP_IF_UNAVAILABLE(cond, reason)                                 \
     if (!(cond)) { testfw::skip(reason); return; }                        \

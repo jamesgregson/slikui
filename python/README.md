@@ -8,7 +8,7 @@ framebuffer — no window, no GPU, no event loop required.
 ```python
 import slikui
 
-ui = slikui.App(320, 200)                     # Target + Sink + Context + font
+ui = slikui.App(320, 200)                     # Target + Sink + Context + font (system, else bundled)
 root = ui.set_root(slikui.Column, padding=16, gap=8)
 root.add(slikui.Label, "Hello, slikui!", font_size=26)
 root.add(slikui.Button, "Save", variant=slikui.ButtonVariant.Primary)
@@ -60,7 +60,7 @@ software backend (same blend/SDF/sampling math, verified by test):
 sink = slikui.CanvasSink(320, 240)
 ctx = slikui.Context(sink)          # any RenderSink subclass works here
 ctx.set_frame_size(320, 240)
-ctx.load_font_file(slikui.find_system_font())
+ctx.load_default_font()           # bundled DejaVu Sans subset; or load_font_file(path)
 # ... build the tree, tick ...
 ctx.render()
 frame = sink.buffer               # (240, 320) uint32, 0xAABBGGRR

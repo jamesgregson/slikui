@@ -24,6 +24,7 @@
 
 #include <slikui/slikui.hpp>
 #include <slikui/backends/software/software.hpp>
+#include <slikui/text/default_font.hpp>
 #include <slikui/text/system_fonts.hpp>
 #include <slikui/version.hpp>
 
@@ -447,6 +448,12 @@ NB_MODULE(_slikui, m) {
              nb::arg("now") = 0.0, nb::arg("dt") = 0.0)
         .def("render", &Context::render, nb::arg("clear") = true)
         .def("load_font_file", &Context::load_font_file, nb::arg("path"))
+        .def("load_default_font",
+             [](Context& c) {
+                 return c.load_font_memory(slikui::text::default_font_data(),
+                                           slikui::text::default_font_size());
+             },
+             "Load the bundled DejaVu Sans subset (always available).")
         .def("set_root_column", [](Context& c) -> Column& { return c.set_root<Column>(); },
              nb::rv_policy::reference_internal)
         .def("set_root_row", [](Context& c) -> Row& { return c.set_root<Row>(); },

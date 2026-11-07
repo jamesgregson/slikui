@@ -220,6 +220,9 @@ public:
         auto* tex = find(cmd.tex_id);
         if (!tex || cmd.uv.empty()) return;
         Rect clip = clips_.back().intersect(cmd.rect);
+        // Fully clipped: the loop below would still visit row int(clip.y)
+        // when clip.y is fractional, painting a sliver outside the clip.
+        if (clip.empty()) return;
         for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
             for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
                 float fx = float(x) + .5f, fy = float(y) + .5f;
@@ -238,6 +241,7 @@ public:
         auto* tex = find(cmd.tex_id);
         if (!tex) return;
         Rect clip = clips_.back().intersect(cmd.rect);
+        if (clip.empty()) return; // see draw_glyph
         for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
             for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
                 float u = cmd.uv.x + (float(x) + .5f - cmd.rect.x) / cmd.rect.w * cmd.uv.w;

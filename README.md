@@ -69,6 +69,12 @@ controls grouped in an accordion panel](docs/images/cube_viewer.png)
     see `docs/backend-contract.md`.
 - **True type text** — vendored public-domain stb_truetype/stb_rect_pack,
   compiled with internal linkage: glyph atlas, kerning, word wrapping.
+  Optional bundled font: `#include <slikui/text/default_font.hpp>` (or
+  `dist/slikui_default_font.hpp`) embeds a ~35 KB DejaVu Sans subset (Latin-1
+  + punctuation) for identical text everywhere, even on machines with no
+  system fonts — `ctx.load_font_memory(slikui::text::default_font_data(),
+  slikui::text::default_font_size())`. Licence:
+  `third_party/fonts/LICENSE-DejaVu.txt`; ship it with your app.
 - **Widget set** — Label, Button (variants), Checkbox, Radio, Switch, Slider,
   ProgressBar, Spinner, TextField, TextArea (multiline), ScrollArea, ListView,
   Tabs, Dropdown (popup), Expander, Accordion, Splitter, Image, hover tooltips;
