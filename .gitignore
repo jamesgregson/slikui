@@ -8,3 +8,5 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 compile_commands.json
+shots/
+hello_raw.ppm
