@@ -756,6 +756,7 @@ def main():
         glfw.swap_buffers(win)
 
     glfw.destroy_window(win)
+    app.close()  # release UI callbacks while the interpreter is alive
     glfw.terminate()
 
 

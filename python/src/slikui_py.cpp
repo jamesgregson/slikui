@@ -461,6 +461,7 @@ NB_MODULE(_slikui, m) {
              nb::arg("id"), nb::rv_policy::reference)
         .def("handle", &Context::handle, nb::arg("event"))
         .def("close_popups", &Context::close_popups)
+        .def("clear_tree", &Context::clear_tree)
         .def_prop_ro("has_popups", &Context::has_popups)
         .def_prop_ro("popup_count", &Context::popup_count)
         .def("popup",

@@ -17,6 +17,10 @@ ui.tick(0.0, 1 / 60)                        # layout + animation
 frame = ui.render()                         # zero-copy np.ndarray (H, W) uint32
 ```
 
+`App.close()` — also run by `with App(...)` and automatically at exit —
+destroys the tree and releases Python callbacks it holds, so shutdown is
+leak-free even when callbacks capture widget wrappers.
+
 Build from source (the C++ side is header-only, nothing to link):
 
 ```
