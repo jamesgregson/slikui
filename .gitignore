@@ -1,0 +1,10 @@
+build/
+build-asan/
+.cache/
+.venv/
+python/build/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+compile_commands.json

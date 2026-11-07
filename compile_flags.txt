@@ -1,0 +1,9 @@
+-Iinclude
+-I/opt/homebrew/include
+-Ipython/src
+-Ithird_party/nanobind/include
+-Ithird_party/nanobind/ext/robin_map/include
+-I/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/include/python3.14
+-std=c++20
+-x
+c++
