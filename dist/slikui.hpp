@@ -337,6 +337,7 @@ inline std::uint32_t utf8_next(std::string_view s, size_t& i) {
 
 // (already included above: slikui/core/math.hpp)
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -6602,21 +6603,31 @@ public:
 
     // --- metrics ---
 
-    float scale(float px) const { return stbtt_ScaleForPixelHeight(&info_, px); }
+    // All entry points tolerate an invalid font (load failed / never loaded):
+    // metrics come back zero and glyphs are whitespace, so a fontless UI
+    // degrades to text-less layout instead of crashing — e.g. minimal Linux
+    // containers have no system fonts (find_system_font() returns "").
+    float scale(float px) const { return ok_ ? stbtt_ScaleForPixelHeight(&info_, px) : 0.f; }
 
     float line_height(float px) const {
+        if (!ok_) return 0;
         int asc = 0, desc = 0, gap = 0;
         stbtt_GetFontVMetrics(&info_, &asc, &desc, &gap);
         return float(asc - desc + gap) * scale(px);
     }
 
     float kern(std::uint32_t prev, std::uint32_t cp, float px) const {
+        if (!ok_) return 0;
         return float(stbtt_GetCodepointKernAdvance(&info_, int(prev), int(cp))) * scale(px);
     }
 
     // --- glyph access (rasterizes on miss) ---
 
     const Glyph& glyph(std::uint32_t cp, float px) {
+        if (!ok_) {
+            static const Glyph empty;
+            return empty;
+        }
         std::uint64_t key = (std::uint64_t(cp) << 20) | std::uint64_t(std::uint32_t(px) & 0xFFFFF);
         auto it = cache_.find(key);
         if (it != cache_.end()) return it->second;
@@ -6647,8 +6658,8 @@ public:
 
     TextLayout layout(std::string_view text, float px, float max_width = 0) const {
         TextLayout out;
+        if (!ok_) return out; // before any metrics call — see the class comment
         out.line_height = line_height(px);
-        if (!ok_) return out;
 
         // Tight metrics: the first line's baseline sits on its ASCENT, not a
         // full leading down — otherwise single-line text rides low in its box
@@ -6734,6 +6745,7 @@ public:
     }
 
     float measure_width(std::string_view text, float px) const {
+        if (!ok_) return 0;
         float w = 0;
         std::uint32_t prev = 0;
         size_t i = 0;
@@ -6749,6 +6761,7 @@ public:
 
     // Width of the first `n` codepoints — caret hit-testing in text fields.
     float advance_upto(std::string_view text, size_t n, float px) const {
+        if (!ok_) return 0;
         float w = 0;
         std::uint32_t prev = 0;
         size_t i = 0, count = 0;
@@ -7534,6 +7547,8 @@ inline void Context::handle_event(const Event& e) {
 // (already included above: slikui/style/theme.hpp)
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
+
+#include <functional>
 
 namespace slikui {
 
@@ -9414,7 +9429,14 @@ private:
         return idx < long(items_.size()) ? idx : -1;
     }
     void refresh_metrics() const {
-        if (valid_ || !ctx || !ctx->font().valid()) return;
+        if (valid_ || !ctx) return;
+        if (!ctx->font().valid()) {
+            // Fontless: paint() indexes layouts_[i] per item, so keep one
+            // (empty) layout per row. valid_ stays false so a font loaded
+            // later still rebuilds real layouts.
+            if (layouts_.size() != items_.size()) layouts_.assign(items_.size(), {});
+            return;
+        }
         const Theme& t = ctx->theme();
         float px = t.s(t.base_font_px);
         cached_line_height_ = ctx->font().line_height(px);
@@ -9514,7 +9536,13 @@ private:
         return size_t(-1);
     }
     void refresh_metrics() const {
-        if (valid_ || !ctx || !ctx->font().valid()) return;
+        if (valid_ || !ctx) return;
+        if (!ctx->font().valid()) {
+            // Fontless: see ListView::refresh_metrics — one empty layout per
+            // tab keeps paint()'s layouts_[i] in bounds.
+            if (layouts_.size() != labels_.size()) layouts_.assign(labels_.size(), {});
+            return;
+        }
         const Theme& t = ctx->theme();
         float px = t.s(t.base_font_px);
         cached_line_height_ = ctx->font().line_height(px);
@@ -17985,6 +18013,9 @@ public:
         auto* tex = find(cmd.tex_id);
         if (!tex || cmd.uv.empty()) return;
         Rect clip = clips_.back().intersect(cmd.rect);
+        // Fully clipped: the loop below would still visit row int(clip.y)
+        // when clip.y is fractional, painting a sliver outside the clip.
+        if (clip.empty()) return;
         for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
             for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
                 float fx = float(x) + .5f, fy = float(y) + .5f;
@@ -18003,6 +18034,7 @@ public:
         auto* tex = find(cmd.tex_id);
         if (!tex) return;
         Rect clip = clips_.back().intersect(cmd.rect);
+        if (clip.empty()) return; // see draw_glyph
         for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
             for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
                 float u = cmd.uv.x + (float(x) + .5f - cmd.rect.x) / cmd.rect.w * cmd.uv.w;

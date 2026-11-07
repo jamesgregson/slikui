@@ -3,7 +3,7 @@
 
 #include "slikui/backends/software/software.hpp"
 #include "slikui/context.hpp"
-#include "slikui/text/system_fonts.hpp"
+#include "slikui/text/default_font.hpp"
 #include "slikui/widgets/all.hpp"
 
 namespace {
@@ -16,7 +16,10 @@ struct Fixture {
 
     Fixture() {
         ctx.set_frame_size({320, 240});
-        has_font = ctx.load_font_file(slikui::find_system_font());
+        // Bundled font: identical text on every platform, even fontless
+        // containers (manylinux), so text checks never skip.
+        has_font = ctx.load_font_memory(slikui::text::default_font_data(),
+                                        slikui::text::default_font_size());
     }
 
     void resize(float w, float h) {
@@ -190,7 +193,7 @@ TEST(dropdown_selection) {
     f.frame();
 
     f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, dd.bounds.center().x, dd.bounds.center().y));
-    SKIP_IF_UNAVAILABLE(f.ctx.has_popups(), "popup did not open");
+    REQUIRE(f.ctx.has_popups());
     f.ctx.handle(f.mouse(slikui::Event::Type::MousePress,
                          dd.bounds.x + 20.f, dd.bounds.bottom() + 20.f)); // first row
     CHECK(!f.ctx.has_popups());
@@ -219,11 +222,6 @@ TEST(scrollarea_wheel_scroll) {
     CHECK(content.children[0]->bounds.y < scroll.bounds.y);
 }
 
-// Shared with tests that need text rendering.
-static bool f_font() {
-    static bool ok = !slikui::find_system_font().empty();
-    return ok;
-}
 
 TEST(window_resize_reflows_layout) {
     Fixture f;
@@ -240,7 +238,6 @@ TEST(window_resize_reflows_layout) {
 }
 
 TEST(label_rewraps_on_resize) {
-    SKIP_IF_UNAVAILABLE(f_font(), "no system font");
     Fixture f;
     auto& root = f.ctx.set_root<slikui::Column>();
     auto& lbl = root.add<slikui::Label>("aaaa bbbb cccc dddd eeee ffff gggg hhhh");
@@ -283,7 +280,7 @@ TEST(popup_reclamps_on_resize) {
 
     slikui::Vec2 c = dd.bounds.center();
     f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, c.x, c.y));
-    SKIP_IF_UNAVAILABLE(f.ctx.has_popups(), "popup did not open");
+    REQUIRE(f.ctx.has_popups());
     f.ctx.close_popups();
 
     // Re-open after shrinking the window: popup must stay inside the frame.
@@ -291,7 +288,7 @@ TEST(popup_reclamps_on_resize) {
     f.frame();
     f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, dd.bounds.center().x,
                          dd.bounds.center().y));
-    SKIP_IF_UNAVAILABLE(f.ctx.has_popups(), "popup did not open after resize");
+    REQUIRE(f.ctx.has_popups());
     slikui::Widget* p = f.ctx.popup(0);
     CHECK(p->bounds.right() <= f.ctx.frame_size().x + 0.5f);
     CHECK(p->bounds.bottom() <= f.ctx.frame_size().y + 0.5f);
@@ -419,7 +416,6 @@ TEST(image_measure_and_upload) {
 }
 
 TEST(textarea_multiline_editing) {
-    SKIP_IF_UNAVAILABLE(f_font(), "no system font");
     Fixture f;
     auto& root = f.ctx.set_root<slikui::Column>();
     auto& ta = root.add<slikui::TextArea>();
@@ -456,7 +452,6 @@ TEST(textarea_multiline_editing) {
 }
 
 TEST(textarea_click_places_caret) {
-    SKIP_IF_UNAVAILABLE(f_font(), "no system font");
     Fixture f;
     auto& root = f.ctx.set_root<slikui::Column>();
     auto& ta = root.add<slikui::TextArea>();
@@ -497,7 +492,6 @@ TEST(tooltip_shows_after_hover_delay) {
         now += 0.016;
         f.ctx.tick(slikui::Time{now, 0.016});
     }
-    SKIP_IF_UNAVAILABLE(f_font(), "no system font"); // tooltip popup needs text
     CHECK(f.ctx.has_popups());
 
     // Moving the pointer away dismisses it (bottom-left: outside the button).
@@ -509,7 +503,6 @@ TEST(single_paint_per_widget) {
     // Regression: containers used to paint their subtree in paint() AND
     // Widget::paint_tree recursed — every child was emitted twice (doubling
     // alpha coverage on text).
-    SKIP_IF_UNAVAILABLE(f_font(), "no system font");
     Fixture f;
     auto& root = f.ctx.set_root<slikui::Column>();
     root.add<slikui::Label>("hello");
@@ -528,7 +521,6 @@ TEST(single_paint_per_widget) {
 TEST(text_block_tight_height) {
     // The first line's baseline sits on its ascent, not a full leading down:
     // single-line blocks are tighter than the old 1.25x line-height box.
-    SKIP_IF_UNAVAILABLE(f_font(), "no system font");
     Fixture f;
     float px = f.ctx.theme().s(f.ctx.theme().base_font_px);
     auto lay = f.ctx.font().layout("Hx", px);

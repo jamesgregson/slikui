@@ -5,13 +5,13 @@ pixel-identical frames to the C++ software.Sink for the same widget trees.
 import numpy as np
 
 import slikui
-from slikui._slikui import Context, Sink, Target, find_system_font
+from slikui._slikui import Context, Sink, Target
 
 
 def _context(sink, w, h, scale, build):
     ctx = Context(sink)
     ctx.set_frame_size(float(w), float(h))
-    ctx.load_font_file(find_system_font())
+    ctx.load_default_font()  # same glyphs on every platform
     build(ctx)
     ctx.tick(0.0, 1 / 60)
     ctx.render()

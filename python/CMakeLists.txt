@@ -17,6 +17,14 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/nanobind
 nanobind_add_module(_slikui NB_STATIC src/slikui_py.cpp)
 target_include_directories(_slikui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 
+# slikui.CanvasSink (numpy) must match the C++ software sink bit-for-bit
+# (test_pyrenderer.py). numpy rounds every float32 op; GCC/Clang fuse a*b+c
+# into FMA on arm64 by default, shifting rare pixels by 1 LSB. MSVC does not
+# contract unless asked (/fp:contract).
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(_slikui PRIVATE -ffp-contract=off)
+endif()
+
 # scikit-build-core merges this into the wheel next to the `slikui` package.
 install(TARGETS _slikui
         LIBRARY DESTINATION slikui

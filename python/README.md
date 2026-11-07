@@ -1,6 +1,22 @@
 # slikui — Python bindings for slikui
 
-`pip install slikui` (planned) · import `slikui` · compiled module `slikui._slikui`.
+Install from GitHub Releases · import `slikui` · compiled module `slikui._slikui`.
+
+```sh
+pip install slikui --find-links https://github.com/jamesgregson/slikui/releases/expanded_assets/v0.1.0
+```
+
+pip picks the wheel matching your OS, CPU and Python (3.10–3.14 on Linux
+x86_64/aarch64, macOS arm64, Windows x64) from the release, and pulls numpy
+from PyPI as usual. Swap `v0.1.0` for any release tag. slikui is distributed
+only here, not on PyPI.
+
+No wheel for your platform (e.g. Intel macOS)? Build the release sdist —
+needs a C++20 compiler; build tools come from PyPI as usual:
+
+```sh
+pip install https://github.com/jamesgregson/slikui/releases/download/v0.1.0/slikui-0.1.0.tar.gz
+```
 
 Headless, testable UI: the software rasterizer renders into a `numpy`
 framebuffer — no window, no GPU, no event loop required.
@@ -8,7 +24,7 @@ framebuffer — no window, no GPU, no event loop required.
 ```python
 import slikui
 
-ui = slikui.App(320, 200)                     # Target + Sink + Context + font
+ui = slikui.App(320, 200)                     # Target + Sink + Context + font (system, else bundled)
 root = ui.set_root(slikui.Column, padding=16, gap=8)
 root.add(slikui.Label, "Hello, slikui!", font_size=26)
 root.add(slikui.Button, "Save", variant=slikui.ButtonVariant.Primary)
@@ -60,7 +76,7 @@ software backend (same blend/SDF/sampling math, verified by test):
 sink = slikui.CanvasSink(320, 240)
 ctx = slikui.Context(sink)          # any RenderSink subclass works here
 ctx.set_frame_size(320, 240)
-ctx.load_font_file(slikui.find_system_font())
+ctx.load_default_font()           # bundled DejaVu Sans subset; or load_font_file(path)
 # ... build the tree, tick ...
 ctx.render()
 frame = sink.buffer               # (240, 320) uint32, 0xAABBGGRR

@@ -81,21 +81,31 @@ public:
 
     // --- metrics ---
 
-    float scale(float px) const { return stbtt_ScaleForPixelHeight(&info_, px); }
+    // All entry points tolerate an invalid font (load failed / never loaded):
+    // metrics come back zero and glyphs are whitespace, so a fontless UI
+    // degrades to text-less layout instead of crashing — e.g. minimal Linux
+    // containers have no system fonts (find_system_font() returns "").
+    float scale(float px) const { return ok_ ? stbtt_ScaleForPixelHeight(&info_, px) : 0.f; }
 
     float line_height(float px) const {
+        if (!ok_) return 0;
         int asc = 0, desc = 0, gap = 0;
         stbtt_GetFontVMetrics(&info_, &asc, &desc, &gap);
         return float(asc - desc + gap) * scale(px);
     }
 
     float kern(std::uint32_t prev, std::uint32_t cp, float px) const {
+        if (!ok_) return 0;
         return float(stbtt_GetCodepointKernAdvance(&info_, int(prev), int(cp))) * scale(px);
     }
 
     // --- glyph access (rasterizes on miss) ---
 
     const Glyph& glyph(std::uint32_t cp, float px) {
+        if (!ok_) {
+            static const Glyph empty;
+            return empty;
+        }
         std::uint64_t key = (std::uint64_t(cp) << 20) | std::uint64_t(std::uint32_t(px) & 0xFFFFF);
         auto it = cache_.find(key);
         if (it != cache_.end()) return it->second;
@@ -126,8 +136,8 @@ public:
 
     TextLayout layout(std::string_view text, float px, float max_width = 0) const {
         TextLayout out;
+        if (!ok_) return out; // before any metrics call — see the class comment
         out.line_height = line_height(px);
-        if (!ok_) return out;
 
         // Tight metrics: the first line's baseline sits on its ASCENT, not a
         // full leading down — otherwise single-line text rides low in its box
@@ -213,6 +223,7 @@ public:
     }
 
     float measure_width(std::string_view text, float px) const {
+        if (!ok_) return 0;
         float w = 0;
         std::uint32_t prev = 0;
         size_t i = 0;
@@ -228,6 +239,7 @@ public:
 
     // Width of the first `n` codepoints — caret hit-testing in text fields.
     float advance_upto(std::string_view text, size_t n, float px) const {
+        if (!ok_) return 0;
         float w = 0;
         std::uint32_t prev = 0;
         size_t i = 0, count = 0;

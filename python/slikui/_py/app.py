@@ -50,7 +50,12 @@ class App:
         self.sink.set_scale(self.scale)
         self.ctx = Context(self.sink)
         self.ctx.set_frame_size(float(self.width), float(self.height))
-        self.ctx.load_font_file(font or find_system_font())
+        if font is not None:
+            self.ctx.load_font_file(font)
+        elif not self.ctx.load_font_file(find_system_font()):
+            # No system font (minimal containers, e.g. manylinux): fall back
+            # to the bundled DejaVu Sans subset so text still renders.
+            self.ctx.load_default_font()
         if theme is not None:
             self.ctx.theme = theme
         _register_exit_close(self)

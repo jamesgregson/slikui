@@ -3,7 +3,7 @@
 
 #include "slikui/backends/software/software.hpp"
 #include "slikui/context.hpp"
-#include "slikui/text/system_fonts.hpp"
+#include "slikui/text/default_font.hpp"
 #include "slikui/widgets/all.hpp"
 
 #include <cstddef>
@@ -18,7 +18,10 @@ struct Golden {
 
     Golden() {
         ctx.set_frame_size({160, 120});
-        has_font = ctx.load_font_file(slikui::find_system_font());
+        // Bundled font: identical text on every platform, even fontless
+        // containers (manylinux), so text checks never skip.
+        has_font = ctx.load_font_memory(slikui::text::default_font_data(),
+                                        slikui::text::default_font_size());
     }
 
     void frame() {
@@ -41,11 +44,6 @@ struct Golden {
 
 } // namespace
 
-// Shared with tests that need text rendering.
-static bool g_font_available() {
-    static bool ok = !slikui::find_system_font().empty();
-    return ok;
-}
 
 TEST(golden_background_fill) {
     Golden g;
@@ -79,7 +77,6 @@ TEST(golden_button_rounded_corner_transparent) {
 }
 
 TEST(golden_label_draws_glyphs) {
-    SKIP_IF_UNAVAILABLE(g_font_available(), "no system font");
     Golden g;
     auto& root = g.ctx.set_root<slikui::Column>();
     auto& label = root.add<slikui::Label>("Hello");
@@ -90,7 +87,6 @@ TEST(golden_label_draws_glyphs) {
 }
 
 TEST(golden_scrollarea_clips_content) {
-    SKIP_IF_UNAVAILABLE(g_font_available(), "no system font");
     Golden g;
     auto& root = g.ctx.set_root<slikui::Column>();
     auto& scroll = root.add<slikui::ScrollArea>();
@@ -128,4 +124,33 @@ TEST(golden_progress_bar_fill) {
                             bar.bounds.w * .35f, bar.bounds.h},
                            bg) > 0;
     CHECK(right_inked);
+}
+
+TEST(golden_glyph_fully_below_clip_paints_nothing) {
+    // A glyph starting at a fractional y just past the clip's bottom edge
+    // intersects to an empty rect. draw_glyph used to loop from int(clip.y)
+    // anyway and paint one row outside the clip (seen as a ScrollArea's
+    // next line bleeding 1px below the viewport with DejaVu metrics).
+    slikui::software::Target target(16, 16);
+    slikui::software::Sink sink(target);
+    std::uint8_t ink[4 * 4];
+    for (auto& a : ink) a = 255;
+    sink.upload({7, 4, 4, slikui::TexFormat::Alpha8, ink});
+
+    slikui::Color bg{0, 0, 0, 255};
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) target.at(x, y) = bg.to_abgr();
+
+    slikui::DrawList list;
+    list.push_clip({0, 0, 16, 9});                                   // rows 0..8
+    list.glyph({2, 9.961f, 4, 4}, 7, {0, 0, 4, 4}, {255, 255, 255, 255}); // starts below
+    list.image({8, 9.5f, 4, 4}, 7, {0, 0, 4, 4});
+    list.pop_clip();
+    sink.render(list, {16, 16});
+
+    bool clean = true;
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x)
+            if (slikui::Color::from_abgr(target.at(x, y)) != bg) clean = false;
+    CHECK(clean);
 }

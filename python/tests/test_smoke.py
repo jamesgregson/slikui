@@ -91,3 +91,73 @@ def test_widget_identity_and_lifecycle():
     assert root.find("nope") is None
     root.id = "root"
     assert root.find("root") is root
+
+
+def test_fontless_context_does_not_crash():
+    # Minimal Linux containers (e.g. manylinux wheel builds) have no system
+    # fonts: find_system_font() returns "" and the font never loads. The
+    # fontless path must degrade to zero-size text, not segfault — the CI
+    # wheel tests crashed in App.tick() before the ok_ guards existed.
+    from slikui._slikui import Context, Sink, Target
+
+    target = Target(120, 80)
+    sink = Sink(target)
+    ctx = Context(sink)  # no load_font_file call: invalid font on purpose
+    ctx.set_frame_size(120.0, 80.0)
+    root = ctx.set_root_column()
+    root.add(slikui.Label, "no font loaded")
+    root.add(slikui.Button, "still fine")
+    ctx.tick(0.0, 1 / 60)
+    ctx.render()  # segfaulted here before the fix
+    assert (target.pixels() != 0).any()  # background + chrome still painted
+
+
+def test_fontless_list_widgets_render_with_items():
+    # ListView/Tabs keep one text layout per item; fontless, that cache was
+    # left empty and paint() read past it. The wheel CI segfaulted in
+    # test_dropdown_popup_opens_selects_closes — a Dropdown popup is a
+    # ListView, painted while open.
+    from slikui._slikui import Context, Sink, Target
+
+    target = Target(240, 200)
+    sink = Sink(target)
+    ctx = Context(sink)  # fontless on purpose
+    ctx.set_frame_size(240.0, 200.0)
+    root = ctx.set_root_column()
+    dd = root.add(slikui.Dropdown, items=["Cube", "Sphere", "Torus"])
+    root.add(slikui.ListView, items=["one", "two", "three"], selected=1)
+    root.add(slikui.Tabs, tabs=["A", "B", "C"])
+    ctx.tick(0.0, 1 / 60)
+    ctx.render()
+
+    r = dd.bounds
+    ctx.handle(slikui.mouse_press((r.x + r.w / 2, r.y + r.h / 2)))
+    assert ctx.popup_count == 1
+    ctx.tick(1 / 60, 1 / 60)
+    ctx.render()  # segfaulted here before the fix
+    ctx.handle(slikui.mouse_move((20, 60)))
+    ctx.render()
+    assert (target.pixels() != 0).any()
+
+
+def test_bundled_default_font_loads():
+    from slikui._slikui import Context, Sink, Target
+
+    ctx = Context(Sink(Target(8, 8)))
+    assert ctx.load_default_font()
+
+
+def test_app_falls_back_to_bundled_font(monkeypatch):
+    # Simulate a fontless machine (manylinux): App() must still render text.
+    import slikui._py.app as app_mod
+
+    monkeypatch.setattr(app_mod, "find_system_font", lambda: "")
+    ui = slikui.App(160, 60)
+    root = ui.set_root(slikui.Column, padding=8)
+    label = root.add(slikui.Label, "Hello")
+    ui.tick(0.0, 1 / 60)
+    frame = ui.render()
+    r = label.bounds
+    assert r.w > 0 and r.h > 0  # measured with real metrics, not zero-size
+    region = frame[int(r.y):int(r.y + r.h), int(r.x):int(r.x + r.w)]
+    assert (region != ui.ctx.theme.background.to_abgr()).sum() > 10  # glyph ink

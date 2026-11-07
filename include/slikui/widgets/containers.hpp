@@ -6,6 +6,8 @@
 #include "slikui/widgets/env.hpp"
 #include "slikui/widgets/widget.hpp"
 
+#include <functional>
+
 namespace slikui {
 
 // Shared flexbox-style behaviour: stack children along one axis with a gap
