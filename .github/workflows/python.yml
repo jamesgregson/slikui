@@ -46,8 +46,7 @@ jobs:
         include:
           - { os: ubuntu-latest }     # linux x86_64
           - { os: ubuntu-24.04-arm }  # linux aarch64
-          - { os: macos-latest }      # macOS arm64
-          - { os: macos-13 }          # macOS x86_64
+          - { os: macos-latest }      # macOS arm64 (no x86_64: Intel Macs build from the sdist)
           - { os: windows-latest }    # windows amd64
     env:
       CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
@@ -67,3 +66,35 @@ jobs:
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
+
+  # Tag push (v*) -> GitHub Release with the sdist + every wheel attached.
+  # GitHub Releases only, no PyPI; install instructions in python/README.md.
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [sdist, wheels]          # every platform built and tested, or no release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write               # create the release + upload assets
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tag must match package version
+        run: |
+          v=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' python/slikui/_version.py)
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match python/slikui/_version.py ($v)"
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true      # sdist + wheels-* -> one flat folder
+
+      - name: create release
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
