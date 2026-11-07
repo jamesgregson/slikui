@@ -28,8 +28,8 @@ test = ["pytest>=8"]
 demo = ["glfw>=2.5", "PyOpenGL"]
 
 [project.urls]
-Homepage = "https://github.com/slikui/slikui"
-Documentation = "https://github.com/slikui/slikui/tree/main/python"
+Homepage = "https://github.com/jamesgregson/slikui"
+Documentation = "https://github.com/jamesgregson/slikui/tree/main/python"
 
 [tool.scikit-build]
 wheel.packages = ["python/slikui"]
