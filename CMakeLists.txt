@@ -1,11 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 
 # Version comes from include/slikui/version.hpp — the single source of truth
-# for the C++ side (see the header for the Python side).
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/slikui/version.hpp" _slikui_version
-     REGEX "#define SLIKUI_VERSION_STRING ")
-string(REGEX REPLACE ".*\"\([^\"]*)\".*" "\\1" _slikui_version "${_slikui_version}")
-string(STRIP "${_slikui_version}" _slikui_version)
+# for C++ and Python alike.
+set(_slikui_version "")
+foreach(_part MAJOR MINOR PATCH)
+  file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/slikui/version.hpp" _line
+       REGEX "^#define SLIKUI_VERSION_${_part} [0-9]+$")
+  if(NOT _line)
+    message(FATAL_ERROR "SLIKUI_VERSION_${_part} not found in include/slikui/version.hpp")
+  endif()
+  string(REGEX REPLACE "^#define SLIKUI_VERSION_${_part} ([0-9]+)$" "\\1" _num "${_line}")
+  list(APPEND _slikui_version "${_num}")
+endforeach()
+list(JOIN _slikui_version "." _slikui_version)
 
 project(slikui VERSION "${_slikui_version}" LANGUAGES CXX)
 message(STATUS "slikui ${PROJECT_VERSION}")

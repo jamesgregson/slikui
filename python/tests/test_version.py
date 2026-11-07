@@ -1,46 +1,31 @@
-"""Version lockstep: Python and C++ must claim the same release version.
+"""Version: include/slikui/version.hpp is the single source of truth.
 
-Two files declare the version — include/slikui/version.hpp (C++ truth, CMake
-parses it into project(VERSION)) and python/slikui/_version.py (Python truth,
-PyPI metadata reads it). This test fails if they drift apart. It needs the
-source tree; running the tests against an installed wheel without sources
-skips it.
+slikui.__version__ comes from the compiled extension (SLIKUI_VERSION_STRING),
+and the PyPI metadata of slikui-python comes from the same header through the
+pyproject regex provider. These tests check the two paths agree, so a broken
+regex or a stale build shows up here rather than on PyPI.
 """
 
 import re
-from pathlib import Path
+from importlib import metadata
 
 import pytest
 
 import slikui
-
-_VERSION_HPP = (
-    Path(__file__).resolve().parents[2] / "include" / "slikui" / "version.hpp"
-)
+import slikui._slikui
 
 
-@pytest.fixture()
-def header_version():
-    if not _VERSION_HPP.exists():
-        pytest.skip("source tree not available (installed-package run)")
-    m = re.search(r'#define SLIKUI_VERSION_STRING "([^"]+)"', _VERSION_HPP.read_text())
-    assert m, "SLIKUI_VERSION_STRING missing from version.hpp"
-    return m.group(1)
+def test_version_is_semver_triple():
+    assert re.fullmatch(r"\d+\.\d+\.\d+", slikui.__version__)
 
 
-def test_python_version_matches_cpp_header(header_version):
-    assert slikui.__version__ == header_version
+def test_python_version_is_extension_version():
+    assert slikui.__version__ == slikui._slikui.__version__
 
 
-def test_extension_version_matches_cpp_header(header_version):
-    import slikui._slikui
-
-    assert slikui._slikui.__version__ == header_version
-
-
-def test_umbrella_header_version_matches(header_version):
-    # The C++ constexpr version is derived from the same macros; this check
-    # runs in Python via the compiled module's sibling — the umbrella itself
-    # is compiled into nothing, so assert the macros parse as a triple.
-    parts = header_version.split(".")
-    assert len(parts) == 3 and all(p.isdigit() for p in parts)
+def test_distribution_metadata_matches_header():
+    try:
+        dist_version = metadata.version("slikui-python")
+    except metadata.PackageNotFoundError:
+        pytest.skip("slikui-python not installed (running from a bare build)")
+    assert dist_version == slikui.__version__

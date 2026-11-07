@@ -79,18 +79,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: tag must match package version
-        run: |
-          v=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' python/slikui/_version.py)
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match python/slikui/_version.py ($v)"
-            exit 1
-          fi
-
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true      # sdist + wheels-* -> one flat folder
+
+      # The built files carry the version from include/slikui/version.hpp (via
+      # the pyproject regex provider) in their names; the tag must agree.
+      - name: tag must match package version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          bad=$(ls dist | grep -v -e "^slikui_python-$v\.tar\.gz$" -e "^slikui_python-$v-.*\.whl$" || true)
+          if [ ! -f "dist/slikui_python-$v.tar.gz" ] || [ -n "$bad" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the built version (include/slikui/version.hpp)"
+            ls dist
+            exit 1
+          fi
 
       - name: create release
         run: |

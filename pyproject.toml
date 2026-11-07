@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=1.0", "ninja>=1.11"]
+requires = ["scikit-build-core>=1.1.2", "ninja>=1.11"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -35,11 +35,14 @@ Documentation = "https://github.com/jamesgregson/slikui/tree/main/python"
 [tool.scikit-build]
 wheel.packages = ["python/slikui"]
 
-# Version: single source of truth is python/slikui/_version.py (lockstep with
-# the C++ side is enforced by python/tests/test_version.py).
-[tool.scikit-build.metadata.version]
+# Version: single source of truth is include/slikui/version.hpp — the same
+# three macros CMake and the compiled extension read.
+[[tool.dynamic-metadata]]
 provider = "scikit_build_core.metadata.regex"
-input = "python/slikui/_version.py"
+field = "version"
+input = "include/slikui/version.hpp"
+regex = '''(?m)^#define SLIKUI_VERSION_MAJOR (?P<major>\d+)$\s+^#define SLIKUI_VERSION_MINOR (?P<minor>\d+)$\s+^#define SLIKUI_VERSION_PATCH (?P<patch>\d+)$'''
+result = "{major}.{minor}.{patch}"
 
 [tool.scikit-build.sdist]
 exclude = [
