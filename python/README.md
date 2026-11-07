@@ -1,22 +1,17 @@
 # slikui — Python bindings for slikui
 
-Install from GitHub Releases · import `slikui` · compiled module `slikui._slikui`.
+Install from PyPI · import `slikui` · compiled module `slikui._slikui`.
 
 ```sh
-pip install slikui --find-links https://github.com/jamesgregson/slikui/releases/expanded_assets/v0.1.0
+pip install slikui-python
 ```
 
 pip picks the wheel matching your OS, CPU and Python (3.10–3.14 on Linux
-x86_64/aarch64, macOS arm64, Windows x64) from the release, and pulls numpy
-from PyPI as usual. Swap `v0.1.0` for any release tag. slikui is distributed
-only here, not on PyPI.
+x86_64/aarch64, macOS arm64, Windows x64). No wheel for your platform (e.g.
+Intel macOS)? pip builds from the sdist instead — that needs a C++20 compiler.
 
-No wheel for your platform (e.g. Intel macOS)? Build the release sdist —
-needs a C++20 compiler; build tools come from PyPI as usual:
-
-```sh
-pip install https://github.com/jamesgregson/slikui/releases/download/v0.1.0/slikui-0.1.0.tar.gz
-```
+The same wheels and sdist are attached to every
+[GitHub Release](https://github.com/jamesgregson/slikui/releases).
 
 Headless, testable UI: the software rasterizer renders into a `numpy`
 framebuffer — no window, no GPU, no event loop required.
