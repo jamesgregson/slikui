@@ -79,9 +79,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Not into dist/: that's the tracked folder holding the amalgamated
+      # C++ headers (attached to the release explicitly below).
       - uses: actions/download-artifact@v4
         with:
-          path: dist
+          path: packages
           merge-multiple: true      # sdist + wheels-* -> one flat folder
 
       # The built files carry the version from include/slikui/version.hpp (via
@@ -89,17 +91,18 @@ jobs:
       - name: tag must match package version
         run: |
           v="${GITHUB_REF_NAME#v}"
-          bad=$(ls dist | grep -v -e "^slikui_python-$v\.tar\.gz$" -e "^slikui_python-$v-.*\.whl$" || true)
-          if [ ! -f "dist/slikui_python-$v.tar.gz" ] || [ -n "$bad" ]; then
+          bad=$(ls packages | grep -v -e "^slikui_python-$v\.tar\.gz$" -e "^slikui_python-$v-.*\.whl$" || true)
+          if [ ! -f "packages/slikui_python-$v.tar.gz" ] || [ -n "$bad" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match the built version (include/slikui/version.hpp)"
-            ls dist
+            ls packages
             exit 1
           fi
 
       - name: create release
         run: |
-          ls -l dist
-          gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
+          ls -l packages dist
+          gh release create "$GITHUB_REF_NAME" packages/* dist/slikui.hpp dist/slikui_default_font.hpp \
+            --generate-notes --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}
 
