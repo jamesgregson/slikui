@@ -3,13 +3,13 @@ requires = ["scikit-build-core>=0.11", "ninja>=1.11"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "silk-ui"
+name = "slikui"
 version = "0.1.0"
-description = "Python bindings for silk — a header-only C++20 UI library"
+description = "Python bindings for slikui — a header-only C++20 UI library"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "silk contributors" }]
+authors = [{ name = "slikui contributors" }]
 dependencies = ["numpy>=1.24"]
 classifiers = [
     "Programming Language :: C++",
@@ -21,7 +21,7 @@ classifiers = [
 test = ["pytest>=8"]
 
 [tool.scikit-build]
-wheel.packages = ["silk"]
+wheel.packages = ["slikui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

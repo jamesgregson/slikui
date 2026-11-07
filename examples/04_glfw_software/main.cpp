@@ -10,9 +10,9 @@
 #include <GLFW/glfw3.h>
 
 #include <chrono>
-#include <silk/backends/software/software.hpp>
-#include <silk/silk.hpp>
-#include <silk/text/system_fonts.hpp>
+#include <slikui/backends/software/software.hpp>
+#include <slikui/slikui.hpp>
+#include <slikui/text/system_fonts.hpp>
 
 #include <vector>
 
@@ -47,23 +47,23 @@ int main() {
 #ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
-    GLFWwindow* win = glfwCreateWindow(640, 420, "silk software blit", nullptr, nullptr);
+    GLFWwindow* win = glfwCreateWindow(640, 420, "slikui software blit", nullptr, nullptr);
     if (!win) return 1;
     glfwMakeContextCurrent(win);
 
-    silk::software::Target target(640, 420);   // owned raw pixel buffer
-    silk::software::Sink sink(target);
-    silk::Context ctx(sink);
-    ctx.load_font_file(silk::find_system_font());
+    slikui::software::Target target(640, 420);   // owned raw pixel buffer
+    slikui::software::Sink sink(target);
+    slikui::Context ctx(sink);
+    ctx.load_font_file(slikui::find_system_font());
 
     int clicks = 0;
-    auto& root = ctx.set_root<silk::Column>();
+    auto& root = ctx.set_root<slikui::Column>();
     root.set_padding(20).set_gap(10);
-    root.add<silk::Label>("Software rasterizer in a window").set_font_size(20);
-    root.add<silk::Label>("Every pixel was blended on the CPU into a uint32_t buffer,");
-    root.add<silk::Label>("then uploaded as one texture and blitted.");
-    auto& status = root.add<silk::Label>("clicks: 0");
-    root.add<silk::Button>("Click me").on_click([&] {
+    root.add<slikui::Label>("Software rasterizer in a window").set_font_size(20);
+    root.add<slikui::Label>("Every pixel was blended on the CPU into a uint32_t buffer,");
+    root.add<slikui::Label>("then uploaded as one texture and blitted.");
+    auto& status = root.add<slikui::Label>("clicks: 0");
+    root.add<slikui::Button>("Click me").on_click([&] {
         status.set_text("clicks: " + std::to_string(++clicks));
     });
 
@@ -119,7 +119,7 @@ int main() {
         last = pt;
         now += dt;
 
-        ctx.tick(silk::Time{now, silk::clamp_dt(dt)});
+        ctx.tick(slikui::Time{now, slikui::clamp_dt(dt)});
         ctx.render(); // rasterize into target
 
         // Blit raw pixels through one texture.

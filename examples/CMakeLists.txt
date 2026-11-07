@@ -13,16 +13,16 @@ endif()
 
 if(glfw3_FOUND)
   add_executable(01_hello 01_hello/main.cpp)
-  target_link_libraries(01_hello PRIVATE silk ${GLFW_LIBS})
+  target_link_libraries(01_hello PRIVATE slikui ${GLFW_LIBS})
 
   add_executable(03_gallery 03_gallery/main.cpp)
-  target_link_libraries(03_gallery PRIVATE silk ${GLFW_LIBS})
+  target_link_libraries(03_gallery PRIVATE slikui ${GLFW_LIBS})
 
   add_executable(04_glfw_opengl 04_glfw_opengl/main.cpp)
-  target_link_libraries(04_glfw_opengl PRIVATE silk ${GLFW_LIBS})
+  target_link_libraries(04_glfw_opengl PRIVATE slikui ${GLFW_LIBS})
 
   add_executable(04_glfw_software 04_glfw_software/main.cpp)
-  target_link_libraries(04_glfw_software PRIVATE silk ${GLFW_LIBS})
+  target_link_libraries(04_glfw_software PRIVATE slikui ${GLFW_LIBS})
 endif()
 
 if(APPLE)
@@ -42,4 +42,4 @@ endif()
 
 # Dependency-free headless example — always builds.
 add_executable(02_raw_pixels 02_raw_pixels/main.cpp)
-target_link_libraries(02_raw_pixels PRIVATE silk)
+target_link_libraries(02_raw_pixels PRIVATE slikui)

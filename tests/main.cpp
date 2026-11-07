@@ -1,4 +1,4 @@
-// tests/main.cpp — entry point for the silk test suite.
+// tests/main.cpp — entry point for the slikui test suite.
 #include "test.hpp"
 
 int main() {

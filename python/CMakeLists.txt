@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(silk-python LANGUAGES CXX)
+project(slikui-python LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,12 +17,12 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/nanobind
                  ${CMAKE_CURRENT_BINARY_DIR}/third_party/nanobind)
 
 # The whole library is header-only, so the extension is a few TUs and no
-# libraries. _silk compiles all of silk (incl. internal-linkage stb).
-nanobind_add_module(_silk NB_STATIC src/silk_py.cpp)
-target_include_directories(_silk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+# libraries. _slikui compiles all of slikui (incl. internal-linkage stb).
+nanobind_add_module(_slikui NB_STATIC src/slikui_py.cpp)
+target_include_directories(_slikui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 
-# scikit-build-core merges this into the wheel next to the `silk` package.
-install(TARGETS _silk
-        LIBRARY DESTINATION silk
-        RUNTIME DESTINATION silk
-        ARCHIVE DESTINATION silk)
+# scikit-build-core merges this into the wheel next to the `slikui` package.
+install(TARGETS _slikui
+        LIBRARY DESTINATION slikui
+        RUNTIME DESTINATION slikui
+        ARCHIVE DESTINATION slikui)

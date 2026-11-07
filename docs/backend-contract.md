@@ -1,6 +1,6 @@
-# The silk backend contract
+# The slikui backend contract
 
-Everything silk needs from a graphics API is one interface:
+Everything slikui needs from a graphics API is one interface:
 
 ```cpp
 class IRenderSink {
@@ -11,8 +11,8 @@ public:
 };
 ```
 
-`silk::software::Sink` (CPU, raw `uint32_t` pixels) and
-`silk::opengl::OpenglSink` (GL 3.3, system headers) are reference
+`slikui::software::Sink` (CPU, raw `uint32_t` pixels) and
+`slikui::opengl::OpenglSink` (GL 3.3, system headers) are reference
 implementations. A new backend — Vulkan, Metal, SDL_Renderer, a raylib batch —
 implements the same two methods.
 
@@ -67,10 +67,10 @@ ctx.render()
 
 ## Event translation
 
-The window layer converts native events into `silk::Event` and calls
+The window layer converts native events into `slikui::Event` and calls
 `Context::handle` — one vocabulary regardless of platform:
 
-| silk event | GLFW source |
+| slikui event | GLFW source |
 |------------|-------------|
 | `MouseMove` | cursor-pos callback (`pos`, `delta`) |
 | `MousePress`/`MouseRelease` | mouse-button callback (`button`, `pos`) |
@@ -89,23 +89,23 @@ the content scale on HiDPI before filling `pos`.
   half-extents, radius/border/dir), one SDF fragment shader: rounded rects and
   capsule lines get their AA for free from `sd_box` coverage.
 - `ClipPush`/`ClipPop` flush the batch and call `glScissor` (y-flipped:
-  GL's origin is bottom-left, silk's is top-left).
+  GL's origin is bottom-left, slikui's is top-left).
 - Glyphs sample the R8 atlas and multiply by `v_col`; images multiply the
   sampled RGBA into the vertex color.
 
 ## A minimal new sink (sketch)
 
 ```cpp
-class MySink : public silk::IRenderSink {
-    void upload(const silk::TexUpload& up) override {
+class MySink : public slikui::IRenderSink {
+    void upload(const slikui::TexUpload& up) override {
         textures[up.id] = make_texture(up); // create-or-replace
     }
-    void render(const silk::DrawList& list, silk::Vec2 fb) override {
+    void render(const slikui::DrawList& list, slikui::Vec2 fb) override {
         begin_frame(fb);
         for (const auto& cmd : list.commands()) {
             switch (cmd.type) {
-            case silk::DrawCmd::Type::ClipPush: push_clip(cmd.rect); break;
-            case silk::DrawCmd::Type::ClipPop:  pop_clip();          break;
+            case slikui::DrawCmd::Type::ClipPush: push_clip(cmd.rect); break;
+            case slikui::DrawCmd::Type::ClipPop:  pop_clip();          break;
             default: draw(cmd); break; // rect/line/glyph/image
             }
         }

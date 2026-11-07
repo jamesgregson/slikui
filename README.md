@@ -1,35 +1,35 @@
-# silk — a sleek, header-only C++ UI library for graphics applications
+# slikui — a sleek, header-only C++ UI library for graphics applications
 
 Retained-mode widget tree, declarative builder API, one narrow rendering
 contract that runs on **raw pixels or any graphics API**. C++20, no build
 step, no dependencies.
 
 ```cpp
-#include "silk.hpp"                 // or dist/silk.hpp — the single header
+#include "slikui.hpp"                 // or dist/slikui.hpp — the single header
 
-#include <silk/backends/software/software.hpp>   // CPU rasterizer
+#include <slikui/backends/software/software.hpp>   // CPU rasterizer
 
 int main() {
-    silk::software::Target target(480, 320);     // raw uint32_t pixels
-    silk::software::Sink sink(target);
-    silk::Context ctx(sink);
+    slikui::software::Target target(480, 320);     // raw uint32_t pixels
+    slikui::software::Sink sink(target);
+    slikui::Context ctx(sink);
     ctx.set_frame_size({480, 320});
-    ctx.load_font_file(silk::find_system_font());
+    ctx.load_font_file(slikui::find_system_font());
 
-    auto& root = ctx.set_root<silk::Column>();
+    auto& root = ctx.set_root<slikui::Column>();
     root.set_padding(16).set_gap(8);
-    root.add<silk::Label>("Hello, silk!");
-    root.add<silk::Button>("Click me").on_click([] { /* ... */ });
+    root.add<slikui::Label>("Hello, slikui!");
+    root.add<slikui::Button>("Click me").on_click([] { /* ... */ });
 
     while (running) {
         ctx.handle(event);                        // translated input events
-        ctx.tick(silk::Time{now, dt});            // layout + animation
+        ctx.tick(slikui::Time{now, dt});            // layout + animation
         ctx.render();                             // -> pixels
     }
 }
 ```
 
-![silk cube viewer — the GLFW + OpenGL demo: torus over a procedural sky,
+![slikui cube viewer — the GLFW + OpenGL demo: torus over a procedural sky,
 controls grouped in an accordion panel](docs/images/cube_viewer.png)
 
 ## Contents
@@ -44,22 +44,22 @@ controls grouped in an accordion panel](docs/images/cube_viewer.png)
     [Expander, Accordion, Splitter](#expander-accordion-splitter) ·
     [Image](#image) · [Tooltips](#tooltips) · [Theming](#theming)
 - [Building the demos](#building-the-demos)
-- [Python bindings — `silk-ui`](python/README.md) — full Python API, events,
+- [Python bindings — `slikui`](python/README.md) — full Python API, events,
   your-own-renderer seam, parity tests
 - [Documentation](#documentation)
 - [Roadmap](#roadmap)
 
 ## Highlights
 
-- **Header-only** — include `silk.hpp` (multi-header) or `dist/silk.hpp`
+- **Header-only** — include `slikui.hpp` (multi-header) or `dist/slikui.hpp`
   (amalgamated single file). No linking, no code generation.
 - **Two backends out of the box**
-  - `silk::software::Sink` — antialiased rasterizer over a raw `uint32_t`
+  - `slikui::software::Sink` — antialiased rasterizer over a raw `uint32_t`
     framebuffer (owned or borrowed). Works headless, on embedded targets, or
     blitted into any engine. `sink.set_scale()` renders logical coordinates
     at any pixel density.
-  - `silk::opengl::OpenglSink` — GL 3.3 core renderer using your **system
-    OpenGL headers** (no vendored loader). Optional `silk::glfw::GlfwWindow`
+  - `slikui::opengl::OpenglSink` — GL 3.3 core renderer using your **system
+    OpenGL headers** (no vendored loader). Optional `slikui::glfw::GlfwWindow`
     wraps window creation and event translation.
   - Anything else (Vulkan, Metal, SDL_Renderer) implements one interface:
     see `docs/backend-contract.md`.
@@ -68,11 +68,11 @@ controls grouped in an accordion panel](docs/images/cube_viewer.png)
 - **Widget set** — Label, Button (variants), Checkbox, Radio, Switch, Slider,
   ProgressBar, Spinner, TextField, TextArea (multiline), ScrollArea, ListView,
   Tabs, Dropdown (popup), Expander, Accordion, Splitter, Image, hover tooltips;
-  Panel, Column, Row, Spacer, Divider — see `silk/widgets/all.hpp`.
+  Panel, Column, Row, Spacer, Divider — see `slikui/widgets/all.hpp`.
 - **Theme + animation** — palette-driven styling with 8 built-in presets
   (Dark, Light, Nord, Dracula, Gruvbox, Mocha, Solarized, Phosphor),
   hover/press transitions, `Anim` tween helper.
-- **Input** — one event vocabulary (`silk::Event`) translated by the window
+- **Input** — one event vocabulary (`slikui::Event`) translated by the window
   layer; hit-testing, focus, Tab navigation, mouse capture, popups.
 
 Every image below is real output: `tools/components_capture.cpp` builds each
@@ -90,12 +90,12 @@ dumps the framebuffer — the code snippets are the actual capture code.
 inside the widget; hover/press transitions are animated by the theme.
 
 ```cpp
-auto& row = root.add<silk::Row>();
+auto& row = root.add<slikui::Row>();
 row.set_gap(10);
-row.add<silk::Button>("Default");
-row.add<silk::Button>("Primary").set_variant(silk::Button::Variant::Primary);
-row.add<silk::Button>("Danger").set_variant(silk::Button::Variant::Danger);
-row.add<silk::Button>("Ghost").set_variant(silk::Button::Variant::Ghost);
+row.add<slikui::Button>("Default");
+row.add<slikui::Button>("Primary").set_variant(slikui::Button::Variant::Primary);
+row.add<slikui::Button>("Danger").set_variant(slikui::Button::Variant::Danger);
+row.add<slikui::Button>("Ghost").set_variant(slikui::Button::Variant::Ghost);
 ```
 
 ![buttons](docs/images/buttons.png)
@@ -107,14 +107,14 @@ All three are bool controls with `set_checked(bool, bool fire_callback)` and
 group is yours to wire (set the others false in the callback).
 
 ```cpp
-auto& row = root.add<silk::Row>();
+auto& row = root.add<slikui::Row>();
 row.set_gap(18);
-row.add<silk::Checkbox>("Sync files", true);
-row.add<silk::Checkbox>("Compress", false);
-row.add<silk::Radio>("Wi-Fi", true);
-row.add<silk::Radio>("Ethernet", false);
-row.add<silk::Switch>().set_checked(true);
-row.add<silk::Switch>().set_checked(false);
+row.add<slikui::Checkbox>("Sync files", true);
+row.add<slikui::Checkbox>("Compress", false);
+row.add<slikui::Radio>("Wi-Fi", true);
+row.add<slikui::Radio>("Ethernet", false);
+row.add<slikui::Switch>().set_checked(true);
+row.add<slikui::Switch>().set_checked(false);
 ```
 
 ![toggles](docs/images/toggles.png)
@@ -127,7 +127,7 @@ takes `set_speed` (degrees per second) — it is driven by the time you pass to
 `ctx.tick`, so it pauses with your app.
 
 ```cpp
-auto& cap = root.add<silk::Row>();
+auto& cap = root.add<slikui::Row>();
 cap.add<Label>("Volume");
 cap.add<Spacer>();
 cap.add<Label>("62%").set_color(ctx.theme().text_dim);
@@ -162,7 +162,7 @@ navigation, clipboard, and auto-scroll. `on_change` fires on every edit,
 root.add<TextField>().set_text("jane@example.com").set_placeholder("you@host");
 root.add<TextField>().set_placeholder("Search…");
 root.add<TextArea>().set_rows(3)
-    .set_text("silk renders this entirely on the CPU —\n"
+    .set_text("slikui renders this entirely on the CPU —\n"
               "no GPU, no window, no dependencies.");
 ```
 
@@ -223,7 +223,7 @@ opening one section closes the others, so at most one is expanded;
 `set_exclusive(false)` lets every section stand open.
 
 ```cpp
-auto& acc = root.add<silk::Accordion>();
+auto& acc = root.add<slikui::Accordion>();
 acc.set_gap(6);
 auto& shape = acc.add_section("Shape", /*open=*/true);  // open by default
 shape.set_gap(8);
@@ -297,14 +297,14 @@ Dark, Light, Nord, Dracula, Gruvbox, Mocha (Catppuccin), Solarized, and
 Phosphor (green CRT terminal, square corners).
 
 ```cpp
-ctx.theme() = silk::Theme::nord();              // simplest — resets scale too
-silk::use_theme(ctx.theme(), silk::Theme::mocha()); // keeps your `scale`
-silk::apply_preset(ctx.theme(), 5);             // by index, wraps around
+ctx.theme() = slikui::Theme::nord();              // simplest — resets scale too
+slikui::use_theme(ctx.theme(), slikui::Theme::mocha()); // keeps your `scale`
+slikui::apply_preset(ctx.theme(), 5);             // by index, wraps around
 
 // Build a picker from the registry:
-for (const auto& p : silk::theme_presets()) names.push_back(p.name);
+for (const auto& p : slikui::theme_presets()) names.push_back(p.name);
 header.add<Dropdown>().set_items(names)
-    .on_select([&](size_t i) { silk::apply_preset(ctx.theme(), i); });
+    .on_select([&](size_t i) { slikui::apply_preset(ctx.theme(), i); });
 ```
 
 Set `theme().scale` for HiDPI: layout stays in logical points, each sink maps
@@ -314,7 +314,7 @@ one struct away — assign the palette fields by hand.
 ```cpp
 ctx.theme().scale = 2.f;          // retina-class density
 sink.set_scale(ctx.theme().scale);
-ctx.theme().accent = silk::Color::from_hex(0xE060B0); // your brand
+ctx.theme().accent = slikui::Color::from_hex(0xE060B0); // your brand
 ```
 
 ![themes](docs/images/themes.png)
@@ -327,7 +327,7 @@ ctx.theme().accent = silk::Color::from_hex(0xE060B0); // your brand
 cmake -S . -B build
 cmake --build build -j
 ctest --test-dir build          # 40 tests, incl. golden-image pixel checks
-./build/examples/03_gallery/silk_gallery
+./build/examples/03_gallery/slikui_gallery
 ./build/examples/04_glfw_opengl     # 3D shape viewer: orbit + zoom + accordion panel
 ./build/examples/04_glfw_software   # same UI, CPU-rasterized scene
 ```
@@ -351,7 +351,7 @@ for f in docs/images/*.ppm; do python3 tools/ppm2png.py "$f" "${f%.ppm}.png"; do
 
 - `docs/architecture.md` — how the pieces fit together.
 - `docs/backend-contract.md` — writing a new graphics-API backend.
-- [`python/README.md`](python/README.md) — the Python bindings (`silk-ui`):
+- [`python/README.md`](python/README.md) — the Python bindings (`slikui`):
   install, widgets, events, and implementing your own renderer.
 
 ## Roadmap

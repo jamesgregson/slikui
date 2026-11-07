@@ -1,9 +1,9 @@
-# silk architecture
+# slikui architecture
 
 ## Module map
 
 ```
-include/silk/
+include/slikui/
 ├── core/            math (Vec2/Rect/Padding), Color, Event, Time, utf8
 ├── layout/          Constraints, CrossMode, flex distribution
 ├── render/          DrawList (display list), IRenderSink (the only backend contract)
@@ -31,7 +31,7 @@ ctx.tick({now, dt}); // 2. attach -> layout -> animation
 ctx.render();        // 3. paint -> sink
 ```
 
-1. **Input** — backends translate native events into one `silk::Event`
+1. **Input** — backends translate native events into one `slikui::Event`
    vocabulary. `Context::handle` routes them: hit-test the deepest visible
    widget containing the pointer, then dispatch the event **up the parent
    chain** until consumed. Key/text events go to the focused widget. Clicking

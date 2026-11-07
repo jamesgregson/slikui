@@ -19,7 +19,7 @@ import glfw
 import numpy as np
 from OpenGL import GL
 
-import silk
+import slikui
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("glfw_demo", HERE / "glfw_demo.py")
@@ -71,7 +71,7 @@ def main():
     global win, out
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "shots")
     out.mkdir(exist_ok=True)
-    silk.set_leak_warnings(False)
+    slikui.set_leak_warnings(False)
 
     glfw.init()
     glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
@@ -81,17 +81,17 @@ def main():
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
     except Exception:
         pass
-    win = glfw.create_window(960, 640, "silk capture check", None, None)
+    win = glfw.create_window(960, 640, "slikui capture check", None, None)
     glfw.make_context_current(win)
 
     g = demo.setup_gl()
     state = demo.State()
-    app = silk.App(960, 640)
+    app = slikui.App(960, 640)
     panel = demo.build_ui(app, state)
     tex_size = [0, 0]
 
     last, now = time.perf_counter(), 0.0
-    dropdown = find_widget(panel, silk.Dropdown)
+    dropdown = find_widget(panel, slikui.Dropdown)
 
     def frame(n, tags=()):
         nonlocal last, now
@@ -127,12 +127,12 @@ def main():
     # open the dropdown popup through the real event path
     b = dropdown.bounds
     pos = (b.x + b.w / 2, b.y + b.h / 2)
-    app.handle(silk.mouse_press(pos))
-    app.handle(silk.mouse_release(pos))
+    app.handle(slikui.mouse_press(pos))
+    app.handle(slikui.mouse_release(pos))
     for i in range(31, 40):
         frame(i)
     frame(40, tags=("ui",))
-    app.handle(silk.key_press(silk.Key.Escape))
+    app.handle(slikui.key_press(slikui.Key.Escape))
     for i in range(41, 50):
         frame(i)
 

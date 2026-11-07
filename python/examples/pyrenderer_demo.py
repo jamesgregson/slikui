@@ -1,8 +1,8 @@
 """Python renderer demo — the same widget tree through two renderers.
 
-Left: silk's C++ software rasterizer (software.Sink).
+Left: slikui's C++ software rasterizer (software.Sink).
 Right: CanvasSink — a pure-Python numpy renderer implementing the same
-IRenderSink contract (silk.RenderSink trampoline).
+IRenderSink contract (slikui.RenderSink trampoline).
 
 The two halves should be pixel-identical; the script reports any diff and
 writes `shots/pyrenderer_demo.ppm` (convert with tools/ppm2png.py).
@@ -15,9 +15,9 @@ import sys
 
 import numpy as np
 
-import silk
-from silk._py.pixels import to_rgba
-from silk._silk import Context, Sink, Target, find_system_font
+import slikui
+from slikui._py.pixels import to_rgba
+from slikui._slikui import Context, Sink, Target, find_system_font
 
 W, H = 480, 320
 
@@ -25,22 +25,22 @@ W, H = 480, 320
 def build(ctx):
     root = ctx.set_root_column()
     root.set_padding(14).set_gap(8)
-    root.add(silk.Label, "One tree, two renderers").set_font_size(22)
-    row = root.add(silk.Row, gap=6)
-    row.add(silk.Button, "Primary", variant=silk.ButtonVariant.Primary)
-    row.add(silk.Button, "Secondary")
-    row.add(silk.Button, "Ghost", variant=silk.ButtonVariant.Ghost)
-    root.add(silk.Checkbox, "checkbox", checked=True)
-    root.add(silk.Switch, checked=True)
-    root.add(silk.Slider).set_value(0.35)
-    root.add(silk.ProgressBar).set_value(0.62)
-    root.add(silk.Divider)
-    panel = root.add(silk.Panel)
+    root.add(slikui.Label, "One tree, two renderers").set_font_size(22)
+    row = root.add(slikui.Row, gap=6)
+    row.add(slikui.Button, "Primary", variant=slikui.ButtonVariant.Primary)
+    row.add(slikui.Button, "Secondary")
+    row.add(slikui.Button, "Ghost", variant=slikui.ButtonVariant.Ghost)
+    root.add(slikui.Checkbox, "checkbox", checked=True)
+    root.add(slikui.Switch, checked=True)
+    root.add(slikui.Slider).set_value(0.35)
+    root.add(slikui.ProgressBar).set_value(0.62)
+    root.add(slikui.Divider)
+    panel = root.add(slikui.Panel)
     panel.set_padding(8)
-    panel.add(silk.Label, "panel with rounded corners")
-    scroll = root.add(silk.ScrollArea)
+    panel.add(slikui.Label, "panel with rounded corners")
+    scroll = root.add(slikui.ScrollArea)
     for i in range(12):
-        scroll.add(silk.Label, f"clipped row {i}")
+        scroll.add(slikui.Label, f"clipped row {i}")
 
 
 def render(w, h):
@@ -48,7 +48,7 @@ def render(w, h):
     cpp = Sink(target)
     ctx_a = Context(cpp)
 
-    py = silk.CanvasSink(w, H)
+    py = slikui.CanvasSink(w, H)
     ctx_b = Context(py)
 
     for ctx in (ctx_a, ctx_b):

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""silk cube viewer — Python-native GLFW + OpenGL host, silk software UI.
+"""slikui cube viewer — Python-native GLFW + OpenGL host, slikui software UI.
 
 The Python twin of examples/04_glfw_opengl: a lit cube/sphere/torus over a
-procedural sky, with a silk controls panel. The difference is who owns the
+procedural sky, with a slikui controls panel. The difference is who owns the
 window: here GLFW and OpenGL are driven from Python (glfw + PyOpenGL), while
-every UI pixel is rasterized on the CPU by silk's software backend and
+every UI pixel is rasterized on the CPU by slikui's software backend and
 blitted as one texture:
 
     scene pass  — plain GL (sky + grid + shape)
     UI pass     — ctx.render(clear=False) into a uint32 Target, alpha keeps
-                  whatever silk painted (0 where untouched), uploaded as one
+                  whatever slikui painted (0 where untouched), uploaded as one
                   texture and blended over the scene
-    input       — GLFW callbacks → silk.Event for UI hits, camera ops else
+    input       — GLFW callbacks → slikui.Event for UI hits, camera ops else
 
 Run:  python examples/glfw_demo.py     (deps: glfw, PyOpenGL, numpy)
 """
@@ -24,7 +24,7 @@ import glfw
 import numpy as np
 from OpenGL import GL
 
-import silk
+import slikui
 
 DEG2RAD = math.pi / 180.0
 K_MIN_DIST, K_MAX_DIST = 2.4, 10.0
@@ -363,11 +363,11 @@ def set_vec3(target, color):
 
 def add_slider(col, label, lo, hi, init, fmt, on_change):
     """Label + live value on one row, slider underneath (mirrors the C++ helper)."""
-    row = col.add(silk.Row, gap=8)
-    row.add(silk.Label, label)
-    row.add(silk.Spacer)
-    val = row.add(silk.Label, fmt % init, color=silk.Color.from_hex(0x8A919C))
-    s = col.add(silk.Slider, lo, hi)
+    row = col.add(slikui.Row, gap=8)
+    row.add(slikui.Label, label)
+    row.add(slikui.Spacer)
+    val = row.add(slikui.Label, fmt % init, color=slikui.Color.from_hex(0x8A919C))
+    s = col.add(slikui.Slider, lo, hi)
     s.set_value(init, False)
     s.on_change(lambda v: (val.set_text(fmt % v), on_change(v)))
     return s
@@ -380,15 +380,15 @@ def add_swatches(col, target, colors):
     the bound factory and kwargs to setters (Swatch's callables are ctor
     args, not setters).
     """
-    row = col.add(silk.Row, gap=6)
+    row = col.add(slikui.Row, gap=6)
     for c in colors:  # hex ints or Color instances both work
-        c = c if isinstance(c, silk.Color) else silk.Color.from_hex(c)
-        row.add(silk.Swatch, c, lambda c=c, t=target: vec3_close(t, c),
+        c = c if isinstance(c, slikui.Color) else slikui.Color.from_hex(c)
+        row.add(slikui.Swatch, c, lambda c=c, t=target: vec3_close(t, c),
                 lambda c=c: set_vec3(target, c))
 
 
 # ---------------------------------------------------------------------------
-# silk UI: docked panel (top-right) + hint bar (bottom-left) via spacers.
+# slikui UI: docked panel (top-right) + hint bar (bottom-left) via spacers.
 # ---------------------------------------------------------------------------
 def build_ui(app, state):
     # Docking without a custom root widget: a full-window Row holds
@@ -397,33 +397,33 @@ def build_ui(app, state):
     # Spacer pushes the hint panel to the bottom (mirrors the C++
     # CubeViewport::arrange dock). The panel keeps hint_h=1e5 so its
     # ScrollArea always fills the window height.
-    root = app.set_root(silk.Row, padding=14, gap=0)
+    root = app.set_root(slikui.Row, padding=14, gap=0)
 
-    left = root.add(silk.Column, gap=0)
-    left.add(silk.Spacer)  # expands vertically: hint hugs the bottom-left
-    hint = left.add(silk.Panel, padding=10, background=silk.Color(0, 0, 0, 120),
+    left = root.add(slikui.Column, gap=0)
+    left.add(slikui.Spacer)  # expands vertically: hint hugs the bottom-left
+    hint = left.add(slikui.Panel, padding=10, background=slikui.Color(0, 0, 0, 120),
                     radius=8)
     hint.id = "hint"  # findable for tests/capture
-    hint.add(silk.Label, "drag: orbit | scroll: zoom",
-             color=silk.Color(255, 255, 255, 160))
+    hint.add(slikui.Label, "drag: orbit | scroll: zoom",
+             color=slikui.Color(255, 255, 255, 160))
 
-    root.add(silk.Spacer)  # expands horizontally: panel hugs the top-right
-    panel = root.add(silk.Panel, padding=14, gap=10,
-                     background=silk.Color(0, 0, 0, 185),
-                     border=silk.Color(255, 255, 255, 30), radius=10)
+    root.add(slikui.Spacer)  # expands horizontally: panel hugs the top-right
+    panel = root.add(slikui.Panel, padding=14, gap=10,
+                     background=slikui.Color(0, 0, 0, 185),
+                     border=slikui.Color(255, 255, 255, 30), radius=10)
     panel.draw_border = True
 
-    scroll = panel.add(silk.ScrollArea)
+    scroll = panel.add(slikui.ScrollArea)
     scroll.hint_h = 1e5  # always fill the panel: it tracks the window size
     scroll.content.set_gap(10)
-    scroll.add(silk.Label, "silk cube viewer").set_font_size(18)
+    scroll.add(slikui.Label, "slikui cube viewer").set_font_size(18)
 
-    acc = scroll.add(silk.Accordion, gap=6)
+    acc = scroll.add(slikui.Accordion, gap=6)
     acc.set_exclusive(False)
 
     sec = acc.add_section("Shape", True)
     sec.set_gap(8)
-    sec.add(silk.Dropdown, items=["Cube", "Sphere", "Torus"],
+    sec.add(slikui.Dropdown, items=["Cube", "Sphere", "Torus"],
             placeholder="Reference shape").on_select(
         lambda i: setattr(state, "shape", i))
 
@@ -437,13 +437,13 @@ def build_ui(app, state):
 
     sec = acc.add_section("Environment")
     sec.set_gap(8)
-    sec.add(silk.Dropdown, items=list(SKY_PRESETS),
+    sec.add(slikui.Dropdown, items=list(SKY_PRESETS),
             placeholder="Sky preset").on_select(lambda i: apply_sky(state, i))
-    sec.add(silk.Label, "Sky zenith", color=silk.Color.from_hex(0x8A919C))
+    sec.add(slikui.Label, "Sky zenith", color=slikui.Color.from_hex(0x8A919C))
     add_swatches(sec, state.sky_zenith, [0x29529E, 0x292E5C, 0x737D8C, 0x8C704D, 0x050814])
-    sec.add(silk.Label, "Horizon", color=silk.Color.from_hex(0x8A919C))
+    sec.add(slikui.Label, "Horizon", color=slikui.Color.from_hex(0x8A919C))
     add_swatches(sec, state.sky_horizon, [0x9EBDE0, 0xF08C47, 0xB8BFCC, 0xD9B380, 0x141A2E])
-    sec.add(silk.Label, "Ground", color=silk.Color.from_hex(0x8A919C))
+    sec.add(slikui.Label, "Ground", color=slikui.Color.from_hex(0x8A919C))
     add_swatches(sec, state.ground, [0x33312B, 0x241C1A, 0x4D4D4A, 0x594733, 0x0D0D0F])
     add_slider(sec, "Haze", 0.0, 1.0, state.haze, "%.2f", lambda v: setattr(state, "haze", v))
     add_slider(sec, "Sun glow", 0.0, 1.0, state.sun_glow, "%.2f",
@@ -451,7 +451,7 @@ def build_ui(app, state):
 
     sec = acc.add_section("Light")
     sec.set_gap(8)
-    sec.add(silk.Label, "Color", color=silk.Color.from_hex(0x8A919C))
+    sec.add(slikui.Label, "Color", color=slikui.Color.from_hex(0x8A919C))
     add_swatches(sec, state.light_color, [0xFFF5E8, 0xFFFFFF, 0xB8D8FF, 0xE8A0FF])
     add_slider(sec, "Intensity", 0.0, 4.0, state.light_intensity, "%.2f",
                lambda v: setattr(state, "light_intensity", v))
@@ -464,11 +464,11 @@ def build_ui(app, state):
 
     sec = acc.add_section("Camera")
     sec.set_gap(8)
-    cb = sec.add(silk.Checkbox, "Auto-rotate", state.auto_rotate)
+    cb = sec.add(slikui.Checkbox, "Auto-rotate", state.auto_rotate)
     cb.on_change(lambda v: setattr(state, "auto_rotate", v))
     add_slider(sec, "Spin speed", 0.0, 2.0, state.spin_speed, "%.2f rad/s",
                lambda v: setattr(state, "spin_speed", v))
-    sec.add(silk.Button, "Reset camera").on_click(lambda: state.reset_camera())
+    sec.add(slikui.Button, "Reset camera").on_click(lambda: state.reset_camera())
 
     return panel
 
@@ -480,9 +480,9 @@ def apply_sky(state, i):
 
 def over_ui(app, panel, x, y):
     """True when a point (logical) is over the panel or any open popup."""
-    if panel.bounds.contains(silk.Vec2(x, y)):
+    if panel.bounds.contains(slikui.Vec2(x, y)):
         return True
-    return any(app.ctx.popup(i).bounds.contains(silk.Vec2(x, y))
+    return any(app.ctx.popup(i).bounds.contains(slikui.Vec2(x, y))
                for i in range(app.ctx.popup_count))
 
 
@@ -639,25 +639,25 @@ def draw_ui(g, app, tex_size):
     GL.glBindVertexArray(0)
 
 
-# GLFW keys we forward to silk (popup navigation, Escape, ...).
+# GLFW keys we forward to slikui (popup navigation, Escape, ...).
 KEY_MAP = {
-    glfw.KEY_ESCAPE: silk.Key.Escape, glfw.KEY_ENTER: silk.Key.Enter,
-    glfw.KEY_TAB: silk.Key.Tab, glfw.KEY_BACKSPACE: silk.Key.Backspace,
-    glfw.KEY_DELETE: silk.Key.Delete, glfw.KEY_SPACE: silk.Key.Space,
-    glfw.KEY_LEFT: silk.Key.Left, glfw.KEY_RIGHT: silk.Key.Right,
-    glfw.KEY_UP: silk.Key.Up, glfw.KEY_DOWN: silk.Key.Down,
-    glfw.KEY_HOME: silk.Key.Home, glfw.KEY_END: silk.Key.End,
-    glfw.KEY_PAGE_UP: silk.Key.PageUp, glfw.KEY_PAGE_DOWN: silk.Key.PageDown,
+    glfw.KEY_ESCAPE: slikui.Key.Escape, glfw.KEY_ENTER: slikui.Key.Enter,
+    glfw.KEY_TAB: slikui.Key.Tab, glfw.KEY_BACKSPACE: slikui.Key.Backspace,
+    glfw.KEY_DELETE: slikui.Key.Delete, glfw.KEY_SPACE: slikui.Key.Space,
+    glfw.KEY_LEFT: slikui.Key.Left, glfw.KEY_RIGHT: slikui.Key.Right,
+    glfw.KEY_UP: slikui.Key.Up, glfw.KEY_DOWN: slikui.Key.Down,
+    glfw.KEY_HOME: slikui.Key.Home, glfw.KEY_END: slikui.Key.End,
+    glfw.KEY_PAGE_UP: slikui.Key.PageUp, glfw.KEY_PAGE_DOWN: slikui.Key.PageDown,
 }
-BUTTON_MAP = {  # GLFW: L=0 R=1 M=2 — silk: L=0 M=1 R=2
-    glfw.MOUSE_BUTTON_LEFT: silk.MouseButton.MouseLeft,
-    glfw.MOUSE_BUTTON_MIDDLE: silk.MouseButton.MouseMiddle,
-    glfw.MOUSE_BUTTON_RIGHT: silk.MouseButton.MouseRight,
+BUTTON_MAP = {  # GLFW: L=0 R=1 M=2 — slikui: L=0 M=1 R=2
+    glfw.MOUSE_BUTTON_LEFT: slikui.MouseButton.MouseLeft,
+    glfw.MOUSE_BUTTON_MIDDLE: slikui.MouseButton.MouseMiddle,
+    glfw.MOUSE_BUTTON_RIGHT: slikui.MouseButton.MouseRight,
 }
 
 
 def main():
-    silk.set_leak_warnings(False)  # teardown-order noise, not a real leak
+    slikui.set_leak_warnings(False)  # teardown-order noise, not a real leak
     if not glfw.init():
         raise SystemExit("glfw.init failed")
     glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
@@ -667,7 +667,7 @@ def main():
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
     except Exception:
         pass
-    win = glfw.create_window(960, 640, "silk cube viewer (python)", None, None)
+    win = glfw.create_window(960, 640, "slikui cube viewer (python)", None, None)
     if not win:
         glfw.terminate()
         raise SystemExit("could not create GLFW window")
@@ -676,10 +676,10 @@ def main():
 
     g = setup_gl()
     state = State()
-    app = silk.App(960, 640)
+    app = slikui.App(960, 640)
     panel = build_ui(app, state)
 
-    # --- input routing state (silk owns UI hits, the app owns the camera) ---
+    # --- input routing state (slikui owns UI hits, the app owns the camera) ---
     ctl = {"dragging": False, "last": (0.0, 0.0)}
 
     def pt():
@@ -691,17 +691,17 @@ def main():
         if action == glfw.PRESS:
             if ui:
                 if button in BUTTON_MAP:
-                    app.handle(silk.mouse_press((x, y), BUTTON_MAP[button]))
+                    app.handle(slikui.mouse_press((x, y), BUTTON_MAP[button]))
             elif button == glfw.MOUSE_BUTTON_LEFT:
                 ctl["dragging"], ctl["last"] = True, (x, y)
         elif action == glfw.RELEASE:
             if ctl["dragging"]:  # a drag owns the mouse until it ends
                 ctl["dragging"] = False
             elif button in BUTTON_MAP:
-                # Always deliver releases that silk saw a press for (e.g. a
-                # slider press that slid off the panel) — silk ignores
+                # Always deliver releases that slikui saw a press for (e.g. a
+                # slider press that slid off the panel) — slikui ignores
                 # releases it did not pair.
-                app.handle(silk.mouse_release((x, y), BUTTON_MAP[button]))
+                app.handle(slikui.mouse_release((x, y), BUTTON_MAP[button]))
 
     def on_cursor(_w, x, y):
         if ctl["dragging"]:
@@ -710,20 +710,20 @@ def main():
             state.pitch = max(-1.45, min(1.45, state.pitch + (y - ly) * 0.008))
             ctl["last"] = (x, y)
         else:
-            app.handle(silk.mouse_move((x, y)))
+            app.handle(slikui.mouse_move((x, y)))
 
     def on_scroll(_w, xoff, yoff):
         x, y = pt()
         if over_ui(app, panel, x, y):
-            app.handle(silk.scroll((x, y), (xoff, yoff)))
+            app.handle(slikui.scroll((x, y), (xoff, yoff)))
         else:
             state.distance = max(K_MIN_DIST,
                                  min(K_MAX_DIST, state.distance * (1.0 - 0.12 * yoff)))
 
     def on_key(_w, key, _sc, action, mods):
         if key in KEY_MAP and action in (glfw.PRESS, glfw.RELEASE):
-            e = silk.key_press(KEY_MAP[key], mods) if action == glfw.PRESS \
-                else silk.key_release(KEY_MAP[key], mods)
+            e = slikui.key_press(KEY_MAP[key], mods) if action == glfw.PRESS \
+                else slikui.key_release(KEY_MAP[key], mods)
             app.handle(e)
 
     glfw.set_mouse_button_callback(win, on_button)

@@ -3,9 +3,9 @@
 // No window, no GPU: the UI is rasterized into a plain uint32_t buffer and
 // written out as a PPM image. This is the "raw pixel setting" path — the
 // same one an embedded framebuffer or software blitter would use.
-#include <silk/backends/software/software.hpp>
-#include <silk/silk.hpp>
-#include <silk/text/system_fonts.hpp>
+#include <slikui/backends/software/software.hpp>
+#include <slikui/slikui.hpp>
+#include <slikui/text/system_fonts.hpp>
 
 #include <cstdio>
 #include <vector>
@@ -14,25 +14,25 @@ int main() {
     constexpr int W = 480, H = 320;
     std::vector<std::uint32_t> pixels(std::size_t(W) * H);
 
-    // Borrowed storage: silk renders into *your* buffer.
-    silk::software::Target target(pixels.data(), W, H);
-    silk::software::Sink sink(target);
+    // Borrowed storage: slikui renders into *your* buffer.
+    slikui::software::Target target(pixels.data(), W, H);
+    slikui::software::Sink sink(target);
 
-    silk::Context ctx(sink);
+    slikui::Context ctx(sink);
     ctx.set_frame_size({W, H});
-    ctx.load_font_file(silk::find_system_font());
+    ctx.load_font_file(slikui::find_system_font());
 
-    auto& root = ctx.set_root<silk::Column>();
+    auto& root = ctx.set_root<slikui::Column>();
     root.set_padding(20).set_gap(10);
-    root.add<silk::Label>("Raw pixel output").set_font_size(20);
-    root.add<silk::Label>("480x320, drawn entirely on the CPU.");
-    auto& panel = root.add<silk::Panel>();
+    root.add<slikui::Label>("Raw pixel output").set_font_size(20);
+    root.add<slikui::Label>("480x320, drawn entirely on the CPU.");
+    auto& panel = root.add<slikui::Panel>();
     panel.set_padding(10);
-    panel.set_background(silk::Color::from_hex(0x223344));
-    panel.add<silk::Label>("a panel inside the flow");
-    auto& bar = root.add<silk::ProgressBar>().set_value(0.7f);
+    panel.set_background(slikui::Color::from_hex(0x223344));
+    panel.add<slikui::Label>("a panel inside the flow");
+    auto& bar = root.add<slikui::ProgressBar>().set_value(0.7f);
 
-    ctx.tick(silk::Time{0.016, 0.016});
+    ctx.tick(slikui::Time{0.016, 0.016});
     ctx.render();
     (void)bar;
 
@@ -41,7 +41,7 @@ int main() {
     std::fprintf(out, "P6\n%d %d\n255\n", W, H);
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x) {
-            silk::Color c = silk::Color::from_abgr(target.at(x, y));
+            slikui::Color c = slikui::Color::from_abgr(target.at(x, y));
             std::uint8_t rgb[3] = {c.r, c.g, c.b};
             std::fwrite(rgb, 1, 3, out);
         }

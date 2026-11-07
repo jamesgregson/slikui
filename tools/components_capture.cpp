@@ -2,15 +2,15 @@
 // README component reference.
 //
 // Uses the software backend only: no window, no GPU, fully deterministic.
-// Each section is a real silk tree (the same code shown in the README),
+// Each section is a real slikui tree (the same code shown in the README),
 // simulated for ~1 s of frames so hover/press animations settle, then dumped
 // to a PPM (converted to PNG by tools/ppm2png.py).
 //
 //   clang++ -std=c++20 -Iinclude tools/components_capture.cpp -o /tmp/ccap
 //   /tmp/ccap docs/images
-#include <silk/backends/software/software.hpp>
-#include <silk/silk.hpp>
-#include <silk/text/system_fonts.hpp>
+#include <slikui/backends/software/software.hpp>
+#include <slikui/slikui.hpp>
+#include <slikui/text/system_fonts.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -21,14 +21,14 @@
 #include <string>
 #include <vector>
 
-using namespace silk;
+using namespace slikui;
 
 struct Buffer {
     int w = 0, h = 0;
     std::vector<std::uint32_t> px;
 };
 
-// silk packs colors R | G<<8 | B<<16; PPM wants R,G,B bytes in file order.
+// slikui packs colors R | G<<8 | B<<16; PPM wants R,G,B bytes in file order.
 static void dump_buffer(const char* path, const Buffer& b) {
     std::FILE* f = std::fopen(path, "wb");
     if (!f) { std::fprintf(stderr, "cannot write %s\n", path); return; }
@@ -205,7 +205,7 @@ int main(int argc, char** argv) {
         root.add<TextField>().set_text("jane@example.com").set_placeholder("you@host");
         root.add<TextField>().set_placeholder("Search…");
         root.add<TextArea>().set_rows(3)
-            .set_text("silk renders this entirely on the CPU —\nno GPU, no window, no dependencies.");
+            .set_text("slikui renders this entirely on the CPU —\nno GPU, no window, no dependencies.");
     });
 
     // ---- views: list, tabs, dropdown (popup open) ------------------------

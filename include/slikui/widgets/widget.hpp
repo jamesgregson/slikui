@@ -1,0 +1,171 @@
+// slikui/widgets/widget.hpp — Widget base class and tree protocol.
+//
+// Frames are ABSOLUTE framebuffer coordinates, assigned during arrange().
+// That makes hit-testing, painting and clipping trivial for every widget.
+//
+//   measure(Constraints) -> intrinsic Size
+//   arrange(Rect abs)    -> assign own frame, then arrange children
+//   paint(DrawList&)     -> append draw commands
+//   on_event(Event)      -> return true if consumed (children see it first)
+//   tick(Time)           -> advance animation state
+#pragma once
+
+#include "slikui/core/input.hpp"
+#include "slikui/core/math.hpp"
+#include "slikui/core/time.hpp"
+#include "slikui/layout/layout.hpp"
+#include "slikui/render/draw_list.hpp"
+#include "slikui/render/sink.hpp"
+#include "slikui/widgets/env.hpp"
+
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace slikui {
+
+struct Theme;   // style/theme.hpp
+struct PaintEnv; // widgets/env.hpp — draw list + theme + font for paint()
+class Context;   // context.hpp — back-reference set during arrange
+
+// Defined in context.hpp: logical px per framebuffer px for a widget's context.
+float theme_scale_of(const Context* ctx);
+
+class Widget {
+public:
+    Widget() = default;
+    explicit Widget(std::string id) : id(std::move(id)) {}
+    virtual ~Widget() = default;
+
+    Widget(const Widget&) = delete;
+    Widget& operator=(const Widget&) = delete;
+
+    // --- tree ---
+
+    template <class T, class... Args>
+    T& add(Args&&... args) {
+        auto child = std::make_unique<T>(std::forward<Args>(args)...);
+        T& ref = *child;
+        ref.parent = this;
+        children.push_back(std::move(child));
+        return ref;
+    }
+
+    void add(std::unique_ptr<Widget> child) {
+        if (!child) return;
+        child->parent = this;
+        children.push_back(std::move(child));
+    }
+
+    Widget* find(const std::string& widget_id) {
+        if (id == widget_id) return this;
+        for (auto& c : children)
+            if (Widget* w = c->find(widget_id)) return w;
+        return nullptr;
+    }
+
+    // --- protocol ---
+
+    virtual Size measure(const Constraints&) { return {0, 0}; }
+
+    virtual void arrange(const Rect& area) { bounds = area; }
+
+    virtual void paint(const PaintEnv&) const {}
+
+    // Paints this widget and its visible subtree.
+    void paint_tree(const PaintEnv& env) const {
+        if (!visible) return;
+        paint(env);
+        std::optional<Rect> clip = clip_rect();
+        if (clip) env.list.push_clip(*clip);
+        for (const auto& c : children) c->paint_tree(env);
+        if (clip) env.list.pop_clip();
+    }
+
+    // Children get the event first (topmost child first). Return true to
+    // consume so ancestors/siblings don't act on it.
+    virtual bool on_event(const Event&) { return false; }
+
+    virtual void tick(Time) {}
+
+    virtual bool focusable() const { return false; }
+
+    // Children marked expanding share leftover main-axis space (Spacer).
+    virtual bool expands_main() const { return false; }
+
+    // Whether containers may stretch this widget along their cross axis.
+    // Fixed-size controls (buttons, switches, ...) opt out and hug.
+    virtual bool stretch_cross() const { return true; }
+
+protected:
+    // Logical px per framebuffer px (from the context theme).
+    float ui_scale() const { return theme_scale_of(ctx); }
+
+    // Optional clip region applied to the subtree while painting children.
+    virtual std::optional<Rect> clip_rect() const { return {}; }
+
+    // Called by Context once per widget when it enters a context.
+    virtual void attached(Context&) {}
+
+public:
+    virtual const char* widget_type() const { return "Widget"; }
+
+    // --- tooltips ---
+
+    // Text shown in a popup after hovering this widget (Context manages the
+    // popup: 0.6 s hover delay, dismissed by moving away or pressing).
+    // NOTE: returns Widget& — in fluent chains, call base-class setters last
+    // (pre-C++23 has no deducing-this, so Widget& can't know the leaf type).
+    Widget& set_tooltip(std::string t) { tooltip_ = std::move(t); return *this; }
+    const std::string& tooltip() const { return tooltip_; }
+
+    // --- texture ownership (Image and friends) ---
+
+    // Widgets that own GPU-side textures (fonts, images) report pending
+    // uploads here; Context collects the whole tree every frame.
+    virtual void collect_uploads(std::vector<TexUpload>&) {}
+    void collect_tree(std::vector<TexUpload>& out) {
+        collect_uploads(out);
+        for (auto& c : children) c->collect_tree(out);
+    }
+
+    // --- state ---
+
+    std::string id;             // optional, for Context::find()
+    Rect bounds;                // absolute frame (assigned by arrange)
+    Widget* parent = nullptr;
+    std::vector<std::unique_ptr<Widget>> children;
+    bool visible = true;
+    bool enabled = true;
+    bool focused = false;       // maintained by Context
+
+protected:
+    Context* ctx = nullptr;     // set by Context::arrange_tree (theme/font access)
+    std::string tooltip_;       // hover-delay tooltip text
+
+    friend class Context;
+
+public:
+
+    // Invoke an event on the subtree, deepest-first, until consumed.
+    bool dispatch(const Event& e) {
+        if (!visible) return false;
+        for (auto it = children.rbegin(); it != children.rend(); ++it)
+            if ((*it)->dispatch(e)) return true;
+        return on_event(e);
+    }
+
+    void tick_tree(Time t) {
+        tick(t);
+        for (auto& c : children) c->tick_tree(t);
+    }
+};
+
+// Common hit-test helper.
+inline bool hit(const Widget& w, Vec2 p) {
+    return w.visible && w.bounds.contains(p);
+}
+
+} // namespace slikui

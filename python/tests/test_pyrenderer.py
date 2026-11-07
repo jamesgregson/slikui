@@ -4,8 +4,8 @@ pixel-identical frames to the C++ software.Sink for the same widget trees.
 
 import numpy as np
 
-import silk
-from silk._silk import Context, Sink, Target, find_system_font
+import slikui
+from slikui._slikui import Context, Sink, Target, find_system_font
 
 
 def _context(sink, w, h, scale, build):
@@ -24,7 +24,7 @@ def render_both(w, h, build, scale=1.0):
     cpp.set_scale(float(scale))
     _context(cpp, w, h, scale, build)
 
-    py = silk.CanvasSink(int(w * scale), int(h * scale))
+    py = slikui.CanvasSink(int(w * scale), int(h * scale))
     py.set_scale(float(scale))
     _context(py, w, h, scale, build)
     return target.pixels(), py.buffer
@@ -33,13 +33,13 @@ def render_both(w, h, build, scale=1.0):
 def _rich_tree(ctx):
     root = ctx.set_root_column()
     root.set_padding(10).set_gap(6)
-    root.add(silk.Label, "Parity check").set_font_size(18)
-    row = root.add(silk.Row, gap=4)
-    row.add(silk.Button, "Save", variant=silk.ButtonVariant.Primary)
-    row.add(silk.Button, "cancel")
-    root.add(silk.Checkbox, "opt-in", checked=True)
-    root.add(silk.Slider, 0.42)
-    root.add(silk.Panel).add(silk.Label, "inside panel")
+    root.add(slikui.Label, "Parity check").set_font_size(18)
+    row = root.add(slikui.Row, gap=4)
+    row.add(slikui.Button, "Save", variant=slikui.ButtonVariant.Primary)
+    row.add(slikui.Button, "cancel")
+    root.add(slikui.Checkbox, "opt-in", checked=True)
+    root.add(slikui.Slider, 0.42)
+    root.add(slikui.Panel).add(slikui.Label, "inside panel")
 
 
 def test_parity_rich_tree():
@@ -51,12 +51,12 @@ def test_parity_scroll_and_lines():
     def build(ctx):
         root = ctx.set_root_column()
         root.set_padding(8).set_gap(4)
-        root.add(silk.Label, "scroll me")
-        scroll = root.add(silk.ScrollArea)
+        root.add(slikui.Label, "scroll me")
+        scroll = root.add(slikui.ScrollArea)
         for i in range(20):
-            scroll.add(silk.Label, f"line {i} — overflow the clip")
-        root.add(silk.ProgressBar).set_value(0.7)
-        root.add(silk.Divider)
+            scroll.add(slikui.Label, f"line {i} — overflow the clip")
+        root.add(slikui.ProgressBar).set_value(0.7)
+        root.add(slikui.Divider)
 
     a, b = render_both(240, 180, build)
     assert np.array_equal(a, b)

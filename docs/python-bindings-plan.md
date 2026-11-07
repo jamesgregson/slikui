@@ -1,16 +1,16 @@
-# Python bindings for silk — plan
+# Python bindings for slikui — plan
 
 > **Status: M0 + M1 + M2 complete; M3 + M4 tabled.** M0/M1: scaffold, values,
 > software backend, `Context`, **every widget class**, Theme + 8 presets,
 > HiDPI scale; 17 tests. M2: full event vocabulary bound (`Event`,
 > `EventType`, `Key`, `Mod`, `MouseButton`, `Rect`, `Widget.bounds`/`children`
 > views, `Context.handle`/`popup*`), Python event factories in
-> `silk/_py/events.py` (`mouse_press`, `mouse_click`, `scroll`, `key_press`,
+> `slikui/_py/events.py` (`mouse_press`, `mouse_click`, `scroll`, `key_press`,
 > `text_input`, `mods("ctrl+shift")`, ...), and 8 simulated-input tests:
 > dropdown popup open→select→dismiss (outside click + Escape), accordion> header clicks (exclusive toggle), tooltip after the 0.6 s hover, TextField
 > focus + typing + backspace + Enter submit, ScrollArea wheel, FrameResize.
 > Plus a bonus before M3: **`python/examples/glfw_demo.py`** — the cube viewer
-> hosted by Python-native GLFW + OpenGL (`glfw` + `PyOpenGL`), silk software
+> hosted by Python-native GLFW + OpenGL (`glfw` + `PyOpenGL`), slikui software
 > UI blitted as one texture with `render(clear=False)` straight-alpha
 > blending. New bindings for it: `Target.resize` (window resizes), a C++-side
 > `Swatch` color-chip widget (Python can't subclass C++ widgets without a
@@ -19,8 +19,8 @@
 > verified in `shots/py_demo_panel.png`, popup/tooltip in
 > `shots/py_dropdown_open.png`, `shots/py_tooltip.png`.
 > **Update: 34/34.** The "Python-implemented sinks" item is done early:
-> `silk.RenderSink` trampoline + `DrawList`/`DrawCmd`/`TexUpload` bindings, and
-> `silk.CanvasSink` — a pure-numpy renderer producing pixel-identical frames
+> `slikui.RenderSink` trampoline + `DrawList`/`DrawCmd`/`TexUpload` bindings, and
+> `slikui.CanvasSink` — a pure-numpy renderer producing pixel-identical frames
 > to the C++ software backend (5 new parity tests; `shots/pyrenderer_demo.png`).
 > Builder contract note: `add(cls, *args, **props)` sends positionals to the
 > bound `add_<name>` factory and kwargs to setters — ctor-only callables
@@ -35,8 +35,8 @@ Decisions made: **nanobind** (vendored), **software backend first** (GLFW+GL
 later), **scikit-build-core + cibuildwheel** packaging, **Pythonic layer on top
 of a thin binding**.
 
-Deliverable: distribution **`silk-ui`** on PyPI, import package **`silk`**,
-compiled module **`silk._silk`**. The C++ library stays header-only and
+Deliverable: distribution **`slikui`** on PyPI, import package **`slikui`**,
+compiled module **`slikui._slikui`**. The C++ library stays header-only and
 dependency-free — all binding machinery lives under `python/`.
 
 ---
@@ -46,13 +46,13 @@ dependency-free — all binding machinery lives under `python/`.
 ```
 python/
 ├── pyproject.toml          # scikit-build-core, cmake>=3.20, nanobind
-├── CMakeLists.txt          # one target: silk._silk (links nothing)
+├── CMakeLists.txt          # one target: slikui._slikui (links nothing)
 ├── src/
-│   ├── silk_py.cpp         # module init + Context/backends/values
+│   ├── slikui_py.cpp         # module init + Context/backends/values
 │   ├── widgets_py.cpp      # all widget classes (split to keep TUs fast)
 │   └── helpers_py.hpp      # setter-chaining / add<>() macros
-├── silk/
-│   ├── __init__.py         # re-exports _silk + pythonic layer
+├── slikui/
+│   ├── __init__.py         # re-exports _slikui + pythonic layer
 │   ├── _py/                # pure-Python layer (see §3)
 │   └── py.typed
 ├── examples/               # gallery.py, hello.py, snapshot tests input
@@ -60,13 +60,13 @@ python/
 third_party/nanobind/       # vendored copy (same policy as stb)
 ```
 
-`src/*.cpp` includes the multi-header `silk.hpp` directly (not
-`dist/silk.hpp`) — no amalgamation step in the build path. Since the extension
+`src/*.cpp` includes the multi-header `slikui.hpp` directly (not
+`dist/slikui.hpp`) — no amalgamation step in the build path. Since the extension
 needs `IRenderSink`, `Context`, and every widget, and the library is
 header-only, the whole binding is a handful of translation units with **no
 libraries to link**.
 
-## 2. Thin binding (`_silk`, nanobind)
+## 2. Thin binding (`_slikui`, nanobind)
 
 What gets bound, 1:1 with the C++ names:
 
@@ -102,13 +102,13 @@ Binding rules:
 - Widgets that need host-side glue (`Image::set_pixels`, font memory loading)
   take `nb::ndarray<uint8_t>` / `bytes` directly.
 
-## 3. Pythonic layer (`silk/_py/`, pure Python)
+## 3. Pythonic layer (`slikui/_py/`, pure Python)
 
 Kept deliberately thin — it must never re-implement widget logic, only
 reshape the surface:
 
 - **kwargs → setters.** A single `add()` helper on containers:
-  `col.add(silk.Button, "Save", variant="primary", tooltip="…")` constructs
+  `col.add(slikui.Button, "Save", variant="primary", tooltip="…")` constructs
   the widget and calls `set_variant(...)`, `set_tooltip(...)`. Names map 1:1 to
   `set_*` methods, so there is **no registry to keep in sync** — a missing
   setter is a plain `AttributeError`, not a silent no-op.
@@ -116,10 +116,10 @@ reshape the surface:
   `mouse_press(button, pos)`, `key_press(key, mods=0)`, `text_input(ch)`, …
   building the bound struct. Mods accept `"ctrl|shift"` strings.
 - **`Context` wrapper as context manager** with conveniences:
-  `ui = silk.App(480, 320)` builds Target+Sink+Context, loads the system font
-  (`silk.find_system_font`), and offers `ui.tick(t)`, `ui.render() -> np.ndarray`
+  `ui = slikui.App(480, 320)` builds Target+Sink+Context, loads the system font
+  (`slikui.find_system_font`), and offers `ui.tick(t)`, `ui.render() -> np.ndarray`
   (zero-copy view), `ui.frame_size = (w, h)`.
-- **Theme ergonomics:** `silk.Theme.nord()` etc. come from the binding;
+- **Theme ergonomics:** `slikui.Theme.nord()` etc. come from the binding;
   the Python layer adds `theme.scale = 2.0` passthrough and hex-string
   coercion for `Color` fields (`theme.accent = "#E060B0"`).
 - **py.typed** — the bound classes get annotations from nanobind
@@ -133,13 +133,13 @@ only where the C++ side already exposes a getter — no invented state.
 - **v1: software only.** Everything render-to-numpy, fully testable headless.
   This covers "generate UI screenshots", "drive a UI from pytest", embedding
   into pygame (blit the numpy frame) — the primary Python use cases.
-- **Later: GLFW + OpenGL.** Bind `silk::glfw::GlfwWindow` + `opengl::OpenglSink`
+- **Later: GLFW + OpenGL.** Bind `slikui::glfw::GlfwWindow` + `opengl::OpenglSink`
   (link system glfw, ship `map_key`). Consider the `glfw` PyPI package
   (ctypes) for windowing and only bind the sink — decide at that milestone.
 - **Later: Python-implemented sinks.** ~~nanobind trampoline for `IRenderSink`
   lets Python back the two-method contract~~ **DONE (ahead of M4):**
-  `silk.RenderSink` trampoline + read-only `DrawList`/`DrawCmd`/`TexUpload`
-  bindings are in, and `silk.CanvasSink` (`silk/_py/renderer.py`) is a
+  `slikui.RenderSink` trampoline + read-only `DrawList`/`DrawCmd`/`TexUpload`
+  bindings are in, and `slikui.CanvasSink` (`slikui/_py/renderer.py`) is a
   pure-numpy rasterizer over the contract, pixel-identical to the C++
   software backend (parity tests in `python/tests/test_pyrenderer.py`, demo in
   `python/examples/pyrenderer_demo.py`). Remaining in this bucket: making
@@ -164,26 +164,26 @@ only where the C++ side already exposes a getter — no invented state.
 - `pyproject.toml` with `scikit-build-core`; `nanobind` vendored under
   `third_party/nanobind` (pip never fetches it; build deps: cmake, ninja via
   scikit-build).
-- Wheel = compiled `_silk.<abi>.so` + the `silk/` package; headers don't ship.
+- Wheel = compiled `_slikui.<abi>.so` + the `slikui/` package; headers don't ship.
 - sdist includes `include/`, `python/src`, vendored nanobind so
-  `pip install silk-ui` builds from source on unusual platforms.
-- Name check before publishing: `silk` on PyPI is likely taken; `silk-ui`
-  (import `silk`) is the proposal.
+  `pip install slikui` builds from source on unusual platforms.
+- Name check before publishing: `slikui` on PyPI is likely taken; `slikui`
+  (import `slikui`) is the proposal.
 
 ## 7. Milestones
 
 | M | Content | Done when |
 |---|---------|-----------|
-| **M0 — scaffold** | `python/` tree, vendored nanobind, CMake, module `silk._silk` imports; `Context`, `Target`, `Sink`, `Color`, `Vec2`, `Column`, `Row`, `Label`, `Button`; numpy framebuffer; App wrapper; 1 pytest | `pip install -e python/` works; smoke test renders "Hello, silk!" to numpy |
+| **M0 — scaffold** | `python/` tree, vendored nanobind, CMake, module `slikui._slikui` imports; `Context`, `Target`, `Sink`, `Color`, `Vec2`, `Column`, `Row`, `Label`, `Button`; numpy framebuffer; App wrapper; 1 pytest | `pip install -e python/` works; smoke test renders "Hello, slikui!" to numpy |
 | **M1 — full widget surface** | every class in `widgets/*.hpp` + theme/presets + Image-from-numpy; kwargs `add()` layer; `py.typed` | gallery.py renders the whole widget set from Python |
 | **M2 — interaction** | Event binding + factories, popups, tooltips, simulated-input tests, golden images | accordion/dropdown/scroll scenarios pass pixel checks |
 | **M3 — packaging & CI** | cibuildwheel matrix, GH Actions, `docs/python-bindings.md`, sdist build | wheels for the matrix build green; docs merged |
-| **M4 — later** | GLFW+GL sink/window ~~(superseded: the demo uses a Python-native glfw/PyOpenGL host)~~, ~~Python `IRenderSink` trampoline~~ **(done: `silk.RenderSink` + `CanvasSink`, see §4)**, free-threaded wheel (opt-in) | ~~demo rendering silk UI into a live GL window from Python~~ (achieved by `python/examples/glfw_demo.py`) |
+| **M4 — later** | GLFW+GL sink/window ~~(superseded: the demo uses a Python-native glfw/PyOpenGL host)~~, ~~Python `IRenderSink` trampoline~~ **(done: `slikui.RenderSink` + `CanvasSink`, see §4)**, free-threaded wheel (opt-in) | ~~demo rendering slikui UI into a live GL window from Python~~ (achieved by `python/examples/glfw_demo.py`) |
 
 ## 8. Known pitfalls (from the C++ work)
 
 - **Setter chaining / base-class collisions** — the demo hit
-  `no member named 'add_section' in 'silk::Container'` because fluent setters
+  `no member named 'add_section' in 'slikui::Container'` because fluent setters
   return the base. In bindings, every setter is rebound per most-derived class
   returning `self`, so Python never sees the C++ base-type problem.
 - **Dangling views:** wrappers are non-owning; docs must say "widgets are
@@ -193,7 +193,7 @@ only where the C++ side already exposes a getter — no invented state.
 - **Ink vs advance / wrap fixes** are already in the C++; the Python golden
   tests lock the label-wrap behavior in.
 - **ABGR packing:** `Target` pixels are `uint32` ABGR (little-endian → BGRA
-  bytes). Provide `silk.to_rgba(frame)` helper; keep the raw view the primary
+  bytes). Provide `slikui.to_rgba(frame)` helper; keep the raw view the primary
   API (zero-copy).
 - **stb internal linkage** means the font atlas compiles into the extension —
   no symbol clashes with anything else, nothing to export.

@@ -8,7 +8,7 @@ import math
 
 import numpy as np
 
-import silk
+import slikui
 from examples_glfw_demo_support import load_demo
 
 demo = load_demo()
@@ -50,7 +50,7 @@ def test_mat4_math():
 
 
 def test_ui_builds_headless():
-    app = silk.App(960, 640)
+    app = slikui.App(960, 640)
     state = demo.State()
     panel = demo.build_ui(app, state)
     app.tick(0.0, 1 / 60)
@@ -61,7 +61,7 @@ def test_ui_builds_headless():
     state.shape = 2  # torus selected (what on_select would set)
     assert list(demo.SKY_PRESETS)[0] == "Day"
     # swatch pick edits the target vector in place
-    color = silk.Color.from_hex(0x4E9E58)
+    color = slikui.Color.from_hex(0x4E9E58)
     demo.set_vec3(state.albedo, color)
     assert demo.vec3_close(state.albedo, color)
     # sliders clamp and report through set_value
@@ -70,7 +70,7 @@ def test_ui_builds_headless():
 
 
 def test_over_ui_uses_popup_bounds():
-    app = silk.App(400, 300)
+    app = slikui.App(400, 300)
     state = demo.State()
     panel = demo.build_ui(app, state)
     app.tick(0.0, 1 / 60)

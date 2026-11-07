@@ -1,14 +1,14 @@
 // examples/04_glfw_opengl/main.cpp — GLFW + system OpenGL: a lit cube viewer.
 //
-// Shows silk living alongside raw GL:
+// Shows slikui living alongside raw GL:
 //   * The cube and floor grid render through their own shader/VAOs BEFORE the
 //     UI pass. ctx.render(false) skips the background fill so the scene shows
 //     through under the widgets.
-//   * A docked silk panel edits material + environment uniforms every frame
+//   * A docked slikui panel edits material + environment uniforms every frame
 //     (sliders, checkboxes, dropdowns, swatches).
 //   * The CubeViewport widget consumes mouse events: left-drag orbits the
 //     camera (Context::capture_mouse keeps the drag alive outside bounds),
-//     the wheel zooms. Silk widgets on top still get their own events.
+//     the wheel zooms. slikui widgets on top still get their own events.
 #define GL_SILENCE_DEPRECATION 1
 #include <OpenGL/gl3.h> // GL first: silenced deprecations, no legacy gl.h
 
@@ -20,10 +20,10 @@
 #include <string>
 #include <vector>
 
-#include <silk/backends/glfw/glfw_window.hpp>
-#include <silk/backends/opengl/opengl.hpp>
-#include <silk/silk.hpp>
-#include <silk/text/system_fonts.hpp>
+#include <slikui/backends/glfw/glfw_window.hpp>
+#include <slikui/backends/opengl/opengl.hpp>
+#include <slikui/slikui.hpp>
+#include <slikui/text/system_fonts.hpp>
 
 // ---------------------------------------------------------------------------
 // Tiny column-major 4x4 math — the only GL math this example needs.
@@ -426,17 +426,17 @@ struct CubeState {
 
 // ---------------------------------------------------------------------------
 // Swatch — a small clickable color chip that highlights when it matches the
-// value it edits. Demonstrates a minimal custom silk widget.
+// value it edits. Demonstrates a minimal custom slikui widget.
 // ---------------------------------------------------------------------------
-class Swatch : public silk::Widget {
+class Swatch : public slikui::Widget {
 public:
-    Swatch(silk::Color c, float* target, std::string widget_id = {})
-        : silk::Widget(std::move(widget_id)), color_(c), target_(target) {}
+    Swatch(slikui::Color c, float* target, std::string widget_id = {})
+        : slikui::Widget(std::move(widget_id)), color_(c), target_(target) {}
 
-    silk::Size measure(const silk::Constraints& c) override { return c.clamp({22.f, 22.f}); }
+    slikui::Size measure(const slikui::Constraints& c) override { return c.clamp({22.f, 22.f}); }
     bool stretch_cross() const override { return false; }
 
-    void paint(const silk::PaintEnv& env) const override {
+    void paint(const slikui::PaintEnv& env) const override {
         // Tolerance covers float<->u8 rounding so preset colors light up
         // the matching swatch, while staying far tighter than distinct chips.
         bool sel = target_ && std::fabs(target_[0] * 255.f - color_.r) < 1.5f &&
@@ -447,8 +447,8 @@ public:
         if (sel) env.list.hollow_rect(bounds.inflate(2, 2), env.theme.accent, 2, 6.f);
     }
 
-    bool on_event(const silk::Event& e) override {
-        if (e.type == silk::Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+    bool on_event(const slikui::Event& e) override {
+        if (e.type == slikui::Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
             target_[0] = color_.r / 255.f;
             target_[1] = color_.g / 255.f;
             target_[2] = color_.b / 255.f;
@@ -460,7 +460,7 @@ public:
     const char* widget_type() const override { return "Swatch"; }
 
 private:
-    silk::Color color_;
+    slikui::Color color_;
     float* target_;
 };
 
@@ -468,21 +468,21 @@ private:
 // CubeViewport — fills the window, transparent, and handles the 3D mouse
 // interaction: left-drag orbits (via mouse capture), wheel zooms.
 // ---------------------------------------------------------------------------
-class CubeViewport : public silk::Widget {
+class CubeViewport : public slikui::Widget {
 public:
     CubeState* state = nullptr;
 
-    silk::Size measure(const silk::Constraints& c) override { return c.clamp({640.f, 420.f}); }
+    slikui::Size measure(const slikui::Constraints& c) override { return c.clamp({640.f, 420.f}); }
 
     // Dock the panel children: the controls panel hugs the top-right corner,
     // every other child hugs the bottom-left (the hint bar).
-    void arrange(const silk::Rect& area) override {
+    void arrange(const slikui::Rect& area) override {
         bounds = area;
-        silk::Rect inner = area.inset(14);
+        slikui::Rect inner = area.inset(14);
         for (auto& ch : children) {
             // Measure at natural (unbounded) width: docked panels hug their
             // content, so a label is never force-wrapped by the window width.
-            silk::Size s = ch->measure(silk::Constraints::loose({silk::kInfinite, inner.h}));
+            slikui::Size s = ch->measure(slikui::Constraints::loose({slikui::kInfinite, inner.h}));
             if (ch.get() == panel_)
                 ch->arrange({inner.right() - s.w, inner.y, s.w, s.h});
             else
@@ -490,11 +490,11 @@ public:
         }
     }
 
-    bool on_event(const silk::Event& e) override {
-        using T = silk::Event::Type;
+    bool on_event(const slikui::Event& e) override {
+        using T = slikui::Event::Type;
         switch (e.type) {
         case T::MousePress:
-            if (e.button != silk::MouseLeft || !state || !bounds.contains(e.pos)) return false;
+            if (e.button != slikui::MouseLeft || !state || !bounds.contains(e.pos)) return false;
             if (panel_ && panel_->bounds.contains(e.pos)) return false; // press on the panel
             dragging_ = true;
             ctx->capture_mouse(this);
@@ -526,37 +526,37 @@ public:
         }
     }
 
-    void tick(silk::Time t) override {
+    void tick(slikui::Time t) override {
         if (state && state->auto_rotate && !dragging_) state->yaw += state->spin_speed * t.dt;
     }
 
     const char* widget_type() const override { return "CubeViewport"; }
 
     bool dragging_ = false;
-    silk::Widget* panel_ = nullptr;
+    slikui::Widget* panel_ = nullptr;
 };
 
 // ---------------------------------------------------------------------------
 // Panel helper: label + live value on one row, slider underneath.
 // ---------------------------------------------------------------------------
 struct SliderRef {
-    silk::Slider* slider;
+    slikui::Slider* slider;
 };
 
-static SliderRef add_slider(silk::Container& col, const char* label, float min, float max,
+static SliderRef add_slider(slikui::Container& col, const char* label, float min, float max,
                             float init, const char* fmt, std::function<void(float)> on_change) {
-    auto& row = col.add<silk::Row>().set_gap(8);
-    row.add<silk::Label>(label);
-    row.add<silk::Spacer>();
-    auto& val = row.add<silk::Label>("");
-    val.set_color(silk::Color::from_hex(0x8A919C));
+    auto& row = col.add<slikui::Row>().set_gap(8);
+    row.add<slikui::Label>(label);
+    row.add<slikui::Spacer>();
+    auto& val = row.add<slikui::Label>("");
+    val.set_color(slikui::Color::from_hex(0x8A919C));
     auto set_text = [vp = &val, fmt](float v) {
         char buf[48];
         std::snprintf(buf, sizeof buf, fmt, v);
         vp->set_text(buf);
     };
     set_text(init);
-    auto& s = col.add<silk::Slider>(min, max);
+    auto& s = col.add<slikui::Slider>(min, max);
     s.set_value(init, false);
     s.on_change([set_text, on_change = std::move(on_change)](float v) {
         set_text(v);
@@ -565,18 +565,18 @@ static SliderRef add_slider(silk::Container& col, const char* label, float min, 
     return {&s};
 }
 
-static void add_swatches(silk::Container& col, float* target,
-                         std::initializer_list<silk::Color> colors) {
-    auto& row = col.add<silk::Row>().set_gap(6);
+static void add_swatches(slikui::Container& col, float* target,
+                         std::initializer_list<slikui::Color> colors) {
+    auto& row = col.add<slikui::Row>().set_gap(6);
     for (auto c : colors) row.add<Swatch>(c, target);
 }
 
 int main() {
-    silk::glfw::GlfwWindow win(960, 640, "silk cube viewer");
+    slikui::glfw::GlfwWindow win(960, 640, "slikui cube viewer");
     win.set_min_size(560, 380);
     if (!win.ok()) return 1;
 
-    silk::opengl::OpenglSink sink; // system OpenGL, no loader
+    slikui::opengl::OpenglSink sink; // system OpenGL, no loader
     if (!sink.init()) return 1;
 
     GLuint prog = build_program(kVs, kFs);
@@ -617,41 +617,41 @@ int main() {
     GLuint sky_vao = 0; // empty: the fullscreen triangle reads only gl_VertexID
     glGenVertexArrays(1, &sky_vao);
 
-    silk::Context ctx(sink);
-    ctx.load_font_file(silk::find_system_font());
+    slikui::Context ctx(sink);
+    ctx.load_font_file(slikui::find_system_font());
 
     CubeState state;
     auto& root = ctx.set_root<CubeViewport>();
     root.state = &state;
 
     // ----- controls panel (docked top-right by CubeViewport::arrange) -----
-    auto& panel = root.add<silk::Panel>();
+    auto& panel = root.add<slikui::Panel>();
     root.panel_ = &panel;
     panel.set_padding(14).set_gap(10);
-    panel.set_background(silk::Color(0, 0, 0, 185));
-    panel.set_border(silk::Color(255, 255, 255, 30));
+    panel.set_background(slikui::Color(0, 0, 0, 185));
+    panel.set_border(slikui::Color(255, 255, 255, 30));
     panel.set_radius(10);
     panel.draw_border_ = true;
 
     // All controls live inside a ScrollArea: on a short window the panel
     // content scrolls (with a thin scrollbar) instead of spilling widgets
     // past the panel's rounded bottom edge.
-    auto& scroll = panel.add<silk::ScrollArea>();
+    auto& scroll = panel.add<slikui::ScrollArea>();
     scroll.hint_h_ = 1e5f; // always fill the panel: it tracks the window size,
                            // so resizing larger grows the panel instead of
                            // leaving a fixed-height one that looks smaller
     scroll.content().set_gap(10);
-    scroll.add<silk::Label>("silk cube viewer").set_font_size(18);
+    scroll.add<slikui::Label>("slikui cube viewer").set_font_size(18);
 
     // Contextual control groups in an accordion: exactly one section open at
     // a time keeps the panel compact at any window size.
-    auto& acc = scroll.add<silk::Accordion>();
+    auto& acc = scroll.add<slikui::Accordion>();
     acc.set_gap(6);
     acc.set_exclusive(false); // sections can be opened independently
 
     auto& sec_shape = acc.add_section("Shape", true);
     sec_shape.set_gap(8);
-    sec_shape.add<silk::Dropdown>()
+    sec_shape.add<slikui::Dropdown>()
         .set_items({"Cube", "Sphere", "Torus"})
         .set_placeholder("Reference shape")
         .set_selected(size_t(state.shape))
@@ -660,9 +660,9 @@ int main() {
     auto& sec_material = acc.add_section("Material");
     sec_material.set_gap(8);
     add_swatches(sec_material, state.albedo,
-                 {silk::Color::from_hex(0xBF5C38), silk::Color::from_hex(0x4E9E58),
-                  silk::Color::from_hex(0x3F6FBF), silk::Color::from_hex(0xC9C2B5),
-                  silk::Color::from_hex(0xE8E8E8)});
+                 {slikui::Color::from_hex(0xBF5C38), slikui::Color::from_hex(0x4E9E58),
+                  slikui::Color::from_hex(0x3F6FBF), slikui::Color::from_hex(0xC9C2B5),
+                  slikui::Color::from_hex(0xE8E8E8)});
     add_slider(sec_material, "Roughness", 0.05f, 1.f, state.roughness, "%.2f",
                [&](float v) { state.roughness = v; });
     add_slider(sec_material, "Metallic", 0.f, 1.f, state.metallic, "%.2f",
@@ -672,7 +672,7 @@ int main() {
     sec_env.set_gap(8);
     // Sky presets set all three dome colors at once; the swatch rows below
     // fine-tune them individually.
-    sec_env.add<silk::Dropdown>()
+    sec_env.add<slikui::Dropdown>()
         .set_items({"Day", "Sunset", "Night", "Overcast", "Dust"})
         .set_placeholder("Sky preset")
         .set_selected(0)
@@ -690,21 +690,21 @@ int main() {
                 state.ground[k] = kSkyPresets[i][2][k];
             }
         });
-    sec_env.add<silk::Label>("Sky zenith").set_color(silk::Color::from_hex(0x8A919C));
+    sec_env.add<slikui::Label>("Sky zenith").set_color(slikui::Color::from_hex(0x8A919C));
     add_swatches(sec_env, state.sky_zenith,
-                 {silk::Color::from_hex(0x29529E), silk::Color::from_hex(0x292E5C),
-                  silk::Color::from_hex(0x737D8C), silk::Color::from_hex(0x8C704D),
-                  silk::Color::from_hex(0x050814)});
-    sec_env.add<silk::Label>("Horizon").set_color(silk::Color::from_hex(0x8A919C));
+                 {slikui::Color::from_hex(0x29529E), slikui::Color::from_hex(0x292E5C),
+                  slikui::Color::from_hex(0x737D8C), slikui::Color::from_hex(0x8C704D),
+                  slikui::Color::from_hex(0x050814)});
+    sec_env.add<slikui::Label>("Horizon").set_color(slikui::Color::from_hex(0x8A919C));
     add_swatches(sec_env, state.sky_horizon,
-                 {silk::Color::from_hex(0x9EBDE0), silk::Color::from_hex(0xF08C47),
-                  silk::Color::from_hex(0xB8BFCC), silk::Color::from_hex(0xD9B380),
-                  silk::Color::from_hex(0x141A2E)});
-    sec_env.add<silk::Label>("Ground").set_color(silk::Color::from_hex(0x8A919C));
+                 {slikui::Color::from_hex(0x9EBDE0), slikui::Color::from_hex(0xF08C47),
+                  slikui::Color::from_hex(0xB8BFCC), slikui::Color::from_hex(0xD9B380),
+                  slikui::Color::from_hex(0x141A2E)});
+    sec_env.add<slikui::Label>("Ground").set_color(slikui::Color::from_hex(0x8A919C));
     add_swatches(sec_env, state.ground,
-                 {silk::Color::from_hex(0x33312B), silk::Color::from_hex(0x241C1A),
-                  silk::Color::from_hex(0x4D4D4A), silk::Color::from_hex(0x594733),
-                  silk::Color::from_hex(0x0D0D0F)});
+                 {slikui::Color::from_hex(0x33312B), slikui::Color::from_hex(0x241C1A),
+                  slikui::Color::from_hex(0x4D4D4A), slikui::Color::from_hex(0x594733),
+                  slikui::Color::from_hex(0x0D0D0F)});
     add_slider(sec_env, "Haze", 0.f, 1.f, state.haze, "%.2f",
                [&](float v) { state.haze = v; });
     add_slider(sec_env, "Sun glow", 0.f, 1.f, state.sun_glow, "%.2f",
@@ -712,10 +712,10 @@ int main() {
 
     auto& sec_light = acc.add_section("Light");
     sec_light.set_gap(8);
-    sec_light.add<silk::Label>("Color").set_color(silk::Color::from_hex(0x8A919C));
+    sec_light.add<slikui::Label>("Color").set_color(slikui::Color::from_hex(0x8A919C));
     add_swatches(sec_light, state.light_color,
-                 {silk::Color::from_hex(0xFFF5E8), silk::Color::from_hex(0xFFFFFF),
-                  silk::Color::from_hex(0xB8D8FF), silk::Color::from_hex(0xE8A0FF)});
+                 {slikui::Color::from_hex(0xFFF5E8), slikui::Color::from_hex(0xFFFFFF),
+                  slikui::Color::from_hex(0xB8D8FF), slikui::Color::from_hex(0xE8A0FF)});
     add_slider(sec_light, "Intensity", 0.f, 4.f, state.light_intensity, "%.2f",
                [&](float v) { state.light_intensity = v; });
     add_slider(sec_light, "Elevation", -85.f, 85.f, state.light_elevation, "%.0f deg",
@@ -727,19 +727,19 @@ int main() {
 
     auto& sec_camera = acc.add_section("Camera");
     sec_camera.set_gap(8);
-    sec_camera.add<silk::Checkbox>("Auto-rotate", state.auto_rotate)
+    sec_camera.add<slikui::Checkbox>("Auto-rotate", state.auto_rotate)
         .on_change([&](bool v) { state.auto_rotate = v; });
     add_slider(sec_camera, "Spin speed", 0.f, 2.f, state.spin_speed, "%.2f rad/s",
                [&](float v) { state.spin_speed = v; });
-    sec_camera.add<silk::Button>("Reset camera").on_click([&] { state.reset_camera(); });
+    sec_camera.add<slikui::Button>("Reset camera").on_click([&] { state.reset_camera(); });
 
     // ----- hint bar (docked bottom-left by CubeViewport::arrange) -----
-    auto& hint = root.add<silk::Panel>();
-    hint.set_padding(silk::Padding::sym(10, 6));
-    hint.set_background(silk::Color(0, 0, 0, 120));
+    auto& hint = root.add<slikui::Panel>();
+    hint.set_padding(slikui::Padding::sym(10, 6));
+    hint.set_background(slikui::Color(0, 0, 0, 120));
     hint.set_radius(8);
-    hint.add<silk::Label>("drag: orbit | scroll: zoom")
-        .set_color(silk::Color(255, 255, 255, 160));
+    hint.add<slikui::Label>("drag: orbit | scroll: zoom")
+        .set_color(slikui::Color(255, 255, 255, 160));
 
     // ----- frame loop -----
     auto last = std::chrono::steady_clock::now();
@@ -755,7 +755,7 @@ int main() {
         last = pt;
         now += dt;
 
-        ctx.tick(silk::Time{now, silk::clamp_dt(dt)});
+        ctx.tick(slikui::Time{now, slikui::clamp_dt(dt)});
 
         // --- scene pass: cube + grid, then the UI on top ---
         int fw = 0, fh = 0;

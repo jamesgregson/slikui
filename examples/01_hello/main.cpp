@@ -3,29 +3,29 @@
 #include <OpenGL/gl3.h> // GL first: silenced deprecations, no legacy gl.h
 
 #include <chrono>
-#include <silk/backends/glfw/glfw_window.hpp>
-#include <silk/backends/opengl/opengl.hpp>
-#include <silk/silk.hpp>
-#include <silk/text/system_fonts.hpp>
+#include <slikui/backends/glfw/glfw_window.hpp>
+#include <slikui/backends/opengl/opengl.hpp>
+#include <slikui/slikui.hpp>
+#include <slikui/text/system_fonts.hpp>
 
 int main() {
-    silk::glfw::GlfwWindow win(640, 420, "hello, silk");
+    slikui::glfw::GlfwWindow win(640, 420, "hello, slikui");
     win.set_min_size(320, 240);
     if (!win.ok()) return 1;
 
-    silk::opengl::OpenglSink sink;       // system OpenGL, no loader
+    slikui::opengl::OpenglSink sink;       // system OpenGL, no loader
     if (!sink.init()) return 1;
 
-    silk::Context ctx(sink);
-    ctx.load_font_file(silk::find_system_font());
+    slikui::Context ctx(sink);
+    ctx.load_font_file(slikui::find_system_font());
 
     int clicks = 0;
-    auto& root = ctx.set_root<silk::Column>();
+    auto& root = ctx.set_root<slikui::Column>();
     root.set_padding(24).set_gap(12);
-    root.add<silk::Label>("Hello, silk!").set_font_size(28);
-    root.add<silk::Label>("A header-only, retained-mode C++ UI library.");
-    auto& status = root.add<silk::Label>("clicks: 0");
-    root.add<silk::Button>("Click me").on_click([&] {
+    root.add<slikui::Label>("Hello, slikui!").set_font_size(28);
+    root.add<slikui::Label>("A header-only, retained-mode C++ UI library.");
+    auto& status = root.add<slikui::Label>("clicks: 0");
+    root.add<slikui::Button>("Click me").on_click([&] {
         status.set_text("clicks: " + std::to_string(++clicks));
     });
 
@@ -42,7 +42,7 @@ int main() {
         last = now_pt;
         now += dt;
 
-        ctx.tick(silk::Time{now, silk::clamp_dt(dt)});
+        ctx.tick(slikui::Time{now, slikui::clamp_dt(dt)});
         ctx.render();
         win.swap();
     }
