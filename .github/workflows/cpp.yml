@@ -1,0 +1,64 @@
+name: cpp
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: cpp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} / ${{ matrix.cxx }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, cc: gcc, cxx: g++ }
+          - { os: ubuntu-latest, cc: clang, cxx: clang++ }
+          - { os: macos-latest, cc: clang, cxx: clang++ }
+          - { os: windows-latest, cc: msvc, cxx: msvc }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set compilers
+        if: matrix.cc != 'msvc'
+        shell: bash
+        run: |
+          echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
+          echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+
+      # Examples pull in GLFW/OpenGL system deps; CI exercises the library
+      # itself. The GL/GLFW backends get a dedicated compile check below.
+      - name: configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSLIKUI_BUILD_EXAMPLES=OFF
+
+      - name: build
+        run: cmake --build build --config Release --parallel
+
+      - name: test
+        run: ctest --test-dir build --output-on-failure -C Release
+
+  # Compile-only smoke for the windowing/GL backends: they self-gate on
+  # __has_include(<GLFW/glfw3.h>), so without dev headers installed they
+  # silently compile to nothing and rot. Install them and force the check.
+  gl-backends:
+    name: GL/GLFW backends compile (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dev headers
+        run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libgl1-mesa-dev
+      - name: syntax-check backend headers
+        shell: bash
+        run: |
+          cat > /tmp/backends.cpp <<'EOF'
+          #define GL_GLEXT_PROTOTYPES
+          #include <slikui/backends/glfw/glfw_window.hpp>
+          #include <slikui/backends/opengl/opengl.hpp>
+          int main() { return 0; }
+          EOF
+          clang++ -std=c++20 -Iinclude -fsyntax-only /tmp/backends.cpp

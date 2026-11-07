@@ -1,5 +1,8 @@
 # slikui — a sleek, header-only C++ UI library for graphics applications
 
+[![cpp CI](https://github.com/jamesgregson/slikui/actions/workflows/cpp.yml/badge.svg)](https://github.com/jamesgregson/slikui/actions/workflows/cpp.yml)
+[![python CI](https://github.com/jamesgregson/slikui/actions/workflows/python.yml/badge.svg)](https://github.com/jamesgregson/slikui/actions/workflows/python.yml)
+
 Retained-mode widget tree, declarative builder API, one narrow rendering
 contract that runs on **raw pixels or any graphics API**. C++20, no build
 step, no dependencies.
