@@ -49,6 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # opengl.hpp includes the system <GL/gl.h> unconditionally; GLFW makes
+      # glfw_window.hpp compile its real body instead of self-gating to empty.
+      - name: install dev headers
+        run: sudo apt-get update && sudo apt-get install -y libgl-dev libglfw3-dev
       - name: standalone header check
         run: ./tools/check_headers.sh
         env:
