@@ -3,7 +3,7 @@ requires = ["scikit-build-core>=1.0", "ninja>=1.11"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "slikui"
+name = "slikui-python"
 dynamic = ["version"]
 description = "Python bindings for slikui — a header-only C++20 UI library"
 readme = "python/README.md"

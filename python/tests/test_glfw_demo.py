@@ -11,8 +11,8 @@ import pytest
 
 import slikui
 
-pytest.importorskip("glfw", reason="pip install slikui[demo] for the glfw tests")
-pytest.importorskip("OpenGL", reason="pip install slikui[demo] for the glfw tests")
+pytest.importorskip("glfw", reason="pip install slikui-python[demo] for the glfw tests")
+pytest.importorskip("OpenGL", reason="pip install slikui-python[demo] for the glfw tests")
 from examples_glfw_demo_support import load_demo
 
 demo = load_demo()

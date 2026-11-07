@@ -67,8 +67,8 @@ jobs:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
 
-  # Tag push (v*) -> GitHub Release with the sdist + every wheel attached.
-  # GitHub Releases only, no PyPI; install instructions in python/README.md.
+  # Tag push (v*) -> GitHub Release with the sdist + every wheel attached;
+  # the pypi job below then uploads the same files to PyPI.
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -98,3 +98,24 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # Tag push (v*) -> upload the same sdist + wheels to PyPI via Trusted
+  # Publishing (OIDC): no stored token. PyPI must list this repo, workflow
+  # python.yml and environment "pypi" as a trusted publisher for slikui-python.
+  pypi:
+    name: publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release]                # tag/version check passed, GitHub Release exists
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/slikui-python
+    permissions:
+      id-token: write               # mint the OIDC token PyPI exchanges for an upload token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true      # sdist + wheels-* -> one flat folder
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
