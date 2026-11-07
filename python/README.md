@@ -3,14 +3,13 @@
 Install from GitHub Releases · import `slikui` · compiled module `slikui._slikui`.
 
 ```sh
-pip install numpy
-pip install --no-index --find-links https://github.com/jamesgregson/slikui/releases/expanded_assets/v0.1.0 slikui
+pip install slikui --find-links https://github.com/jamesgregson/slikui/releases/expanded_assets/v0.1.0
 ```
 
 pip picks the wheel matching your OS, CPU and Python (3.10–3.14 on Linux
-x86_64/aarch64, macOS arm64, Windows x64). `--no-index` keeps pip from looking
-at PyPI for `slikui` — slikui is only distributed here. Swap `v0.1.0` for any
-release tag.
+x86_64/aarch64, macOS arm64, Windows x64) from the release, and pulls numpy
+from PyPI as usual. Swap `v0.1.0` for any release tag. slikui is distributed
+only here, not on PyPI.
 
 No wheel for your platform (e.g. Intel macOS)? Build the release sdist —
 needs a C++20 compiler; build tools come from PyPI as usual:
