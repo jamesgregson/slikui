@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: build + test wheels
-        uses: pypa/cibuildwheel@v3
+        uses: pypa/cibuildwheel@v3.4
 
       - uses: actions/upload-artifact@v4
         with:
