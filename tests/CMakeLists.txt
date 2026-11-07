@@ -4,6 +4,7 @@ add_executable(slikui_tests
   test_layout.cpp
   test_widgets.cpp
   test_theme.cpp
+  test_font.cpp
   test_golden.cpp)
 target_link_libraries(slikui_tests PRIVATE slikui)
 

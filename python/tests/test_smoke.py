@@ -5,6 +5,11 @@ import gc
 import numpy as np
 
 import slikui
+from slikui._slikui import find_system_font
+
+# Text-rendering checks need an actual font; minimal containers (manylinux
+# wheel builds) have none — those tests skip rather than fail there.
+_HAS_FONT = bool(find_system_font())
 
 
 def test_version_and_exports():
@@ -23,6 +28,10 @@ def test_color():
 
 
 def test_hello_renders_text():
+    if not _HAS_FONT:
+        import pytest
+
+        pytest.skip("no system font (minimal container)")
     ui = slikui.App(240, 120)
     root = ui.set_root(slikui.Column)
     root.set_padding(16).set_gap(8)
@@ -91,3 +100,22 @@ def test_widget_identity_and_lifecycle():
     assert root.find("nope") is None
     root.id = "root"
     assert root.find("root") is root
+
+
+def test_fontless_context_does_not_crash():
+    # Minimal Linux containers (e.g. manylinux wheel builds) have no system
+    # fonts: find_system_font() returns "" and the font never loads. The
+    # fontless path must degrade to zero-size text, not segfault — the CI
+    # wheel tests crashed in App.tick() before the ok_ guards existed.
+    from slikui._slikui import Context, Sink, Target
+
+    target = Target(120, 80)
+    sink = Sink(target)
+    ctx = Context(sink)  # no load_font_file call: invalid font on purpose
+    ctx.set_frame_size(120.0, 80.0)
+    root = ctx.set_root_column()
+    root.add(slikui.Label, "no font loaded")
+    root.add(slikui.Button, "still fine")
+    ctx.tick(0.0, 1 / 60)
+    ctx.render()  # segfaulted here before the fix
+    assert (target.pixels() != 0).any()  # background + chrome still painted
