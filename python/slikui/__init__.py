@@ -80,7 +80,7 @@ from slikui._slikui import (  # noqa: F401 — input enums
     set_leak_warnings,
 )
 
-__version__ = "0.1.0"
+from slikui._version import __version__
 
 # Pythonic sugar on the bound classes: `container.add(slikui.Label, "hi")` and
 # `ctx.set_root(slikui.Column)`. nanobind classes are heap types, so type-level

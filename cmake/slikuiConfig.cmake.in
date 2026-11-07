@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+# Header-only: slikui::slikui is an INTERFACE target — include + compile
+# features, nothing to link. SLIKUI_VERSION_STRING and friends come from
+# <slikui/version.hpp>, which is installed with the rest of the headers.
+include("${CMAKE_CURRENT_LIST_DIR}/slikuiTargets.cmake")
+
+check_required_components(slikui)

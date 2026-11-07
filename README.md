@@ -8,6 +8,7 @@ step, no dependencies.
 #include "slikui.hpp"                 // or dist/slikui.hpp — the single header
 
 #include <slikui/backends/software/software.hpp>   // CPU rasterizer
+#include <slikui/text/system_fonts.hpp>            // find_system_font()
 
 int main() {
     slikui::software::Target target(480, 320);     // raw uint32_t pixels
@@ -326,7 +327,7 @@ ctx.theme().accent = slikui::Color::from_hex(0xE060B0); // your brand
 ```
 cmake -S . -B build
 cmake --build build -j
-ctest --test-dir build          # 40 tests, incl. golden-image pixel checks
+ctest --test-dir build          # golden-image pixel checks included
 ./build/examples/03_gallery/slikui_gallery
 ./build/examples/04_glfw_opengl     # 3D shape viewer: orbit + zoom + accordion panel
 ./build/examples/04_glfw_software   # same UI, CPU-rasterized scene

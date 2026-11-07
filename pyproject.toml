@@ -1,0 +1,52 @@
+[build-system]
+requires = ["scikit-build-core>=1.0", "ninja>=1.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "slikui"
+dynamic = ["version"]
+description = "Python bindings for slikui — a header-only C++20 UI library"
+readme = "python/README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "slikui contributors" }]
+dependencies = ["numpy>=1.24"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: User Interfaces",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+# for python/examples/glfw_demo.py (and its headless tests)
+demo = ["glfw>=2.5", "PyOpenGL"]
+
+[project.urls]
+Homepage = "https://github.com/slikui/slikui"
+Documentation = "https://github.com/slikui/slikui/tree/main/python"
+
+[tool.scikit-build]
+wheel.packages = ["python/slikui"]
+
+# Version: single source of truth is python/slikui/_version.py (lockstep with
+# the C++ side is enforced by python/tests/test_version.py).
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "python/slikui/_version.py"
+
+[tool.scikit-build.sdist]
+exclude = [
+    "third_party/nanobind/docs",
+    "third_party/nanobind/.github",
+    "third_party/nanobind/nanobind-backend",
+    "third_party/nanobind/ext/robin_map/.git",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]

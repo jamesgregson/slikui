@@ -24,8 +24,8 @@ leak-free even when callbacks capture widget wrappers.
 Build from source (the C++ side is header-only, nothing to link):
 
 ```
-pip install -e python/          # editable, into your venv
-python -m pytest python/tests   # 34 tests: widgets, events, renderer parity
+pip install -e .                # editable, into your venv — from the repo root
+python -m pytest python/tests   # 38 tests: widgets, events, renderer parity
 python python/examples/hello.py # writes hello.ppm
 ```
 

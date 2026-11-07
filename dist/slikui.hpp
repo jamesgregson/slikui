@@ -7142,6 +7142,25 @@ public:
 
     Widget* find(const std::string& id) { return root_ ? root_->find(id) : nullptr; }
 
+    // Destroys the widget tree, popups and deferred closures, releasing the
+    // Python callbacks they hold. The Python bindings route App.close() /
+    // App.__del__ through this: a callback capturing a widget wrapper forms a
+    // cycle closed by C++ ownership, which the GC cannot traverse — destroying
+    // the tree while the interpreter is alive is what makes shutdown
+    // leak-free (see python/tests/test_shutdown_leaks.py). Not safe to call
+    // from inside a widget callback: destruction is immediate, not deferred.
+    void clear_tree() {
+        set_focus(nullptr); // widget flags while they are still alive
+        mouse_capture_ = nullptr;
+        hover_ = nullptr;
+        tooltip_open_ = false;
+        hover_since_ = -1;
+        inside_press_ = false;
+        popups_.clear();  // popup widgets may hold callbacks
+        root_.reset();    // the tree itself
+        closing_.clear(); // widgets deferred by close_popups()
+    }
+
     // --- input ---
 
     // NOTE: popup destruction is deferred to the end of handle() — callbacks
@@ -18660,9 +18679,27 @@ namespace slikui::glfw {
 // (already included above: slikui/text/font.hpp)
 // (already included above: slikui/widgets/all.hpp)
 // (already included above: slikui/context.hpp)
+// ============================================================================
+// slikui/version.hpp
+// ============================================================================
+// slikui/version.hpp — release version of the library.
+//
+// Single source of truth for the C++ side: CMakeLists.txt parses these
+// macros into its project(VERSION), and the Python bindings' lockstep test
+// compares them against python/slikui/_version.py. Bump here (and in
+// python/slikui/_version.py) for each release.
+
+#define SLIKUI_VERSION_MAJOR 0
+#define SLIKUI_VERSION_MINOR 1
+#define SLIKUI_VERSION_PATCH 0
+#define SLIKUI_VERSION_STRING "0.1.0"
+
 
 namespace slikui {
-inline constexpr const char* version = "0.1.0";
+inline constexpr int version_major = SLIKUI_VERSION_MAJOR;
+inline constexpr int version_minor = SLIKUI_VERSION_MINOR;
+inline constexpr int version_patch = SLIKUI_VERSION_PATCH;
+inline constexpr const char* version = SLIKUI_VERSION_STRING;
 } // namespace slikui
 
 

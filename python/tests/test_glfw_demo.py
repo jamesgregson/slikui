@@ -7,8 +7,12 @@ here runs without a window or GL context.
 import math
 
 import numpy as np
+import pytest
 
 import slikui
+
+pytest.importorskip("glfw", reason="pip install slikui[demo] for the glfw tests")
+pytest.importorskip("OpenGL", reason="pip install slikui[demo] for the glfw tests")
 from examples_glfw_demo_support import load_demo
 
 demo = load_demo()

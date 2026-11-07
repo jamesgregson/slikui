@@ -18,7 +18,11 @@
 #include "text/font.hpp"
 #include "widgets/all.hpp"
 #include "context.hpp"
+#include "version.hpp"
 
 namespace slikui {
-inline constexpr const char* version = "0.1.0";
+inline constexpr int version_major = SLIKUI_VERSION_MAJOR;
+inline constexpr int version_minor = SLIKUI_VERSION_MINOR;
+inline constexpr int version_patch = SLIKUI_VERSION_PATCH;
+inline constexpr const char* version = SLIKUI_VERSION_STRING;
 } // namespace slikui

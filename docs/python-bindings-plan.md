@@ -1,6 +1,8 @@
 # Python bindings for slikui — plan
 
-> **Status: M0 + M1 + M2 complete; M3 + M4 tabled.** M0/M1: scaffold, values,
+> **Status: M0 + M1 + M2 complete; M3 in progress (sdist + version
+> single-sourcing + C++ install/export done; cibuildwheel/GH Actions tabled);
+> M4 tabled.** M0/M1: scaffold, values,
 > software backend, `Context`, **every widget class**, Theme + 8 presets,
 > HiDPI scale; 17 tests. M2: full event vocabulary bound (`Event`,
 > `EventType`, `Key`, `Mod`, `MouseButton`, `Rect`, `Widget.bounds`/`children`

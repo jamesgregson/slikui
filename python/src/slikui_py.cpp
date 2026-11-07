@@ -25,6 +25,7 @@
 #include <slikui/slikui.hpp>
 #include <slikui/backends/software/software.hpp>
 #include <slikui/text/system_fonts.hpp>
+#include <slikui/version.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -195,7 +196,7 @@ struct PyRenderSink : IRenderSink {
 
 NB_MODULE(_slikui, m) {
     m.doc() = "slikui Python bindings — thin layer over the C++20 UI library.";
-    m.attr("__version__") = "0.1.0";
+    m.attr("__version__") = SLIKUI_VERSION_STRING;
     // GUI apps legitimately hold widget wrappers until process exit; the
     // shutdown-order "leak" report is noise there. Opt-out for apps (tests
     // keep the checker on).
