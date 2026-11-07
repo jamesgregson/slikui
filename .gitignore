@@ -2,6 +2,7 @@ build/
 build-asan/
 .cache/
 .venv/
+.jimbo/
 python/build/
 __pycache__/
 *.pyc
