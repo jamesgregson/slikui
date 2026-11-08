@@ -46,7 +46,16 @@ python -m slikui.examples.gallery           # full-surface gallery -> gallery.pn
 python python/examples/pyrenderer_demo.py   # C++ vs CanvasSink pixel diff (0)
 python -m slikui.examples.paint --docs-image custom_widget docs/images/custom_widget.png
 python tools/extract_snippets.py            # regenerate docs/includes/examples/ after editing demo code
+python tools/gen_stubs.py                   # regenerate the committed type stub after binding changes
+for n in hello gallery events paint controls keyboard renderer window; do
+  python -m slikui.examples.$n --smoke docs/images/examples-$n.png
+done                                        # the examples page's screenshots
+python tools/examples_gif.py                # examples-snake.gif, examples-clock.gif
 ```
+
+`python/tests/test_stubs.py` fails when the committed stub drifts from the
+built extension; `test_examples.py` runs every smoke pass in a fresh
+interpreter and fails on nanobind's shutdown leak report.
 
 ## Regenerating the docs images
 

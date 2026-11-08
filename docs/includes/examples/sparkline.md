@@ -6,7 +6,9 @@ class Sparkline(slikui.Widget):
     """A numpy series as a polyline, with a hover crosshair.
 
     ``hover_x`` is the pointer's local x (or ``None``); ``paint`` turns it
-    into the crosshair line, so hover state lives entirely in the widget.
+    into the crosshair line. MouseMove only arrives while the pointer is
+    over the widget, so the crosshair is cleared on MouseLeave — the hover
+    idiom for any widget.
     """
 
     def __init__(self, series, capacity=128, color=None):
@@ -28,11 +30,10 @@ class Sparkline(slikui.Widget):
 
     def on_event(self, event):
         if event.type == slikui.EventType.MouseMove:
-            inside = self.bounds.contains(event.pos)
-            self.hover_x = (event.pos.x - self.bounds.x) if inside else None
-            return inside
-        if event.type == slikui.EventType.MousePress and self.bounds.contains(event.pos):
-            return True  # click = freeze (no-op here; the point is consume)
+            self.hover_x = event.pos.x - self.bounds.x
+            return True
+        if event.type == slikui.EventType.MouseLeave:
+            self.hover_x = None
         return False
 
     def paint(self, env):

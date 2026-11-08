@@ -5,32 +5,20 @@
 class EventProbe(slikui.Widget):
     """Narrates every event it receives into a LogView via ``sink``.
 
-    Demonstrates the three rules of slikui input:
-
-    * return ``True`` to consume — ancestors/siblings stop seeing it;
-    * key and text events are focus-routed — the probe only gets them while
-      it holds focus (it is focusable; the TextField beside it shows the
-      contrast). Note the current core drops KeyRelease entirely
-      (`Context::handle` never dispatches it) — apps that need key-up must
-      plan around it;
-    * there is no mouse capture in the bindings yet — moves and releases
-      outside the widget's bounds are never delivered, so a drag "ends"
-      when the pointer leaves and a lost release must be handled
-      defensively (a fresh press while still ``dragging`` logs the warning).
+    Also the reference drag idiom: capture the mouse on press, so moves and
+    the release keep arriving after the pointer leaves the widget; release
+    the capture on MouseRelease; cancel on FocusLost (the app lost focus
+    mid-drag — the release may never come).
     """
 
     def __init__(self):
         super().__init__()
         self.sink = None            # callable(level, text) — usually a LogView
-        self.seen = []              # (kind, line) — full record, for tests
-        self.now = 0.0              # tick clock, for press-pair timing
-        self.last_pos = None        # last mouse position seen, for painting
-        self.press_count = 0
-        self.double_clicks = 0
+        self.seen = []              # (EventType, line) — full record, for tests
+        self.last_pos = None        # last pointer position seen, for painting
+        self.hovered = False
         self.dragging = False
         self.log_moves = True
-        self.move_positions = []   # every MouseMove actually delivered
-        self._last_press = -1.0
 
     def measure(self, constraints):
         return constraints.clamp(slikui.Size(220, 120))
@@ -41,52 +29,32 @@ class EventProbe(slikui.Widget):
     def focusable(self):
         return True
 
-    def tick(self, t):
-        self.now = t.now
-
     def on_event(self, e):
-        self._note(e)
-        return self._consume(e)
-
-    def _note(self, e):
-        kind = type_name(e)
-        if kind == "MouseMove":
-            self.move_positions.append((e.pos.x, e.pos.y))
-            if self.log_moves:
-                self._say(kind, INFO, describe(e))
-        else:
-            self._say(kind, INFO, describe(e))
-        if e.type in (slikui.EventType.MouseMove, slikui.EventType.MousePress,
-                      slikui.EventType.MouseRelease, slikui.EventType.Scroll):
+        if e.type != T.MouseMove or self.log_moves:
+            self._say(e.type, INFO, describe(e))
+        if e.type in (T.MouseMove, T.MousePress, T.MouseRelease, T.Scroll):
             self.last_pos = (e.pos.x, e.pos.y)
 
-    def _consume(self, e):
-        if e.type == slikui.EventType.MousePress and e.button == LEFT:
-            inside = self.bounds.contains(e.pos)
-            if not inside:
-                return False
-            if self.dragging:  # a lost release: the pointer left, pressed
-                self._say("note", WARN, "press while still dragging — the "
-                            "previous release never arrived (no mouse capture "
-                            "yet)")
+        if e.type == T.MouseEnter:
+            self.hovered = True
+        elif e.type == T.MouseLeave:
+            self.hovered = False
+        elif e.type == T.MousePress and e.button == LEFT:
             self.dragging = True
-            self.press_count += 1
-            if 0.0 <= self.now - self._last_press < DOUBLE_CLICK_S:
-                self.double_clicks += 1
-                self._say("note", OK, "double-click (two presses < "
-                                      f"{DOUBLE_CLICK_S:.2f} s apart)")
-            self._last_press = self.now
-            return True
-        if e.type == slikui.EventType.MouseMove:
-            inside = self.bounds.contains(e.pos)
-            return bool(self.dragging) or inside
-        if e.type == slikui.EventType.MouseRelease:
-            was = self.dragging
+            self.context.capture_mouse(self)  # moves + release keep coming
+        elif e.type == T.MouseRelease and e.button == LEFT and self.dragging:
             self.dragging = False
-            return was
-        if e.type == slikui.EventType.Scroll and self.bounds.contains(e.pos):
-            return True
-        return False  # keys/text: routed by focus, log only
+            self.context.release_mouse(self)
+        elif e.type == T.FocusLost and self.dragging:
+            self.dragging = False             # app lost focus mid-drag
+            self.context.release_mouse(self)
+            self._say("note", WARN, "drag cancelled by FocusLost")
+        elif e.type == T.DoubleClick:
+            self._say("note", OK, "double-click (core DoubleClick event)")
+
+        # Consume pointer input; keys/text only log (bubbling is harmless).
+        return e.type in (T.MouseMove, T.MousePress, T.MouseRelease, T.Click,
+                          T.DoubleClick, T.Scroll)
 
     def _say(self, kind, level, text):
         self.seen.append((kind, text))
@@ -96,10 +64,11 @@ class EventProbe(slikui.Widget):
     def paint(self, env):
         b, th = self.bounds, env.theme
         env.list.rect(b, th.surface_alt, 6)
-        env.list.hollow_rect(b, th.border, 1, 6)
+        edge = th.accent if (self.focused or self.hovered) else th.border
+        env.list.hollow_rect(b, edge, 2 if self.focused else 1, 6)
         if self.dragging:
             env.list.hollow_rect(b.inflate(2, 2), th.accent, 2, 8)
-        if self.last_pos is not None:
+        if self.last_pos is not None and self.hovered:
             env.list.circle(slikui.Vec2(*self.last_pos),
                             6.0 if self.dragging else 3.0, th.accent)
 ```

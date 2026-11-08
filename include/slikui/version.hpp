@@ -12,7 +12,7 @@
 #pragma once
 
 #define SLIKUI_VERSION_MAJOR 0
-#define SLIKUI_VERSION_MINOR 2
+#define SLIKUI_VERSION_MINOR 3
 #define SLIKUI_VERSION_PATCH 0
 
 #define SLIKUI_VERSION_STR_(x) #x

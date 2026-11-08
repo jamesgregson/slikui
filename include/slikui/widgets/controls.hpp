@@ -72,19 +72,29 @@ public:
             hover_.target = bounds.contains(e.pos) ? 1.f : 0.f;
             return false;
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
                 armed_ = true;
                 pressed_.target = 1;
                 return true;
             }
             return false;
         case Event::Type::MouseRelease:
-            if (armed_) {
+            if (e.button == MouseLeft && armed_) {
                 armed_ = false;
                 pressed_.target = 0;
-                if (enabled && bounds.contains(e.pos) && on_click_) on_click_();
                 return true;
             }
+            return false;
+        case Event::Type::Click: // Context: press + release on this widget
+            if (e.button == MouseLeft && enabled) {
+                if (on_click_) on_click_();
+                return true;
+            }
+            return false;
+        case Event::Type::MouseLeave: // un-hover; a drag-off also disarms
+            hover_.target = 0;
+            armed_ = false;
+            pressed_.target = 0;
             return false;
         case Event::Type::KeyPress:
             if (focused && (e.key == Key::Enter || e.key == Key::Space)) {
@@ -185,7 +195,7 @@ public:
 
     bool on_event(const Event& e) override {
         // A radio selects itself; it never unselects on click.
-        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
             select();
             return true;
         }
@@ -273,7 +283,7 @@ public:
     }
 
     bool on_event(const Event& e) override {
-        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
             toggle();
             return true;
         }
@@ -337,7 +347,7 @@ public:
     }
 
     bool on_event(const Event& e) override {
-        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
             set_checked(!checked_, true);
             return true;
         }
@@ -431,7 +441,7 @@ public:
     bool on_event(const Event& e) override {
         switch (e.type) {
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
                 ctx->capture_mouse(this);
                 dragging_ = true;
                 value_from_pos(e.pos.x);
@@ -445,7 +455,7 @@ public:
             }
             return false;
         case Event::Type::MouseRelease:
-            if (dragging_) {
+            if (e.button == MouseLeft && dragging_) {
                 dragging_ = false;
                 ctx->release_mouse(this);
                 return true;
@@ -572,7 +582,7 @@ public:
             hovered_ = index_at(e.pos.x);
             return false;
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
                 long idx = index_at(e.pos.x);
                 if (idx >= 0) set_selected(idx);
                 return true;

@@ -247,7 +247,7 @@ public:
     bool on_event(const Event& e) override {
         switch (e.type) {
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
                 ctx->capture_mouse(this);
                 dragging_ = true;
                 set_value(to_value(e.pos));
@@ -261,7 +261,7 @@ public:
             }
             return false;
         case Event::Type::MouseRelease:
-            if (dragging_) {
+            if (e.button == MouseLeft && dragging_) {
                 dragging_ = false;
                 ctx->release_mouse(this);
                 return true;
@@ -390,7 +390,7 @@ public:
             hovered_ = bounds.contains(e.pos) ? long(row_at(e.pos.y)) : -1;
             return false;
         }
-        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
             long vi = row_at(e.pos.y);
             if (vi < 0) return false;
             size_t i = visible_[size_t(vi)];
@@ -526,7 +526,7 @@ public:
             hovered_ = bounds.contains(e.pos) ? row_at(e.pos.y) : -1;
             return false;
         }
-        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
             long r = row_at(e.pos.y);
             if (r >= 0) {
                 selected_ = r;

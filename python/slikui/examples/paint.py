@@ -62,7 +62,9 @@ class Sparkline(slikui.Widget):
     """A numpy series as a polyline, with a hover crosshair.
 
     ``hover_x`` is the pointer's local x (or ``None``); ``paint`` turns it
-    into the crosshair line, so hover state lives entirely in the widget.
+    into the crosshair line. MouseMove only arrives while the pointer is
+    over the widget, so the crosshair is cleared on MouseLeave — the hover
+    idiom for any widget.
     """
 
     def __init__(self, series, capacity=128, color=None):
@@ -84,11 +86,10 @@ class Sparkline(slikui.Widget):
 
     def on_event(self, event):
         if event.type == slikui.EventType.MouseMove:
-            inside = self.bounds.contains(event.pos)
-            self.hover_x = (event.pos.x - self.bounds.x) if inside else None
-            return inside
-        if event.type == slikui.EventType.MousePress and self.bounds.contains(event.pos):
-            return True  # click = freeze (no-op here; the point is consume)
+            self.hover_x = event.pos.x - self.bounds.x
+            return True
+        if event.type == slikui.EventType.MouseLeave:
+            self.hover_x = None
         return False
 
     def paint(self, env):
@@ -209,10 +210,10 @@ class ClockFace(slikui.Widget):
 
 # doc: boundsdebug
 class BoundsDebug(slikui.Widget):
-    """Wrapper that delegates everything to its child, then outlines every
-    descendant. `paint_tree` paints the parent before recursing, so the
-    outlines sit one pixel outside each child's bounds to survive the
-    child's own painting — the one-widget layout debugger."""
+    """Wrapper that delegates layout to its child, then outlines every
+    descendant in ``paint_over`` — which runs after the children have
+    painted, so the outlines are never covered. The one-widget layout
+    debugger."""
 
     def __init__(self):
         super().__init__()
@@ -228,11 +229,15 @@ class BoundsDebug(slikui.Widget):
         if self.children:
             self.children[0].arrange(area)
 
-    def paint(self, env):
+    def paint_over(self, env):
+        # paint_over runs after the children, so the outlines sit on top.
         if not (self.outlines and self.children):
             return
-        for w in _support.walk(self.children[0]):
-            env.list.hollow_rect(w.bounds.inflate(1, 1), env.theme.accent, 1)
+        stack = [self.children[0]]
+        while stack:  # every descendant, depth-first
+            w = stack.pop()
+            env.list.hollow_rect(w.bounds, env.theme.accent, 1)
+            stack.extend(w.children)
 
 
 # doc: end
@@ -291,6 +296,9 @@ def smoke(app, state, session, log):
     after = _support.crop(app.render(), sb)
     c.ok(state.spark.hover_x is not None, "sparkline tracks the pointer")
     c.ok(_support.diff(before, after) > 0, "crosshair painted")
+    mb = state.meter.bounds  # move onto another widget: MouseLeave clears it
+    _support.move(app, (mb.x + 4, mb.y + mb.h / 2))
+    c.ok(state.spark.hover_x is None, "crosshair cleared on MouseLeave")
 
     # Gauge + clock are tick-driven: advance the deterministic clock.
     state.gauge.set_value(0.9)

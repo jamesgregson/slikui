@@ -143,7 +143,7 @@ public:
             return false;
         }
         case Event::Type::MousePress:
-            if (!bounds.contains(e.pos)) return false;
+            if (e.button != MouseLeft || !bounds.contains(e.pos)) return false;
             if (!enabled_) return true; // swallow: disabled rows don't dismiss
             if (submenu_) {
                 if (submenu_open()) close_submenu();
@@ -276,7 +276,7 @@ public:
             opened_item_->note_opened_from(nullptr);
             opened_item_ = nullptr;
         }
-        if (e.type == Event::Type::MousePress && ctx && opened_item_ &&
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && ctx && opened_item_ &&
             ctx->popup_open(opened_item_->submenu_) &&
             bounds.contains(e.pos)) {
             // Click on this menu's dead area (padding, separator): the open
@@ -417,7 +417,7 @@ public:
                 return false;
             }
             case Event::Type::MousePress:
-                if (bounds.contains(e.pos)) {
+                if (e.button == MouseLeft && bounds.contains(e.pos)) {
                     if (open()) ctx->close_popups();
                     else open_menu();
                     return true;

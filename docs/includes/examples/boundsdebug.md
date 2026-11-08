@@ -3,10 +3,10 @@
 
 ```python
 class BoundsDebug(slikui.Widget):
-    """Wrapper that delegates everything to its child, then outlines every
-    descendant. `paint_tree` paints the parent before recursing, so the
-    outlines sit one pixel outside each child's bounds to survive the
-    child's own painting — the one-widget layout debugger."""
+    """Wrapper that delegates layout to its child, then outlines every
+    descendant in ``paint_over`` — which runs after the children have
+    painted, so the outlines are never covered. The one-widget layout
+    debugger."""
 
     def __init__(self):
         super().__init__()
@@ -22,9 +22,13 @@ class BoundsDebug(slikui.Widget):
         if self.children:
             self.children[0].arrange(area)
 
-    def paint(self, env):
+    def paint_over(self, env):
+        # paint_over runs after the children, so the outlines sit on top.
         if not (self.outlines and self.children):
             return
-        for w in _support.walk(self.children[0]):
-            env.list.hollow_rect(w.bounds.inflate(1, 1), env.theme.accent, 1)
+        stack = [self.children[0]]
+        while stack:  # every descendant, depth-first
+            w = stack.pop()
+            env.list.hollow_rect(w.bounds, env.theme.accent, 1)
+            stack.extend(w.children)
 ```

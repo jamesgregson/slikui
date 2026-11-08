@@ -10,6 +10,8 @@ Run:
     python -m slikui.examples.hello --smoke     # scripted self-check
 """
 
+from types import SimpleNamespace
+
 import numpy as np
 
 import slikui
@@ -30,7 +32,7 @@ def build(app):
     row.add(slikui.Button, "Default")
     row.add(slikui.Button, "Primary", variant=slikui.ButtonVariant.Primary,
             on_click=lambda: hits.append("primary"))
-    return _support.State(root=root, hits=hits)
+    return SimpleNamespace(root=root, hits=hits)  # whatever smoke() needs
 
 
 # doc: end

@@ -7,6 +7,8 @@ contract — the contract exists, the smoke produced a summary, and the PNG
 is real.
 """
 
+import pathlib
+
 import pytest
 
 from slikui.examples import REGISTRY, load
@@ -54,3 +56,53 @@ def test_paint_docs_image(tmp_path):
     png = tmp_path / "custom_widget.png"
     assert paint.main(["--docs-image", "custom_widget", str(png)]) == 0
     assert png.exists() and png.stat().st_size > 0
+
+
+@pytest.mark.parametrize("example", REGISTRY, ids=lambda e: e.name)
+def test_smoke_is_leak_free(example, tmp_path):
+    """Run each smoke pass in a fresh interpreter and fail on nanobind's
+    shutdown leak report — examples get copied into apps, so a reference
+    cycle in one (e.g. a custom widget holding a callback that captures one
+    of its own descendants) would be copied too."""
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-m", f"slikui.examples.{example.name}",
+         "--smoke", str(tmp_path / "s.png")],
+        capture_output=True, text=True, cwd=tmp_path, timeout=120)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "leaked" not in out.stderr, out.stderr
+
+
+def test_launcher_contract_and_where(capsys):
+    from slikui.examples import __main__ as launcher
+
+    assert launcher.main(["--contract"]) == 0
+    out = capsys.readouterr().out
+    for kind in ("MouseEnter", "Click(clicks=1)", "DoubleClick(clicks=2)",
+                 "MouseLeave", "KeyRelease", "FocusLost"):
+        assert kind in out, kind
+    assert launcher.main(["--where"]) == 0
+    where = capsys.readouterr().out.strip()
+    assert (pathlib.Path(where) / "events.py").exists()
+
+
+def _doc_regions():
+    """(module, slug, text) for every `# doc:` region in the examples."""
+    import re
+
+    pkg = pathlib.Path(load("hello").__file__).parent
+    for path in sorted(pkg.glob("[a-z]*.py")):
+        src = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"# doc: (\S+)\n(.*?)# doc: end", src, re.S):
+            yield path.stem, m.group(1), m.group(2)
+
+
+def test_doc_regions_are_copy_paste_safe():
+    """Snippets the docs quote must run outside this package: no harness
+    imports inside a widget, no references to private helpers."""
+    regions = list(_doc_regions())
+    assert regions, "no doc regions found"
+    for mod, slug, text in regions:
+        assert "_support." not in text, f"{mod}:{slug} uses the private harness"

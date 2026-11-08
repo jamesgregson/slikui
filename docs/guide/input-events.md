@@ -8,15 +8,32 @@ synthesize in tests) yourself.
 
 ## The event vocabulary
 
+Hosts send raw input:
+
 | Event | Carries | Notes |
 |-------|---------|-------|
-| `MouseMove` | `pos`, `delta` | framebuffer pixels, y-down |
-| `MousePress` / `MouseRelease` | `button`, `pos`, `mods` | routed through hit-testing |
-| `Scroll` | `pos`, `scroll` | wheel ticks, may carry mods |
-| `KeyPress` / `KeyRelease` | `key`, `mods` | focus-routed |
-| `TextInput` | `codepoint` | Unicode scalar, focus-routed |
-| `FocusLost` | — | clears focus state |
+| `MouseMove` | `pos`, `delta`, `mods` | logical points, y-down |
+| `MousePress` / `MouseRelease` | `button`, `pos`, `mods`, `clicks` | any button; routed through hit-testing |
+| `Scroll` | `pos`, `scroll`, `mods` | wheel ticks |
+| `KeyPress` / `KeyRelease` | `key`, `mods`, `repeat` | focus-routed; `repeat` marks auto-repeat presses |
+| `TextInput` | `codepoint` | Unicode scalar, to the focused widget |
+| `FocusLost` | — | the app lost focus: cancels drags, closes popups |
 | `FrameResize` | `pos` = pixel size | converted to the logical frame |
+
+The Context synthesizes these for widgets (hosts never send them):
+
+| Event | When | Delivered to |
+|-------|------|--------------|
+| `Click` | press + release on the same widget, any button; `clicks` = 1, 2, 3… | the pressed widget, bubbling |
+| `DoubleClick` | after the `Click` whose `clicks == 2` | the pressed widget, bubbling |
+| `MouseEnter` / `MouseLeave` | the pointer entered / left the widget *and its descendants* | that widget only |
+| `FocusGained` / `FocusLost` | keyboard focus moved (or the app lost focus mid-drag) | that widget only |
+
+`clicks` counts presses of the same button within
+`Event::kMultiClickTime` (0.4 s, Python `slikui.Event.MULTI_CLICK_TIME`) and
+`kMultiClickSlop` (4 px) of the previous one. Events carry no timestamps, so
+the timing is measured on the Context's tick clock: headless tests must
+advance ticks between clicks.
 
 === "C++"
 
@@ -46,41 +63,43 @@ exactly these constructors through the real dispatch path](../images/views.png)
 
 1. **Hit-testing** — the deepest visible widget containing the pointer wins.
 2. **Bubble up** — the event dispatches up the parent chain until a widget
-   consumes it (widgets return `true` from `on_event`).
-3. **Focus** — key/text events go to the focused widget. Clicking focuses the
-   nearest focusable ancestor of the hit; <kbd>Tab</kbd> cycles focusables in
-   tree order.
-4. **Popups** — clicking outside a popup dismisses it. Popups are owned by
+   consumes it (widgets return `true` from `on_event`). Enter/Leave and
+   FocusGained/FocusLost never bubble.
+3. **Every button** — left, middle and right presses all reach widgets
+   (built-ins act on the left button only). A right press on a widget with a
+   context menu opens the menu instead; that press and its release are not
+   delivered.
+4. **Focus** — key/text events go to the focused widget; with nothing
+   focused, key events go to the hovered widget. A left click focuses the
+   nearest focusable ancestor of the hit; <kbd>Tab</kbd> /
+   <kbd>Shift</kbd>+<kbd>Tab</kbd> cycle focusables in tree order;
+   <kbd>Escape</kbd> clears focus. Tab, Escape and shortcut chords are
+   consumed by the Context. A `KeyRelease` is delivered only for a press the
+   tree received.
+5. **Popups** — clicking outside a popup dismisses it. Popups are owned by
    the context and destroyed at the end of `handle`, never during dispatch.
-5. **Mouse capture** — widgets can `ctx.capture_mouse(this)` to receive
-   every subsequent move/release (drag interactions) and must
-   `release_mouse` when done.
+6. **Mouse capture** — a widget calls `ctx->capture_mouse(this)` (Python:
+   `self.context.capture_mouse(self)`) on press to receive every following
+   move and the release, even outside its bounds, and `release_mouse` when
+   done. If the app loses focus mid-drag, the capturing widget receives
+   `FocusLost` — cancel the drag there.
 
 ## Watching events: the shipped EventProbe demo
 
 `slikui.examples.events` is a custom widget whose whole job is narrating
-every event it receives into a LogView — hover, click, drag, scroll,
-right-click context menu, focus-routed keys and text, and a manual
-double-click detector (slikui events carry no timestamps; the probe times
-press pairs against the tick clock). Its `--smoke` pass drives the whole
-vocabulary synthetically and asserts each event arrives exactly where the
-routing rules above say it should. The probe itself is plain Python:
+every event it receives into a LogView — enter/leave, press/release/click,
+double-click, a captured drag that leaves the widget, scroll, the
+right-click context menu, focus gained/lost, focus-routed keys (press and
+release) and text. Its `--smoke` pass drives the whole vocabulary
+synthetically and asserts each event arrives, in order, exactly where the
+routing rules above say it should. The probe is also the reference drag
+idiom — capture on press, release on release, cancel on `FocusLost`:
 
 --8<-- "includes/examples/eventprobe.md"
 
-Two contract facts the demo teaches the hard way:
-
-- **KeyRelease is not dispatched** today — `Context::handle` drops it
-  (presses, text and shortcuts route; releases don't), so key-up-driven
-  widgets must plan around it.
-- **No mouse capture in the Python bindings yet** (the C++ `capture_mouse`
-  above has no trampoline) — moves and releases outside a widget's bounds
-  are never delivered, so a drag ends when the pointer leaves and a lost
-  release must be handled defensively; the probe logs a warning when a
-  press arrives while it is still "dragging".
-
 Run it: `python -m slikui.examples.events` (headless screenshot) or
-`--smoke` for the scripted pass.
+`--smoke` for the scripted pass. For a one-screen summary measured on your
+installed build, run `python -m slikui.examples --contract`.
 
 ## Menus, context menus and shortcuts
 

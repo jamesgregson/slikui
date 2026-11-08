@@ -13,11 +13,20 @@ A widget implements whichever of these it needs:
 |--------|------|
 | `measure(const Constraints&)` | intrinsic size under bounds; return clamped `Size` |
 | `arrange(const Rect&)` | assign own absolute frame + children (default assigns `bounds`) |
-| `paint(const PaintEnv&)` | append draw commands to `env.list` |
+| `paint(const PaintEnv&)` | append draw commands to `env.list` (before the children) |
+| `paint_over(const PaintEnv&)` | draw on top of the children (decorations, overlays) |
 | `on_event(const Event&)` | return `true` to consume an event |
 | `tick(Time)` | animation / per-frame state |
 | `focusable()`, `expands_main()`, `stretch_cross()` | opt-in layout/focus behavior |
 | `clip_rect()` | container clipping for its subtree |
+| `attached(Context&)` | called once when the widget joins a context |
+
+Layout runs in `Context::tick` (Python `app.tick()`), not in `render`: bounds
+are zero, and `context()` is null, until the first tick after a widget is
+added. What `on_event` receives — every mouse button, synthesized
+`Click`/`DoubleClick`, `MouseEnter`/`MouseLeave`, `FocusGained`/`FocusLost`,
+`KeyRelease` — and the mouse-capture drag idiom are in
+[Input & events](input-events.md#routing-rules).
 
 Frames are absolute framebuffer coordinates; `paint_tree`, hit-testing and
 `tick_tree` all recurse through `children`, so a wrapper widget that only
@@ -82,7 +91,11 @@ gradient).
 ## Python example
 
 Subclass `slikui.Widget`, implement `measure` / `paint` / `on_event` (plus
-opt-in `tick`, `stretch_cross`, `expands_main`, `focusable`, `widget_type`):
+opt-in `tick`, `stretch_cross`, `expands_main`, `focusable`, `arrange`,
+`clip_rect`, `paint_over`, `attached`, `widget_type`). Widgets read
+`self.bounds`, `self.focused` and `self.context` (for
+`capture_mouse`/`release_mouse`/`set_focus`), and can call
+`self.request_focus()` and `self.set_cursor(...)`:
 
 ```python
 class Meter(slikui.Widget):
@@ -120,9 +133,19 @@ Python state lives in ordinary instance attributes.
 ## Rules and gotchas
 
 - Python subclasses **must call `super().__init__()`**.
-- Subclassing the *bound* C++ widget types (`Column`, `Row`, ...) is
-  rejected — build layouts from Python code instead. Only `slikui.Widget`
-  subclasses are the extension seam.
+- Subclassing the *bound* C++ widget types (`Column`, `Row`, `Slider`, ...)
+  is rejected — build layouts from Python code instead. Only
+  `slikui.Widget` subclasses are the extension seam. To decorate a built-in,
+  wrap it: delegate `measure`/`arrange` to the child and draw in
+  `paint_over` (`LimitSlider` in `slikui.examples.controls`).
+- Custom widgets draw geometry, not text: compose `Label` widgets beside
+  them.
+- **Don't keep a reference to one of a custom widget's own descendants on
+  that widget** — an attribute holding the wrapper `add()` returned, or a
+  callback stored on the widget that captures one. Child wrappers keep
+  their parents alive, so that forms a cycle Python's garbage collector
+  cannot see and the tree leaks (nanobind reports it at exit). Reach
+  descendants through `self.children` or `self.find(id)` instead.
 - Callbacks into Python must outlive the tree: `App.close()` (context manager
   exit, `atexit`) releases them; see
   [Python bindings](../reference/python-bindings.md).

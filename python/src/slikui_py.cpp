@@ -30,13 +30,22 @@
 #include <slikui/version.hpp>
 
 #include <cstdint>
+#include <cstdio>
 #include <functional>
+#include <string>
 #include <utility>
 
 namespace nb = nanobind;
 using namespace slikui;
 
 namespace {
+
+// Shortest round-trippable-enough float text for __repr__ ("12", "0.25").
+std::string fmt_float(float v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%g", double(v));
+    return buf;
+}
 
 // Bind one C++ setter `W& W::f(V)` under `name`, returning the same wrapper.
 template <typename W, typename... Bs, typename V>
@@ -308,6 +317,24 @@ struct PyWidget : slikui::Widget {
 
     void paint(const PaintEnv& env) const override { NB_OVERRIDE(paint, env); }
 
+    void paint_over(const PaintEnv& env) const override { NB_OVERRIDE(paint_over, env); }
+
+    // Protected in C++; the bound names below forward to these.
+    std::optional<Rect> clip_rect() const override { NB_OVERRIDE(clip_rect); }
+    // Manual dispatch: NB_OVERRIDE would try to COPY the (non-copyable)
+    // Context into the call; pass it by reference instead.
+    void attached(Context& c) override {
+        constexpr std::uint64_t nb_hash = nb::detail::str_hash("attached");
+        nb::detail::ticket t(nb_trampoline, "attached", nb_hash, false);
+        if (t.key.is_valid()) {
+            nb_trampoline.base().attr(t.key)(nb::cast(&c, nb::rv_policy::reference));
+            return;
+        }
+        slikui::Widget::attached(c);
+    }
+    std::optional<Rect> base_clip_rect() const { return slikui::Widget::clip_rect(); }
+    void base_attached(Context& c) { slikui::Widget::attached(c); }
+
     bool on_event(const Event& e) override { NB_OVERRIDE(on_event, e); }
 
     void tick(Time t) override { NB_OVERRIDE(tick, t); }
@@ -380,7 +407,10 @@ NB_MODULE(_slikui, m) {
         .def_rw("x", &Vec2::x)
         .def_rw("y", &Vec2::y)
         .def("__eq__", [](const Vec2& a, const Vec2& b) { return a == b; },
-             nb::arg("other"), nb::is_operator());
+             nb::arg("other"), nb::is_operator())
+        .def("__repr__", [](const Vec2& v) {
+            return "Vec2(" + fmt_float(v.x) + ", " + fmt_float(v.y) + ")";
+        });
 
     nb::class_<Color>(m, "Color")
         .def(nb::init<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t>(),
@@ -481,14 +511,21 @@ NB_MODULE(_slikui, m) {
         .def("bottom", &Rect::bottom)
         .def("center", &Rect::center)
         .def("__eq__", [](const Rect& a, const Rect& b) { return a == b; },
-             nb::arg("other"), nb::is_operator());
+             nb::arg("other"), nb::is_operator())
+        .def("__repr__", [](const Rect& r) {
+            return "Rect(" + fmt_float(r.x) + ", " + fmt_float(r.y) + ", " +
+                   fmt_float(r.w) + ", " + fmt_float(r.h) + ")";
+        });
 
     nb::class_<Size>(m, "Size")
         .def(nb::init<float, float>(), nb::arg("w") = 0.f, nb::arg("h") = 0.f)
         .def_rw("w", &Size::w)
         .def_rw("h", &Size::h)
         .def("__eq__", [](const Size& a, const Size& b) { return a == b; },
-             nb::arg("other"), nb::is_operator());
+             nb::arg("other"), nb::is_operator())
+        .def("__repr__", [](const Size& z) {
+            return "Size(" + fmt_float(z.w) + ", " + fmt_float(z.h) + ")";
+        });
 
     nb::class_<Constraints>(m, "Constraints")
         .def(nb::init<>())
@@ -567,7 +604,17 @@ NB_MODULE(_slikui, m) {
         .value("W", Key::W)
         .value("X", Key::X)
         .value("Y", Key::Y)
-        .value("Z", Key::Z);
+        .value("Z", Key::Z)
+        .value("Num0", Key::Num0)
+        .value("Num1", Key::Num1)
+        .value("Num2", Key::Num2)
+        .value("Num3", Key::Num3)
+        .value("Num4", Key::Num4)
+        .value("Num5", Key::Num5)
+        .value("Num6", Key::Num6)
+        .value("Num7", Key::Num7)
+        .value("Num8", Key::Num8)
+        .value("Num9", Key::Num9);
 
     nb::enum_<Mod>(m, "Mod", nb::is_arithmetic())
         .value("ModNone", ModNone)
@@ -581,7 +628,11 @@ NB_MODULE(_slikui, m) {
         .value("MouseMiddle", MouseMiddle)
         .value("MouseRight", MouseRight);
 
-    nb::enum_<Event::Type>(m, "EventType")
+    nb::enum_<Event::Type>(m, "EventType", nb::is_arithmetic(),
+                           "Event kinds. Context-synthesized (never sent by hosts): "
+                           "Click, DoubleClick, MouseEnter, MouseLeave, FocusGained; "
+                           "FocusLost is both host→Context (app lost focus) and "
+                           "Context→widget (this widget lost focus).")
         .value("MouseMove", Event::Type::MouseMove)
         .value("MousePress", Event::Type::MousePress)
         .value("MouseRelease", Event::Type::MouseRelease)
@@ -590,7 +641,12 @@ NB_MODULE(_slikui, m) {
         .value("KeyRelease", Event::Type::KeyRelease)
         .value("TextInput", Event::Type::TextInput)
         .value("FocusLost", Event::Type::FocusLost)
-        .value("FrameResize", Event::Type::FrameResize);
+        .value("FrameResize", Event::Type::FrameResize)
+        .value("Click", Event::Type::Click)
+        .value("DoubleClick", Event::Type::DoubleClick)
+        .value("MouseEnter", Event::Type::MouseEnter)
+        .value("MouseLeave", Event::Type::MouseLeave)
+        .value("FocusGained", Event::Type::FocusGained);
 
     nb::class_<Event>(m, "Event")
         .def("__init__",
@@ -604,9 +660,55 @@ NB_MODULE(_slikui, m) {
         .def_rw("key", &Event::key)
         .def_rw("codepoint", &Event::codepoint)
         .def_rw("mods", &Event::mods)
+        .def_rw("clicks", &Event::clicks,
+                "Consecutive-click count on MousePress/MouseRelease/Click "
+                "(1, 2, 3...); 0 on other events.")
+        .def_rw("repeat", &Event::repeat, "KeyPress generated by key auto-repeat.")
         .def_prop_ro("shift", &Event::shift)
         .def_prop_ro("ctrl", &Event::ctrl)
-        .def_prop_ro("alt", &Event::alt);
+        .def_prop_ro("alt", &Event::alt)
+        .def_prop_ro("super", &Event::super)
+        .def_prop_ro("shortcut_mod", &Event::shortcut_mod,
+                     "Ctrl, or Cmd on macOS: the copy/paste chord modifier.")
+        .def("__repr__", [](const Event& e) {
+            using T = Event::Type;
+            auto enum_name = [](auto v) {
+                return std::string(nb::str(nb::cast(v).attr("name")).c_str());
+            };
+            std::string out = "Event(" + enum_name(e.type);
+            auto pos = [&] { out += " pos=(" + fmt_float(e.pos.x) + ", " + fmt_float(e.pos.y) + ")"; };
+            switch (e.type) {
+            case T::MouseMove:
+                pos();
+                out += " delta=(" + fmt_float(e.delta.x) + ", " + fmt_float(e.delta.y) + ")";
+                break;
+            case T::MousePress: case T::MouseRelease: case T::Click: case T::DoubleClick:
+                pos();
+                out += " button=" + std::to_string(e.button) + " clicks=" + std::to_string(e.clicks);
+                break;
+            case T::Scroll:
+                pos();
+                out += " scroll=(" + fmt_float(e.scroll.x) + ", " + fmt_float(e.scroll.y) + ")";
+                break;
+            case T::KeyPress: case T::KeyRelease:
+                out += " key=" + enum_name(e.key);
+                if (e.repeat) out += " repeat";
+                break;
+            case T::TextInput:
+                out += " codepoint=" + std::to_string(e.codepoint);
+                break;
+            case T::MouseEnter: case T::MouseLeave:
+                pos();
+                break;
+            default:
+                break;
+            }
+            if (e.mods) out += " mods=" + std::to_string(e.mods);
+            return out + ")";
+        });
+    // Multi-click thresholds (Event.clicks): seconds on the tick clock, px.
+    m.attr("Event").attr("MULTI_CLICK_TIME") = Event::kMultiClickTime;
+    m.attr("Event").attr("MULTI_CLICK_SLOP") = Event::kMultiClickSlop;
 
     // ------------------------------------------------------------------ //
     // Render contract: TexUpload, DrawCmd, DrawList, and the RenderSink
@@ -787,6 +889,21 @@ NB_MODULE(_slikui, m) {
              },
              nb::arg("id"), nb::rv_policy::reference)
         .def("handle", &Context::handle, nb::arg("event"))
+        .def("set_focus", [](Context& c, Widget* w) { c.set_focus(w); },
+             nb::arg("widget").none(),
+             "Move keyboard focus (None clears it); notifies both widgets.")
+        .def_prop_ro("focused", [](Context& c) { return c.focused(); },
+                     nb::rv_policy::reference)
+        .def_prop_ro("hovered", [](Context& c) { return c.hovered(); },
+                     nb::rv_policy::reference)
+        .def_prop_ro("root", [](Context& c) { return c.root(); },
+                     nb::rv_policy::reference, "The root widget (None before set_root).")
+        .def("capture_mouse", [](Context& c, Widget& w) { c.capture_mouse(&w); },
+             nb::arg("widget"),
+             "Route every mouse event to `widget` until release_mouse — call "
+             "on MousePress so a drag survives the pointer leaving it.")
+        .def("release_mouse", [](Context& c, Widget& w) { c.release_mouse(&w); },
+             nb::arg("widget"))
         .def("add_shortcut",
              [](Context& c, Key key, unsigned mods, std::function<void()> action) -> Context& {
                  return c.add_shortcut(key, mods, std::move(action));
@@ -887,7 +1004,10 @@ NB_MODULE(_slikui, m) {
         // the MRO; unbound names would raise "lookup failed" on dispatch).
         .def("measure",
              [](Widget& w, const Constraints& c) { return w.measure(c); },
-             nb::arg("constraints"))
+             nb::arg("constraints"),
+             "Override: intrinsic size under `constraints`; return "
+             "constraints.clamp(Size(w, h)). Layout runs in Context.tick(), "
+             "not render() — bounds are zero until the first tick.")
         .def("arrange",
              [](Widget& w, const Rect& area) { w.arrange(area); },
              nb::arg("area"),
@@ -895,11 +1015,46 @@ NB_MODULE(_slikui, m) {
              "child after assigning their own bounds).")
         .def("paint",
              [](Widget& w, const PaintEnv& e) { w.paint(e); },
-             nb::arg("env"))
+             nb::arg("env"),
+             "Override: append draw commands to env.list (rect, hollow_rect, "
+             "line, circle, image, push_clip/pop_clip) using env.theme colors, "
+             "in absolute coordinates (self.bounds). Painted BEFORE children; "
+             "see paint_over for drawing on top of them.")
+        .def("paint_over",
+             [](Widget& w, const PaintEnv& e) { w.paint_over(e); },
+             nb::arg("env"),
+             "Override: drawn AFTER (on top of) the children, outside this "
+             "widget's clip_rect — decorations over wrapped widgets.")
+        .def("clip_rect",
+             [](Widget& w) {
+                 auto* pw = dynamic_cast<PyWidget*>(&w);
+                 return pw ? pw->base_clip_rect() : std::optional<Rect>{};
+             },
+             "Override: Rect to clip the children to while painting, or None.")
+        .def("attached",
+             [](Widget& w, Context& c) {
+                 if (auto* pw = dynamic_cast<PyWidget*>(&w)) pw->base_attached(c);
+             },
+             nb::arg("context"),
+             "Override: called once when the widget joins a Context (on the "
+             "first tick after it was added).")
         .def("on_event",
              [](Widget& w, const Event& e) { return w.on_event(e); },
-             nb::arg("event"))
-        .def("tick", [](Widget& w, Time t) { w.tick(t); }, nb::arg("time"))
+             nb::arg("event"),
+             "Override: return True to consume. Mouse events (MouseMove, "
+             "MousePress, MouseRelease, Click, DoubleClick, Scroll) reach the "
+             "widget under the pointer — or the mouse-capture widget — and "
+             "bubble to ancestors until consumed; every button is delivered "
+             "(check event.button). Key events go to the focused widget "
+             "(falling back to the hovered one) and bubble; KeyRelease only "
+             "follows a KeyPress the widget tree received. TextInput needs "
+             "focus (focusable() -> True). MouseEnter/MouseLeave and "
+             "FocusGained/FocusLost go to the affected widget only. Use "
+             "context.capture_mouse(self) on press so a drag keeps receiving "
+             "moves and the release outside your bounds.")
+        .def("tick", [](Widget& w, Time t) { w.tick(t); }, nb::arg("time"),
+             "Override: per-frame update; time.now / time.dt in seconds. "
+             "Use this clock, not wall time, for animation.")
         .def("stretch_cross", [](Widget& w) { return w.stretch_cross(); })
         .def("expands_main", [](Widget& w) { return w.expands_main(); })
         .def("focusable", [](Widget& w) { return w.focusable(); })
@@ -908,6 +1063,25 @@ NB_MODULE(_slikui, m) {
         .def_rw("id", &Widget::id)
         .def_rw("visible", &Widget::visible)
         .def_rw("enabled", &Widget::enabled)
+        .def_prop_ro("focused", [](Widget& w) { return w.focused; },
+                     "True while this widget holds keyboard focus.")
+        .def_prop_ro("context", [](Widget& w) { return w.context(); },
+                     nb::rv_policy::reference,
+                     "The Context this widget is attached to (None until the "
+                     "first tick after it joined a tree).")
+        .def("request_focus",
+             [](Widget& w) {
+                 if (!w.context())
+                     throw nb::value_error(
+                         "request_focus(): widget is not attached to a Context "
+                         "yet (call after the first tick)");
+                 w.context()->set_focus(&w);
+             },
+             "Give this widget keyboard focus (it receives FocusGained).")
+        .def("set_cursor",
+             [](Widget& w, Cursor c) -> Widget& { return w.set_cursor(c); },
+             nb::arg("cursor"), nb::rv_policy::reference,
+             "Cursor shape requested while hovered (needs a cursor host).")
         .def_prop_ro("type", [](Widget& w) { return std::string(w.widget_type()); })
         .def_prop_ro("tooltip", [](Widget& w) { return w.tooltip(); })
         .def_prop_rw("bounds",
@@ -997,10 +1171,12 @@ NB_MODULE(_slikui, m) {
     def_setter(label, "set_font_size", &Label::set_font_size);
     def_setter(label, "set_color", &Label::set_color);
     def_setter(label, "set_wrap_width", &Label::set_wrap_width);
+    label.def_prop_ro("text", [](Label& l) { return l.text(); });
 
     auto button = nb::class_<Button, Widget>(m, "Button");
     def_setter(button, "set_text", &Button::set_text);
     def_setter(button, "set_variant", &Button::set_variant);
+    button.def_prop_ro("text", [](Button& b) { return b.text(); });
     button.def("set_padding",
                [](Button& b, float h, float v) -> Button& { return b.set_padding(h, v); },
                nb::arg("h"), nb::arg("v"), nb::rv_policy::reference)

@@ -80,7 +80,7 @@ public:
                         max_scroll_);
                 return true;
             }
-            if (e.type == T::MouseRelease) {
+            if (e.type == T::MouseRelease && e.button == MouseLeft) {
                 drag_bar_ = false;
                 ctx->release_mouse(this);
                 return true;
@@ -186,7 +186,7 @@ public:
             hovered_ = row_at(e.pos.y);
             return false;
         }
-        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
             long idx = row_at(e.pos.y);
             if (idx >= 0) {
                 selected_ = idx;
@@ -291,7 +291,7 @@ public:
             hovered_ = tab_at(e.pos.x);
             return false;
         }
-        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
             size_t idx = tab_at(e.pos.x);
             if (idx != size_t(-1) && idx != selected_) {
                 selected_ = idx;
@@ -395,7 +395,7 @@ public:
     }
 
     bool on_event(const Event& e) override {
-        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
             open_popup();
             return true;
         }

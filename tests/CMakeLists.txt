@@ -9,7 +9,8 @@ add_executable(slikui_tests
   test_shells.cpp
   test_theme.cpp
   test_font.cpp
-  test_golden.cpp)
+  test_golden.cpp
+  test_input.cpp)
 target_link_libraries(slikui_tests PRIVATE slikui)
 
 add_test(NAME slikui_tests COMMAND slikui_tests)
