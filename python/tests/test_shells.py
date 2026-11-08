@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import slikui
 
@@ -88,8 +89,9 @@ def test_dialog_drag_moves():
     move(ui, (ref.bounds.x + 50, ref.bounds.y + 32))
     release(ui, (ref.bounds.x + 50, ref.bounds.y + 32))
     ui.tick(1 / 60, 1 / 60)
-    assert ref.bounds.x == x0 + 40
-    assert ref.bounds.y == y0 + 20
+    # Rect is float32; compare with tolerance (non-integer dialog origins round).
+    assert ref.bounds.x == pytest.approx(x0 + 40, abs=1e-3)
+    assert ref.bounds.y == pytest.approx(y0 + 20, abs=1e-3)
 
 
 def test_modal_dialog_traps_presses():
