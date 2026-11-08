@@ -55,6 +55,14 @@ public:
               0, thickness, false, c, 0, {}});
     }
 
+    // n-point connected line strip (butt joints; degenerate segments skipped).
+    void polyline(const Vec2* pts, size_t n, Color c, float thickness = 1) {
+        for (size_t i = 1; i < n; ++i) {
+            if (pts[i - 1].x == pts[i].x && pts[i - 1].y == pts[i].y) continue;
+            line(pts[i - 1], pts[i], c, thickness);
+        }
+    }
+
     void circle(Vec2 center, float radius, Color c) {
         if (radius <= 0) return;
         push({DrawCmd::Type::Rect, {center.x - radius, center.y - radius, radius * 2, radius * 2},

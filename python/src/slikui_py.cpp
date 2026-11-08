@@ -18,6 +18,7 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/trampoline.h>
 #include <nanobind/stl/function.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/vector.h>
@@ -42,6 +43,26 @@ template <typename W, typename... Bs, typename V>
 void def_setter(nb::class_<W, Bs...>& cls, const char* name, W& (W::*f)(V)) {
     cls.def(name, [f](W& w, V v) -> W& { return (w.*f)(std::move(v)); },
             nb::rv_policy::reference, nb::arg("value"));
+}
+
+// Vec2Edit/Vec3Edit/Vec4Edit share one API; bind it once per instantiation.
+template <size_t N>
+void bind_vec_edit(nb::class_<slikui::VecNEdit<N>, slikui::Widget>& cls) {
+    using Vec = slikui::VecNEdit<N>;
+    def_setter(cls, "set_labels", &Vec::set_labels);
+    def_setter(cls, "on_change", &Vec::on_change);
+    cls.def("set_range",
+            [](Vec& v, float min, float max) -> Vec& { return v.set_range(min, max); },
+            nb::arg("min"), nb::arg("max"), nb::rv_policy::reference)
+        .def("set_axis_range",
+             [](Vec& v, size_t axis, float min, float max) -> Vec& {
+                 return v.set_axis_range(axis, min, max);
+             },
+             nb::arg("axis"), nb::arg("min"), nb::arg("max"), nb::rv_policy::reference)
+        .def("set_int_mode", [](Vec& v, bool on) -> Vec& { return v.set_int_mode(on); },
+             nb::arg("on"), nb::rv_policy::reference)
+        .def("set_step", [](Vec& v, float step) -> Vec& { return v.set_step(step); },
+             nb::arg("step"), nb::rv_policy::reference);
 }
 
 // Swatch — a small clickable color chip that highlights when its
@@ -153,6 +174,75 @@ void bind_add(nb::class_<Host, Bs...>& cls) {
              },
              nb::arg("min") = 0.f, nb::arg("max") = 1.f,
              nb::rv_policy::reference_internal)
+        .def("add_dragvalue",
+             [](Host& h, float value) -> DragValue& {
+                 return h.template add<DragValue>(value);
+             },
+             nb::arg("value") = 0.f, nb::rv_policy::reference_internal)
+        .def("add_vec2edit",
+             [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec2Edit& {
+                 if (values.shape(0) != 2)
+                     throw nb::value_error("Vec2Edit needs a float32 array of length 2");
+                 return h.template add<Vec2Edit>(values.data());
+             },
+             nb::arg("values"), nb::rv_policy::reference_internal)
+        .def("add_vec3edit",
+             [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec3Edit& {
+                 if (values.shape(0) != 3)
+                     throw nb::value_error("Vec3Edit needs a float32 array of length 3");
+                 return h.template add<Vec3Edit>(values.data());
+             },
+             nb::arg("values"), nb::rv_policy::reference_internal)
+        .def("add_vec4edit",
+             [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec4Edit& {
+                 if (values.shape(0) != 4)
+                     throw nb::value_error("Vec4Edit needs a float32 array of length 4");
+                 return h.template add<Vec4Edit>(values.data());
+             },
+             nb::arg("values"), nb::rv_policy::reference_internal)
+        .def("add_plot", [](Host& h) -> Plot& { return h.template add<Plot>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_vec2pad", [](Host& h) -> Vec2Pad& { return h.template add<Vec2Pad>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_treeview", [](Host& h) -> TreeView& { return h.template add<TreeView>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_table", [](Host& h) -> Table& { return h.template add<Table>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_propertygrid",
+             [](Host& h) -> PropertyGrid& { return h.template add<PropertyGrid>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_iconbutton",
+             [](Host& h, Icon icon) -> IconButton& {
+                 return h.template add<IconButton>(icon);
+             },
+             nb::arg("icon"), nb::rv_policy::reference_internal)
+        .def("add_toolbar", [](Host& h) -> Toolbar& { return h.template add<Toolbar>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_menubar", [](Host& h) -> MenuBar& { return h.template add<MenuBar>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_coloredit",
+             [](Host& h, Color color) -> ColorEdit& {
+                 return h.template add<ColorEdit>(color);
+             },
+             nb::arg("color") = Color::white(), nb::rv_policy::reference_internal)
+        .def("add_segmented", [](Host& h) -> Segmented& { return h.template add<Segmented>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_groupbox",
+             [](Host& h, std::string title) -> GroupBox& {
+                 return h.template add<GroupBox>(std::move(title));
+             },
+             nb::arg("title"), nb::rv_policy::reference_internal)
+        .def("add_searchbox", [](Host& h) -> SearchBox& { return h.template add<SearchBox>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_statusbar", [](Host& h) -> StatusBar& { return h.template add<StatusBar>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_logview", [](Host& h) -> LogView& { return h.template add<LogView>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_imageview", [](Host& h) -> ImageView& { return h.template add<ImageView>(); },
+             nb::rv_policy::reference_internal)
+        .def("add_compareview",
+             [](Host& h) -> CompareView& { return h.template add<CompareView>(); },
+             nb::rv_policy::reference_internal)
         .def("add_progressbar",
              [](Host& h) -> ProgressBar& { return h.template add<ProgressBar>(); },
              nb::rv_policy::reference_internal)
@@ -179,7 +269,12 @@ void bind_add(nb::class_<Host, Bs...>& cls) {
              [](Host& h, std::string name) -> Image& {
                  return h.template add<Image>(std::move(name));
              },
-             nb::arg("name"), nb::rv_policy::reference_internal);
+             nb::arg("name"), nb::rv_policy::reference_internal)
+        .def("add_splitter",
+             [](Host& h, bool vertical) -> Splitter& {
+                 return h.template add<Splitter>(vertical);
+             },
+             nb::arg("vertical") = false, nb::rv_policy::reference_internal);
 }
 
 // PyRenderSink — trampoline so Python classes can implement the
@@ -209,6 +304,8 @@ struct PyWidget : slikui::Widget {
 
     Size measure(const Constraints& c) override { NB_OVERRIDE(measure, c); }
 
+    void arrange(const Rect& area) override { NB_OVERRIDE(arrange, area); }
+
     void paint(const PaintEnv& env) const override { NB_OVERRIDE(paint, env); }
 
     bool on_event(const Event& e) override { NB_OVERRIDE(on_event, e); }
@@ -236,8 +333,24 @@ struct PyWidget : slikui::Widget {
 
     // NOT dispatched to Python: this is the destruction protocol. Dropping
     // the anchor may deallocate `this` re-entrantly — touch nothing after.
+    //
+    // The subtree is destroyed eagerly, before the anchor drops. Dropping the
+    // anchor alone does not guarantee ~PyWidget runs: Python may still hold
+    // the wrapper — and the subtree itself can be what holds it. Callbacks
+    // inside the subtree capture child wrappers, whose reference_internal
+    // keep_alive edges climb back up to this wrapper: a cycle through C++
+    // ownership the GC cannot see, so the whole subtree would leak (found
+    // via examples/showcase.py: a Fill container hosting every page). The
+    // tree is tearing this widget down, so its children go now, whatever
+    // Python does with the detached wrapper afterwards. The anchor still
+    // pins `this` while they die; moving them out first keeps `children`
+    // consistent if their teardown re-enters Python.
     void release() noexcept override {
         nb::gil_scoped_acquire gil;
+        {
+            auto doomed = std::move(children);
+            children.clear();
+        } // children destroyed here (nested PyWidgets release recursively)
         anchor.reset();
     }
 
@@ -283,6 +396,18 @@ NB_MODULE(_slikui, m) {
         .def("faded", &Color::faded, nb::arg("f"))
         .def("lerp", &Color::lerp, nb::arg("other"), nb::arg("t"))
         .def("to_abgr", &Color::to_abgr)
+        .def("to_hsv",
+             [](const Color& c) {
+                 auto hsv = c.to_hsv();
+                 return nb::make_tuple(hsv[0], hsv[1], hsv[2]);
+             },
+             "(h, s, v) in [0,1]; h=0 for achromatic colors.")
+        .def_static("from_hsv",
+                    [](float h, float s, float v, std::uint8_t alpha) {
+                        return Color::from_hsv(h, s, v, alpha);
+                    },
+                    nb::arg("h"), nb::arg("s"), nb::arg("v"), nb::arg("alpha") = 255,
+                    "h wraps; s/v clamp to [0,1].")
         .def_static("black", &Color::black)
         .def_static("white", &Color::white)
         .def("__eq__", [](const Color& a, const Color& b) { return a == b; },
@@ -294,6 +419,49 @@ NB_MODULE(_slikui, m) {
              nb::arg("now") = 0.0, nb::arg("dt") = 0.0)
         .def_rw("now", &Time::now)
         .def_rw("dt", &Time::dt);
+
+    nb::enum_<Cursor>(m, "Cursor")
+        .value("Arrow", Cursor::Arrow)
+        .value("IBeam", Cursor::IBeam)
+        .value("Hand", Cursor::Hand)
+        .value("Grab", Cursor::Grab)
+        .value("Crosshair", Cursor::Crosshair)
+        .value("ResizeH", Cursor::ResizeH)
+        .value("ResizeV", Cursor::ResizeV);
+
+    nb::enum_<PopupDir>(m, "PopupDir")
+        .value("Below", PopupDir::Below)
+        .value("Above", PopupDir::Above)
+        .value("Right", PopupDir::Right)
+        .value("Left", PopupDir::Left);
+
+    nb::enum_<Icon>(m, "Icon")
+        .value("Play", Icon::Play)
+        .value("Pause", Icon::Pause)
+        .value("Stop", Icon::Stop)
+        .value("Record", Icon::Record)
+        .value("StepForward", Icon::StepForward)
+        .value("StepBack", Icon::StepBack)
+        .value("Grid", Icon::Grid)
+        .value("Camera", Icon::Camera)
+        .value("Save", Icon::Save)
+        .value("Folder", Icon::Folder)
+        .value("Refresh", Icon::Refresh)
+        .value("Plus", Icon::Plus)
+        .value("Minus", Icon::Minus)
+        .value("Close", Icon::Close)
+        .value("Check", Icon::Check)
+        .value("ChevronLeft", Icon::ChevronLeft)
+        .value("ChevronRight", Icon::ChevronRight)
+        .value("ChevronUp", Icon::ChevronUp)
+        .value("ChevronDown", Icon::ChevronDown)
+        .value("Eye", Icon::Eye)
+        .value("Gear", Icon::Gear)
+        .value("Search", Icon::Search)
+        .value("Trash", Icon::Trash)
+        .value("Copy", Icon::Copy)
+        .value("Lock", Icon::Lock)
+        .value("Sun", Icon::Sun);
 
     nb::enum_<CrossMode>(m, "CrossMode")
         .value("Stretch", CrossMode::Stretch)
@@ -309,6 +477,9 @@ NB_MODULE(_slikui, m) {
         .def_rw("h", &Rect::h)
         .def("contains", &Rect::contains, nb::arg("p"))
         .def("inflate", &Rect::inflate, nb::arg("dx"), nb::arg("dy"))
+        .def("right", &Rect::right)
+        .def("bottom", &Rect::bottom)
+        .def("center", &Rect::center)
         .def("__eq__", [](const Rect& a, const Rect& b) { return a == b; },
              nb::arg("other"), nb::is_operator());
 
@@ -370,7 +541,33 @@ NB_MODULE(_slikui, m) {
         .value("F9", Key::F9)
         .value("F10", Key::F10)
         .value("F11", Key::F11)
-        .value("F12", Key::F12);
+        .value("F12", Key::F12)
+        .value("A", Key::A)
+        .value("B", Key::B)
+        .value("C", Key::C)
+        .value("D", Key::D)
+        .value("E", Key::E)
+        .value("F", Key::F)
+        .value("G", Key::G)
+        .value("H", Key::H)
+        .value("I", Key::I)
+        .value("J", Key::J)
+        .value("K", Key::K)
+        .value("L", Key::L)
+        .value("M", Key::M)
+        .value("N", Key::N)
+        .value("O", Key::O)
+        .value("P", Key::P)
+        .value("Q", Key::Q)
+        .value("R", Key::R)
+        .value("S", Key::S)
+        .value("T", Key::T)
+        .value("U", Key::U)
+        .value("V", Key::V)
+        .value("W", Key::W)
+        .value("X", Key::X)
+        .value("Y", Key::Y)
+        .value("Z", Key::Z);
 
     nb::enum_<Mod>(m, "Mod", nb::is_arithmetic())
         .value("ModNone", ModNone)
@@ -590,6 +787,45 @@ NB_MODULE(_slikui, m) {
              },
              nb::arg("id"), nb::rv_policy::reference)
         .def("handle", &Context::handle, nb::arg("event"))
+        .def("add_shortcut",
+             [](Context& c, Key key, unsigned mods, std::function<void()> action) -> Context& {
+                 return c.add_shortcut(key, mods, std::move(action));
+             },
+             nb::arg("key"), nb::arg("mods"), nb::arg("action"), nb::rv_policy::reference,
+             "Global accelerator: fires on key+mods (needs a modifier) before "
+             "widget dispatch.")
+        .def("clear_shortcuts", &Context::clear_shortcuts)
+        .def("push_popup",
+             [](Context& c, Widget& w, Vec2 pos) -> Widget& {
+                 return c.push_popup(w, pos);
+             },
+             nb::arg("widget"), nb::arg("pos"), nb::rv_policy::reference_internal,
+             "Borrowed popup at a screen position; keep the widget alive.")
+        .def("push_popup",
+             [](Context& c, Widget& w, Widget& anchor, PopupDir dir) -> Widget& {
+                 return c.push_popup(w, anchor, dir);
+             },
+             nb::arg("widget"), nb::arg("anchor"), nb::arg("dir"),
+             nb::rv_policy::reference_internal,
+             "Borrowed popup anchored beside a widget (flips + clamps).")
+        .def("open_context_menu",
+             [](Context& c, Menu& m, Vec2 pos) -> Widget& {
+                 return c.open_context_menu(m, pos);
+             },
+             nb::arg("menu"), nb::arg("pos"), nb::rv_policy::reference_internal,
+             "Open a Menu as a floating popup at pos (the right-click path "
+             "does this for widgets with set_context_menu).")
+        .def("set_clipboard_source",
+             [](Context& c, std::function<std::string()> f) -> Context& {
+                 return c.set_clipboard_source(std::move(f));
+             },
+             nb::arg("source"), nb::rv_policy::reference,
+             "Host clipboard read callback; absent = clipboard ops are no-ops.")
+        .def("set_clipboard_sink",
+             [](Context& c, std::function<void(std::string)> f) -> Context& {
+                 return c.set_clipboard_sink(std::move(f));
+             },
+             nb::arg("sink"), nb::rv_policy::reference)
         .def("close_popups", &Context::close_popups)
         .def("clear_tree", &Context::clear_tree)
         .def_prop_ro("has_popups", &Context::has_popups)
@@ -598,7 +834,47 @@ NB_MODULE(_slikui, m) {
              [](Context& c, std::size_t i) -> Widget* {
                  return i < c.popup_count() ? c.popup(i) : nullptr;
              },
-             nb::arg("index"), nb::rv_policy::reference);
+             nb::arg("index"), nb::rv_policy::reference)
+        .def("set_cursor_host",
+             [](Context& c, nb::object fn) -> Context& {
+                 c.set_cursor_host([fn](Cursor cur) {
+                     nb::gil_scoped_acquire gil; // GLFW pumps events w/o GIL
+                     fn(cur);
+                 });
+                 return c;
+             },
+             nb::arg("host"), nb::rv_policy::reference,
+             "Host callback receiving a Cursor whenever the hovered widget "
+             "requests a shape (GLFW attach sets the real cursor in C++).")
+        .def("open_dialog",
+             [](Context& c, Dialog& d) -> Dialog& {
+                 return static_cast<Dialog&>(c.open_dialog(d));
+             },
+             nb::arg("dialog"), nb::rv_policy::reference_internal,
+             "Put a Dialog on the floating shell layer (borrowed: keep the "
+             "Python object alive). Modal dialogs dim the app and trap "
+             "outside presses. Default position is centered.")
+        .def("close_dialog",
+             [](Context& c, Dialog& d) { c.close_dialog(d); }, nb::arg("dialog"))
+        .def_prop_ro("dialog_count", &Context::dialog_count)
+        .def("dialog",
+             [](Context& c, std::size_t i) -> Widget* {
+                 return i < c.dialog_count() ? c.dialog(i) : nullptr;
+             },
+             nb::arg("index"), nb::rv_policy::reference)
+        .def("push_toast",
+             [](Context& c, std::string text, double seconds,
+                std::optional<Icon> icon) -> Toast& {
+                 auto t = std::make_unique<Toast>(std::move(text));
+                 Toast* raw = t.get();
+                 if (icon) raw->set_icon(*icon);
+                 c.push_toast(std::move(t), seconds);
+                 return *raw;
+             },
+             nb::arg("text"), nb::arg("seconds") = 3.0,
+             nb::arg("icon") = nb::none(), nb::rv_policy::reference,
+             "Transient corner notice, owned by the context; auto-dismisses "
+             "after `seconds` (measured from the last tick's time).");
 
     // ------------------------------------------------------------------ //
     // Widgets
@@ -612,6 +888,11 @@ NB_MODULE(_slikui, m) {
         .def("measure",
              [](Widget& w, const Constraints& c) { return w.measure(c); },
              nb::arg("constraints"))
+        .def("arrange",
+             [](Widget& w, const Rect& area) { w.arrange(area); },
+             nb::arg("area"),
+             "Runs the C++ arrange (custom containers call this on their "
+             "child after assigning their own bounds).")
         .def("paint",
              [](Widget& w, const PaintEnv& e) { w.paint(e); },
              nb::arg("env"))
@@ -629,7 +910,12 @@ NB_MODULE(_slikui, m) {
         .def_rw("enabled", &Widget::enabled)
         .def_prop_ro("type", [](Widget& w) { return std::string(w.widget_type()); })
         .def_prop_ro("tooltip", [](Widget& w) { return w.tooltip(); })
-        .def_prop_ro("bounds", [](Widget& w) { return w.bounds; })
+        .def_prop_rw("bounds",
+                     [](Widget& w) { return w.bounds; },
+                     [](Widget& w, Rect area) { w.bounds = area; },
+                     "Readable always; writable for custom widgets that "
+                     "implement arrange() (the C++ side assigns bounds via "
+                     "Widget::arrange, which Python overrides).")
         .def_prop_ro("children",
                      [](Widget& w) {
                          nb::list out;
@@ -640,6 +926,11 @@ NB_MODULE(_slikui, m) {
         .def("find",
              [](Widget& w, const std::string& widget_id) -> Widget* { return w.find(widget_id); },
              nb::arg("id"), nb::rv_policy::reference)
+        .def("set_context_menu",
+             [](Widget& w, Menu& m) -> Widget& { return w.set_context_menu(&m); },
+             nb::arg("menu"), nb::rv_policy::reference,
+             "Right-click target for this widget and its subtree. Borrowed: "
+             "keep the Menu alive on the Python side.")
         .def("set_tooltip",
              [](Widget& w, std::string t) -> Widget& { return w.set_tooltip(std::move(t)); },
              nb::arg("text"), nb::rv_policy::reference)
@@ -679,6 +970,7 @@ NB_MODULE(_slikui, m) {
     (void)column_cls; (void)row_cls; (void)spacer_cls;
 
     auto panel_cls = nb::class_<Panel, Container>(m, "Panel");
+    panel_cls.def(nb::init<>()); // standalone popups (Menus, anchored panels)
     def_setter(panel_cls, "set_background", &Panel::set_background);
     def_setter(panel_cls, "set_border", &Panel::set_border);
     def_setter(panel_cls, "set_radius", &Panel::set_radius);
@@ -750,6 +1042,10 @@ NB_MODULE(_slikui, m) {
 
     auto slider = nb::class_<Slider, Widget>(m, "Slider");
     def_setter(slider, "on_change", &Slider::on_change);
+    def_setter(slider, "set_label", &Slider::set_label);
+    def_setter(slider, "set_format", &Slider::set_format);
+    def_setter(slider, "set_log_scale", &Slider::set_log_scale);
+    def_setter(slider, "set_step", &Slider::set_step);
     slider.def("set_range",
                [](Slider& s, float min, float max) -> Slider& {
                    return s.set_range(min, max);
@@ -760,10 +1056,311 @@ NB_MODULE(_slikui, m) {
                     return s.set_value(v, fire);
                 },
                 nb::arg("value"), nb::arg("fire_callback") = true,
-                nb::rv_policy::reference);
+                nb::rv_policy::reference)
+           .def_prop_ro("value", &Slider::value);
 
     auto progress = nb::class_<ProgressBar, Widget>(m, "ProgressBar");
     def_setter(progress, "set_value", &ProgressBar::set_value);
+
+    auto dragvalue = nb::class_<DragValue, Widget>(m, "DragValue");
+    def_setter(dragvalue, "on_change", &DragValue::on_change);
+    def_setter(dragvalue, "set_speed", &DragValue::set_speed);
+    def_setter(dragvalue, "set_step", &DragValue::set_step);
+    def_setter(dragvalue, "set_int_mode", &DragValue::set_int_mode);
+    def_setter(dragvalue, "set_prefix", &DragValue::set_prefix);
+    def_setter(dragvalue, "set_suffix", &DragValue::set_suffix);
+    def_setter(dragvalue, "set_format", &DragValue::set_format);
+    dragvalue.def("set_value",
+                  [](DragValue& d, float v, bool fire) -> DragValue& {
+                      return d.set_value(v, fire);
+                  },
+                  nb::arg("value"), nb::arg("fire_callback") = true,
+                  nb::rv_policy::reference)
+             .def("set_range",
+                  [](DragValue& d, float min, float max) -> DragValue& {
+                      return d.set_range(min, max);
+                  },
+                  nb::arg("min"), nb::arg("max"), nb::rv_policy::reference)
+             .def_prop_ro("value", &DragValue::value);
+
+    // VecNEdit borrows a float32 array: edits write into it, the fields
+    // mirror it every tick. Keep the numpy array alive as long as the widget.
+    auto vec2 = nb::class_<Vec2Edit, Widget>(m, "Vec2Edit");
+    vec2.def("__init__",
+             [](Vec2Edit* w, nb::ndarray<nb::numpy, float, nb::ndim<1>> values,
+                std::string labels) {
+                 if (values.shape(0) != 2)
+                     throw nb::value_error("Vec2Edit needs a float32 array of length 2");
+                 new (w) Vec2Edit(values.data(), std::move(labels));
+             },
+             nb::arg("values"), nb::arg("labels") = "XY");
+    bind_vec_edit(vec2);
+
+    auto vec3 = nb::class_<Vec3Edit, Widget>(m, "Vec3Edit");
+    vec3.def("__init__",
+             [](Vec3Edit* w, nb::ndarray<nb::numpy, float, nb::ndim<1>> values,
+                std::string labels) {
+                 if (values.shape(0) != 3)
+                     throw nb::value_error("Vec3Edit needs a float32 array of length 3");
+                 new (w) Vec3Edit(values.data(), std::move(labels));
+             },
+             nb::arg("values"), nb::arg("labels") = "XYZ");
+    bind_vec_edit(vec3);
+
+    auto vec4 = nb::class_<Vec4Edit, Widget>(m, "Vec4Edit");
+    vec4.def("__init__",
+             [](Vec4Edit* w, nb::ndarray<nb::numpy, float, nb::ndim<1>> values,
+                std::string labels) {
+                 if (values.shape(0) != 4)
+                     throw nb::value_error("Vec4Edit needs a float32 array of length 4");
+                 new (w) Vec4Edit(values.data(), std::move(labels));
+             },
+             nb::arg("values"), nb::arg("labels") = "XYZW");
+    bind_vec_edit(vec4);
+
+    auto coloredit = nb::class_<ColorEdit, Widget>(m, "ColorEdit");
+    def_setter(coloredit, "on_change", &ColorEdit::on_change);
+    coloredit.def("set_color",
+                  [](ColorEdit& c, Color color, bool fire) -> ColorEdit& {
+                      return c.set_color(color, fire);
+                  },
+                  nb::arg("color"), nb::arg("fire_callback") = true,
+                  nb::rv_policy::reference)
+               .def_prop_ro("color", &ColorEdit::color);
+
+    auto segmented = nb::class_<Segmented, Widget>(m, "Segmented");
+    def_setter(segmented, "set_items", &Segmented::set_items);
+    def_setter(segmented, "on_select", &Segmented::on_select);
+    segmented.def("set_selected",
+                  [](Segmented& s, long index, bool fire) -> Segmented& {
+                      return s.set_selected(index, fire);
+                  },
+                  nb::arg("index"), nb::arg("fire_callback") = true,
+                  nb::rv_policy::reference)
+               .def_prop_ro("selected", &Segmented::selected);
+
+    // --- menus & toolbars (Phase B) -----------------------------------
+    auto menu = nb::class_<Menu, Panel>(m, "Menu");
+    menu.def(nb::init<std::string, std::string>(), nb::arg("title") = "",
+             nb::arg("id") = "")
+        .def("add_item",
+             [](Menu& m, std::string label, std::function<void()> action,
+                std::string hint, bool enabled) -> Menu& {
+                 return m.add_item(std::move(label), std::move(action),
+                                   std::move(hint), enabled);
+             },
+             nb::arg("label"), nb::arg("action"), nb::arg("hint") = "",
+             nb::arg("enabled") = true, nb::rv_policy::reference_internal)
+        .def("add_checkable",
+             [](Menu& m, std::string label, std::function<bool()> is_checked,
+                std::function<void()> toggle, std::string hint, bool enabled) -> Menu& {
+                 return m.add_checkable(std::move(label), std::move(is_checked),
+                                        std::move(toggle), std::move(hint), enabled);
+             },
+             nb::arg("label"), nb::arg("is_checked"), nb::arg("toggle"),
+             nb::arg("hint") = "", nb::arg("enabled") = true,
+             nb::rv_policy::reference_internal)
+        .def("add_submenu",
+             [](Menu& m, std::string label, Menu& sub, std::string hint,
+                bool enabled) -> Menu& {
+                 return m.add_submenu(std::move(label), sub, std::move(hint),
+                                      enabled);
+             },
+             nb::arg("label"), nb::arg("submenu"), nb::arg("hint") = "",
+             nb::arg("enabled") = true, nb::rv_policy::reference_internal,
+             "Borrowed submenu: keep the Menu object alive on the Python side.")
+        .def("add_separator", [](Menu& m) -> Menu& { return m.add_separator(); },
+             nb::rv_policy::reference_internal)
+        .def("set_min_width", [](Menu& m, float w) -> Menu& { return m.set_min_width(w); },
+             nb::arg("w"), nb::rv_policy::reference)
+        .def("on_open", [](Menu& m, std::function<void()> f) -> Menu& { return m.on_open(std::move(f)); },
+             nb::arg("f"), nb::rv_policy::reference)
+        .def("open_for",
+             [](Menu& m, Widget& anchor, PopupDir dir) {
+                 m.open_for(anchor, dir);
+             },
+             nb::arg("anchor"), nb::arg("dir") = PopupDir::Below,
+             "Push this menu onto the popup stack beside anchor.");
+
+    auto menubar = nb::class_<MenuBar, Row>(m, "MenuBar");
+    menubar.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("add_menu",
+             [](MenuBar& b, std::string title) -> Menu& {
+                 return b.add_menu(std::move(title));
+             },
+             nb::arg("title"), nb::rv_policy::reference_internal);
+
+    auto iconbutton = nb::class_<IconButton, Widget>(m, "IconButton");
+    def_setter(iconbutton, "on_click", &IconButton::on_click);
+    iconbutton.def(nb::init<Icon, std::string>(), nb::arg("icon"), nb::arg("id") = "")
+        .def("set_icon",
+             [](IconButton& b, Icon i) -> IconButton& { return b.set_icon(i); },
+             nb::arg("icon"), nb::rv_policy::reference)
+        .def("set_variant",
+             [](IconButton& b, Button::Variant v) -> IconButton& {
+                 return b.set_variant(v);
+             },
+             nb::arg("variant"), nb::rv_policy::reference)
+        .def("set_icon_px",
+             [](IconButton& b, float px) -> IconButton& { return b.set_icon_px(px); },
+             nb::arg("px"), nb::rv_policy::reference)
+        .def_prop_ro("icon", &IconButton::icon)
+        .def_prop_ro("variant", &IconButton::variant);
+
+    // --- data display (Phase C) ----------------------------------------
+    auto plot = nb::class_<Plot, Widget>(m, "Plot");
+    def_setter(plot, "set_bars", &Plot::set_bars);
+    def_setter(plot, "set_fill", &Plot::set_fill);
+    def_setter(plot, "set_markers", &Plot::set_markers);
+    plot.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("set_series",
+             [](Plot& p, nb::ndarray<nb::numpy, float, nb::ndim<1>> ys, Color color) -> Plot& {
+                 std::vector<Vec2> pts;
+                 pts.reserve(ys.shape(0));
+                 for (size_t i = 0; i < ys.shape(0); ++i)
+                     pts.push_back({float(i), ys.data()[i]});
+                 return p.clear_series().add_series(std::move(pts), color);
+             },
+             nb::arg("ys"), nb::arg("color"), nb::rv_policy::reference,
+             "Single y-series with x = 0..n-1 (numpy float32, copied).")
+        .def("add_series",
+             [](Plot& p, nb::ndarray<nb::numpy, float, nb::ndim<1>> xs,
+                nb::ndarray<nb::numpy, float, nb::ndim<1>> ys, Color color) -> Plot& {
+                 if (xs.shape(0) != ys.shape(0))
+                     throw nb::value_error("xs and ys must have the same length");
+                 std::vector<Vec2> pts;
+                 pts.reserve(ys.shape(0));
+                 for (size_t i = 0; i < ys.shape(0); ++i)
+                     pts.push_back({xs.data()[i], ys.data()[i]});
+                 return p.add_series(std::move(pts), color);
+             },
+             nb::arg("xs"), nb::arg("ys"), nb::arg("color"), nb::rv_policy::reference)
+        .def("clear_series", [](Plot& p) -> Plot& { return p.clear_series(); },
+             nb::rv_policy::reference)
+        .def("set_x_range",
+             [](Plot& p, float a, float b) -> Plot& { return p.set_x_range(a, b); },
+             nb::arg("min"), nb::arg("max"), nb::rv_policy::reference)
+        .def("set_y_range",
+             [](Plot& p, float a, float b) -> Plot& { return p.set_y_range(a, b); },
+             nb::arg("min"), nb::arg("max"), nb::rv_policy::reference);
+
+    auto vec2pad = nb::class_<Vec2Pad, Widget>(m, "Vec2Pad");
+    def_setter(vec2pad, "on_change", &Vec2Pad::on_change);
+    vec2pad.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("set_value",
+             [](Vec2Pad& p, Vec2 v, bool fire) -> Vec2Pad& {
+                 return p.set_value(v, fire);
+             },
+             nb::arg("value"), nb::arg("fire_callback") = true,
+             nb::rv_policy::reference)
+        .def("set_range",
+             [](Vec2Pad& p, Vec2 min, Vec2 max) -> Vec2Pad& {
+                 return p.set_range(min, max);
+             },
+             nb::arg("min"), nb::arg("max"), nb::rv_policy::reference,
+             "Corner vectors: min corner, then max corner.")
+        .def_prop_ro("value", &Vec2Pad::value);
+
+    auto treeview = nb::class_<TreeView, Widget>(m, "TreeView");
+    nb::class_<TreeView::Row>(treeview, "Row")
+        .def(nb::init<std::string, int, bool>(), nb::arg("label"),
+             nb::arg("depth") = 0, nb::arg("expandable") = false)
+        .def_rw("label", &TreeView::Row::label)
+        .def_rw("depth", &TreeView::Row::depth)
+        .def_rw("expandable", &TreeView::Row::expandable);
+    def_setter(treeview, "on_select", &TreeView::on_select);
+    treeview.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("set_rows",
+             [](TreeView& t, std::vector<TreeView::Row> rows) -> TreeView& {
+                 return t.set_rows(std::move(rows));
+             },
+             nb::arg("rows"), nb::rv_policy::reference)
+        .def("set_expanded",
+             [](TreeView& t, size_t index, bool open) -> TreeView& {
+                 return t.set_expanded(index, open);
+             },
+             nb::arg("index"), nb::arg("open"), nb::rv_policy::reference)
+        .def("expanded", &TreeView::expanded, nb::arg("index"))
+        .def("set_selected",
+             [](TreeView& t, long index) -> TreeView& {
+                 return t.set_selected(index);
+             },
+             nb::arg("index"), nb::rv_policy::reference)
+        .def_prop_ro("selected", &TreeView::selected)
+        .def_prop_ro("visible_count", &TreeView::visible_count);
+
+    auto table = nb::class_<Table, Widget>(m, "Table");
+    nb::class_<Table::ColumnSpec>(table, "ColumnSpec")
+        .def(nb::init<std::string, float, bool>(), nb::arg("title"),
+             nb::arg("width") = 0.f, nb::arg("right_align") = false)
+        .def_rw("title", &Table::ColumnSpec::title)
+        .def_rw("width", &Table::ColumnSpec::width)
+        .def_rw("right_align", &Table::ColumnSpec::right_align);
+    def_setter(table, "on_select", &Table::on_select);
+    table.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("set_columns",
+             [](Table& t, std::vector<Table::ColumnSpec> cols) -> Table& {
+                 return t.set_columns(std::move(cols));
+             },
+             nb::arg("columns"), nb::rv_policy::reference)
+        .def("set_rows",
+             [](Table& t, std::vector<std::vector<std::string>> rows) -> Table& {
+                 return t.set_rows(std::move(rows));
+             },
+             nb::arg("rows"), nb::rv_policy::reference)
+        .def("set_selected",
+             [](Table& t, long index) -> Table& { return t.set_selected(index); },
+             nb::arg("index"), nb::rv_policy::reference)
+        .def_prop_ro("selected", &Table::selected);
+
+    auto propertygrid = nb::class_<PropertyGrid, Column>(m, "PropertyGrid");
+    bind_add(propertygrid);
+    propertygrid.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("add_property",
+             [](PropertyGrid& g, std::string label, float label_w) -> PropertyRow& {
+                 return g.add_property(std::move(label), label_w);
+             },
+             nb::arg("label"), nb::arg("label_width") = 110.f,
+             nb::rv_policy::reference_internal,
+             "Returns the row — add the editor widget into it.")
+        .def("add_section",
+             [](PropertyGrid& g, std::string title, bool open) -> PropertyGrid& {
+                 return g.add_section(std::move(title), open);
+             },
+             nb::arg("title"), nb::arg("open") = false,
+             nb::rv_policy::reference_internal);
+
+    auto propertyrow = nb::class_<PropertyRow, Widget>(m, "PropertyRow");
+    bind_add(propertyrow); // so `row.add(slikui.Slider, ...)` builds editors
+    propertyrow.def("label", [](PropertyRow& r) -> Label& { return r.label(); },
+                    nb::rv_policy::reference_internal)
+                 .def("editor", [](PropertyRow& r) -> Widget& { return r.editor(); },
+                      nb::rv_policy::reference);
+
+    auto toolbar = nb::class_<Toolbar, Row>(m, "Toolbar");
+    toolbar.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("add_button",
+             [](Toolbar& t, Icon icon, std::function<void()> on_click,
+                std::string tip) -> IconButton& {
+                 return t.add_button(icon, std::move(on_click), std::move(tip));
+             },
+             nb::arg("icon"), nb::arg("on_click"), nb::arg("tip") = "",
+             nb::rv_policy::reference_internal)
+        .def("add_labeled_button",
+             [](Toolbar& t, Icon icon, std::string label,
+                std::function<void()> on_click, std::string tip) -> IconButton& {
+                 return t.add_button(icon, std::move(label), std::move(on_click),
+                                     std::move(tip));
+             },
+             nb::arg("icon"), nb::arg("label"), nb::arg("on_click"),
+             nb::arg("tip") = "", nb::rv_policy::reference_internal)
+        .def("add_separator", [](Toolbar& t) { t.add_separator(); })
+        .def("set_icon_px",
+             [](Toolbar& t, float px) -> Toolbar& { return t.set_icon_px(px); },
+             nb::arg("px"), nb::rv_policy::reference)
+        .def("set_background",
+             [](Toolbar& t, Color c) -> Toolbar& { return t.set_background(c); },
+             nb::arg("color"), nb::rv_policy::reference);
 
     auto spinner = nb::class_<Spinner, Widget>(m, "Spinner");
     def_setter(spinner, "set_speed", &Spinner::set_speed);
@@ -825,6 +1422,20 @@ NB_MODULE(_slikui, m) {
                   nb::arg("title"), nb::arg("open") = false,
                   nb::rv_policy::reference_internal);
 
+    auto splitter = nb::class_<Splitter, Widget>(m, "Splitter");
+    splitter.def(nb::init<bool, std::string>(), nb::arg("vertical") = false,
+                 nb::arg("id") = "")
+        .def("set_fraction",
+             [](Splitter& s, float f) -> Splitter& { return s.set_fraction(f); },
+             nb::arg("fraction"), nb::rv_policy::reference)
+        .def("on_change",
+             [](Splitter& s, std::function<void(float)> f) -> Splitter& {
+                 return s.on_change(std::move(f));
+             },
+             nb::arg("f"), nb::rv_policy::reference)
+        .def_prop_ro("fraction", &Splitter::fraction);
+    bind_add(splitter); // splitters host exactly two children
+
     nb::enum_<Image::Fit>(m, "ImageFit")
         .value("Stretch", Image::Fit::Stretch)
         .value("Contain", Image::Fit::Contain)
@@ -852,6 +1463,206 @@ NB_MODULE(_slikui, m) {
               nb::arg("w"), nb::arg("h"), nb::rv_policy::reference)
          .def_prop_ro("width", &Image::width)
          .def_prop_ro("height", &Image::height);
+
+    // ------------------------------------------------------------------ //
+    // Shells (Phase D): dialogs, feedback, browsers, image views
+    // ------------------------------------------------------------------ //
+
+    // Shared (H, W, 4) uint8 RGBA argument unpacking for ImageView/CompareView.
+    auto px_arg = [](nb::ndarray<nb::numpy, const std::uint8_t, nb::ndim<3>> arr,
+                     int& w, int& h) -> const std::uint8_t* {
+        if (arr.shape(2) != 4)
+            throw nb::value_error("set_pixels expects (H, W, 4) uint8 RGBA");
+        w = static_cast<int>(arr.shape(1));
+        h = static_cast<int>(arr.shape(0));
+        return arr.data();
+    };
+
+    auto dialog = nb::class_<Dialog, Panel>(m, "Dialog");
+    dialog.def(nb::init<std::string, std::string>(), nb::arg("title"),
+               nb::arg("id") = "")
+        .def("content", [](Dialog& d) -> Column& { return d.content(); },
+             nb::rv_policy::reference_internal,
+             "The body column — add widgets here.")
+        .def("set_title",
+             [](Dialog& d, std::string t) -> Dialog& {
+                 return d.set_title(std::move(t));
+             },
+             nb::arg("title"), nb::rv_policy::reference)
+        .def_prop_ro("title",
+                     [](Dialog& d) -> const std::string& { return d.title(); })
+        .def("set_modal",
+             [](Dialog& d, bool mod) -> Dialog& { return d.set_modal(mod); },
+             nb::arg("modal"), nb::rv_policy::reference)
+        .def_prop_ro("modal", &Dialog::modal)
+        .def("set_position",
+             [](Dialog& d, Vec2 p) -> Dialog& { return d.set_position(p); },
+             nb::arg("pos"), nb::rv_policy::reference)
+        .def("request_close", &Dialog::request_close)
+        .def("on_close",
+             [](Dialog& d, std::function<void()> f) -> Dialog& {
+                 return d.on_close(std::move(f));
+             },
+             nb::arg("callback"), nb::rv_policy::reference)
+        .def_prop_ro("close_button",
+                     [](Dialog& d) -> IconButton& { return d.close_button(); },
+                     nb::rv_policy::reference_internal);
+
+    auto messagebox = nb::class_<MessageBox, Dialog>(m, "MessageBox");
+    messagebox.def(nb::init<std::string, std::string, std::string>(),
+                   nb::arg("title"), nb::arg("message"), nb::arg("id") = "")
+        .def("add_button",
+             [](MessageBox& mb, std::string label, std::function<void()> action) -> Button& {
+                 return mb.add_button(std::move(label), std::move(action));
+             },
+             nb::arg("label"), nb::arg("action"), nb::rv_policy::reference_internal,
+             "Right-aligned action button; the callback runs, then the "
+             "message box closes.");
+
+    auto groupbox = nb::class_<GroupBox, Panel>(m, "GroupBox");
+    bind_add(groupbox);
+    groupbox.def(nb::init<std::string, std::string>(), nb::arg("title"),
+                 nb::arg("id") = "")
+        .def("set_title",
+             [](GroupBox& g, std::string t) -> GroupBox& {
+                 return g.set_title(std::move(t));
+             },
+             nb::arg("title"), nb::rv_policy::reference)
+        .def_prop_ro("title",
+                     [](GroupBox& g) -> const std::string& { return g.title(); });
+
+    auto searchbox = nb::class_<SearchBox, Widget>(m, "SearchBox");
+    def_setter(searchbox, "on_change", &SearchBox::on_change);
+    def_setter(searchbox, "on_submit", &SearchBox::on_submit);
+    searchbox.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("set_text",
+             [](SearchBox& b, std::string t) -> SearchBox& {
+                 return b.set_text(std::move(t));
+             },
+             nb::arg("text"), nb::rv_policy::reference)
+        .def_prop_ro("text",
+                     [](SearchBox& b) -> const std::string& { return b.text(); })
+        .def("set_placeholder",
+             [](SearchBox& b, std::string p) -> SearchBox& {
+                 return b.set_placeholder(std::move(p));
+             },
+             nb::arg("placeholder"), nb::rv_policy::reference)
+        .def("field", [](SearchBox& b) -> TextField& { return b.field(); },
+             nb::rv_policy::reference_internal)
+        .def_prop_ro("clear_button",
+                     [](SearchBox& b) -> IconButton& { return b.clear_button(); },
+                     nb::rv_policy::reference_internal);
+
+    auto statusbar = nb::class_<StatusBar, Row>(m, "StatusBar");
+    bind_add(statusbar); // right-side widgets: bar.add(slikui.ProgressBar, ...)
+    statusbar.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("set_text",
+             [](StatusBar& s, std::string t) -> StatusBar& {
+                 return s.set_text(std::move(t));
+             },
+             nb::arg("text"), nb::rv_policy::reference)
+        .def_prop_ro("text",
+                     [](StatusBar& s) -> const std::string& { return s.text(); })
+        .def("show_message",
+             [](StatusBar& s, std::string msg, double seconds) -> StatusBar& {
+                 return s.show_message(std::move(msg), seconds);
+             },
+             nb::arg("message"), nb::arg("seconds") = 3.0,
+             nb::rv_policy::reference,
+             "Transient message; the base text returns once it expires.");
+
+    auto logview = nb::class_<LogView, Widget>(m, "LogView");
+    nb::enum_<LogView::Level>(logview, "Level")
+        .value("Info", LogView::Level::Info)
+        .value("Success", LogView::Level::Success)
+        .value("Warning", LogView::Level::Warning)
+        .value("Error", LogView::Level::Error);
+    logview.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("log",
+             [](LogView& l, LogView::Level level, std::string text) -> LogView& {
+                 return l.log(level, std::move(text));
+             },
+             nb::arg("level"), nb::arg("text"), nb::rv_policy::reference)
+        .def("clear",
+             [](LogView& l) -> LogView& { return l.clear(); },
+             nb::rv_policy::reference)
+        .def_prop_ro("line_count", &LogView::line_count);
+
+    nb::class_<Toast, Widget>(m, "Toast")
+        .def(nb::init<std::string, std::string>(), nb::arg("text"),
+             nb::arg("id") = "")
+        .def("set_icon",
+             [](Toast& t, Icon i) -> Toast& { return t.set_icon(i); },
+             nb::arg("icon"), nb::rv_policy::reference,
+             "Usually pushed with Context.push_toast, which owns the toast.");
+
+    auto filebrowser = nb::class_<FileBrowser, Dialog>(m, "FileBrowser");
+    nb::enum_<FileBrowser::Mode>(filebrowser, "Mode")
+        .value("Open", FileBrowser::Mode::Open)
+        .value("Save", FileBrowser::Mode::Save);
+    def_setter(filebrowser, "on_pick", &FileBrowser::on_pick);
+    filebrowser.def(nb::init<FileBrowser::Mode, std::string, std::string>(),
+                    nb::arg("mode"), nb::arg("title") = "", nb::arg("id") = "")
+        .def("set_path",
+             [](FileBrowser& fb, std::string dir) -> FileBrowser& {
+                 return fb.set_path(std::move(dir));
+             },
+             nb::arg("dir"), nb::rv_policy::reference)
+        .def_prop_ro("path", [](FileBrowser& fb) { return fb.path(); })
+        .def("selection",
+             [](FileBrowser& fb) { return fb.selection(); },
+             "path()/selection(): current directory and the picked file ('' "
+             "when nothing is chosen).")
+        .def_prop_ro("list", [](FileBrowser& fb) -> ListView& { return fb.list(); },
+                     nb::rv_policy::reference_internal)
+        .def_prop_ro("name_field",
+                     [](FileBrowser& fb) -> TextField& { return fb.name_field(); },
+                     nb::rv_policy::reference_internal)
+        .def_prop_ro("open_button",
+                     [](FileBrowser& fb) -> Button& { return fb.open_button(); },
+                     nb::rv_policy::reference_internal);
+
+    auto imageview = nb::class_<ImageView, Widget>(m, "ImageView");
+    imageview.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("set_pixels",
+             [px_arg](ImageView& v,
+                      nb::ndarray<nb::numpy, const std::uint8_t, nb::ndim<3>> arr) -> ImageView& {
+                 int w = 0, h = 0;
+                 const std::uint8_t* px = px_arg(arr, w, h);
+                 return v.set_pixels(w, h, px);
+             },
+             nb::arg("pixels"), nb::rv_policy::reference)
+        .def("set_file", &ImageView::set_file, nb::arg("path"))
+        .def_prop_ro("zoom", &ImageView::zoom)
+        .def_prop_ro("pan", &ImageView::pan)
+        .def_prop_ro("width", &ImageView::width)
+        .def_prop_ro("height", &ImageView::height);
+
+    auto compareview = nb::class_<CompareView, Widget>(m, "CompareView");
+    compareview.def(nb::init<std::string>(), nb::arg("id") = "")
+        .def("set_pixels_a",
+             [px_arg](CompareView& v,
+                      nb::ndarray<nb::numpy, const std::uint8_t, nb::ndim<3>> arr) -> CompareView& {
+                 int w = 0, h = 0;
+                 const std::uint8_t* px = px_arg(arr, w, h);
+                 return v.set_pixels_a(w, h, px);
+             },
+             nb::arg("pixels"), nb::rv_policy::reference,
+             "Both images stretch over the full view; A fills [0, fraction].")
+        .def("set_pixels_b",
+             [px_arg](CompareView& v,
+                      nb::ndarray<nb::numpy, const std::uint8_t, nb::ndim<3>> arr) -> CompareView& {
+                 int w = 0, h = 0;
+                 const std::uint8_t* px = px_arg(arr, w, h);
+                 return v.set_pixels_b(w, h, px);
+             },
+             nb::arg("pixels"), nb::rv_policy::reference)
+        .def("set_fraction",
+             [](CompareView& v, float f) -> CompareView& {
+                 return v.set_fraction(f);
+             },
+             nb::arg("fraction"), nb::rv_policy::reference)
+        .def_prop_ro("fraction", &CompareView::fraction);
 
     // ------------------------------------------------------------------ //
     // Theme
@@ -906,6 +1717,10 @@ NB_MODULE(_slikui, m) {
     // Module functions
     // ------------------------------------------------------------------ //
 
+    m.def("shortcut_label",
+          [](Key key, unsigned mods) { return shortcut_label(key, mods); },
+          nb::arg("key"), nb::arg("mods"),
+          "\"Ctrl+Shift+S\" (\"\u2318\u21e7S\" on Apple) — for menu hints.");
     m.def("find_system_font", &find_system_font,
           "First system TTF that opens (best-effort; '' if none).");
 }

@@ -10,8 +10,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace slikui {
 
@@ -374,28 +376,56 @@ public:
     }
     Slider& set_value(float v, bool fire_callback = true) {
         v = std::clamp(v, min_, max_);
+        if (step_ > 0) v = min_ + std::round((v - min_) / step_) * step_;
+        v = std::clamp(v, min_, max_);
         if (v == value_) return *this;
         value_ = v;
         fraction_.target = fraction();
+        label_valid_ = false;
         if (fire_callback && on_change_) on_change_(value_);
         return *this;
     }
     float value() const { return value_; }
     Slider& on_change(std::function<void(float)> f) { on_change_ = std::move(f); return *this; }
 
+    // Built-in label + live value row above the track (the demo helper this
+    // replaces was: Row[label, value-Label] + Slider underneath).
+    Slider& set_label(std::string label) { label_ = std::move(label); label_valid_ = false; return *this; }
+    // printf format for the value text; showing a value implies the label row.
+    Slider& set_format(std::string fmt) { fmt_ = std::move(fmt); fmt_set_ = true; label_valid_ = false; return *this; }
+    // Position maps through log(); requires min > 0 (silently ignored else).
+    Slider& set_log_scale(bool on) {
+        log_ = on && min_ > 0.f && max_ > min_;
+        set_value(value_, false);
+        return *this;
+    }
+    // Quantize values to multiples of step (step 1 = integer mode). 0 = off.
+    Slider& set_step(float step) { step_ = step; set_value(value_, false); return *this; }
+
     bool focusable() const override { return true; }
 
-    Size measure(const Constraints& c) override { return c.clamp({160.f, 22.f}); }
+    Size measure(const Constraints& c) override {
+        return c.clamp({160.f, shows_value() ? 37.f : 22.f});
+    }
 
     void paint(const PaintEnv& env) const override {
         const Theme& t = env.theme;
-        float cy = bounds.center().y;
+        refresh_value_text();
+        float inv = 1.f / ui_scale();
+        float label_h = shows_value() ? 15.f : 0.f;
+        float cy = bounds.y + label_h + (bounds.h - label_h) * .5f;
         float x0 = bounds.x + 8, x1 = bounds.right() - 8;
         env.list.line({x0, cy}, {x1, cy}, t.surface_alt, 4);
         float fx = x0 + fraction_.value * (x1 - x0);
         if (fx > x0) env.list.line({x0, cy}, {fx, cy}, t.accent, 4);
         env.list.circle({fx, cy}, 7, Color::white());
         env.list.circle({fx, cy}, 6, t.accent);
+        if (shows_value()) {
+            float ty = bounds.y + 1;
+            if (!label_.empty()) paint_text(env, label_lay_, {bounds.x, ty}, t.text_dim, inv);
+            float vw = value_lay_.size.w * inv;
+            paint_text(env, value_lay_, {bounds.right() - vw, ty}, t.text_dim, inv);
+        }
     }
 
     bool on_event(const Event& e) override {
@@ -425,9 +455,9 @@ public:
             if (!focused) return false;
             switch (e.key) {
             case Key::Left:
-            case Key::Down: set_value(value_ - (max_ - min_) / 20.f); return true;
+            case Key::Down: set_value(value_ - key_step()); return true;
             case Key::Right:
-            case Key::Up:   set_value(value_ + (max_ - min_) / 20.f); return true;
+            case Key::Up:   set_value(value_ + key_step()); return true;
             case Key::Home: set_value(min_); return true;
             case Key::End:  set_value(max_); return true;
             default: return false;
@@ -445,19 +475,139 @@ public:
     const char* widget_type() const override { return "Slider"; }
 
 private:
+    bool shows_value() const { return !label_.empty() || fmt_set_; }
+    float key_step() const { return step_ > 0 ? step_ : (max_ - min_) / 20.f; }
+
     float fraction() const {
-        return max_ > min_ ? clamp01((value_ - min_) / (max_ - min_)) : 0.f;
+        if (max_ <= min_) return 0.f;
+        if (log_) return clamp01(std::log(value_ / min_) / std::log(max_ / min_));
+        return clamp01((value_ - min_) / (max_ - min_));
     }
     void value_from_pos(float x) {
         float x0 = bounds.x + 8, x1 = bounds.right() - 8;
         float frac = x1 > x0 ? clamp01((x - x0) / (x1 - x0)) : 0.f;
-        set_value(min_ + frac * (max_ - min_));
+        float v = log_ ? min_ * std::pow(max_ / min_, frac) : min_ + frac * (max_ - min_);
+        set_value(v);
+    }
+
+    void refresh_value_text() const {
+        if (label_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        if (!label_.empty()) label_lay_ = ctx->font().layout(label_, t.s(t.base_font_px));
+        char buf[64];
+        std::snprintf(buf, sizeof buf, fmt_.c_str(), double(value_));
+        value_lay_ = ctx->font().layout(buf, t.s(t.base_font_px));
+        label_valid_ = true;
     }
 
     float min_, max_, value_;
+    std::string label_;
+    std::string fmt_ = "%.3g";
+    bool fmt_set_ = false, log_ = false;
+    float step_ = 0;
     bool dragging_ = false;
     Anim fraction_{0, 0, 20};
     std::function<void(float)> on_change_;
+    mutable text::TextLayout label_lay_, value_lay_;
+    mutable bool label_valid_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// Segmented — N-option single-select row (a Dropdown for 2-5 options)
+// ---------------------------------------------------------------------------
+class Segmented : public Widget {
+public:
+    explicit Segmented(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+
+    Segmented& set_items(std::vector<std::string> items) {
+        items_ = std::move(items);
+        selected_ = -1;
+        hovered_ = -1;
+        labels_valid_ = false;
+        return *this;
+    }
+    Segmented& set_selected(long index, bool fire_callback = true) {
+        if (index == selected_) return *this;
+        selected_ = index;
+        if (fire_callback && on_select_ && selected_ >= 0) on_select_(size_t(selected_));
+        return *this;
+    }
+    long selected() const { return selected_; }
+    Segmented& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+
+    bool stretch_cross() const override { return false; }
+
+    Size measure(const Constraints& c) override {
+        refresh_labels();
+        float inv = 1.f / ui_scale();
+        float w = 0;
+        for (auto& l : lays_) w += l.size.w * inv + 24.f;
+        return c.clamp({std::fmax(w, 60.f), 26.f});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        refresh_labels();
+        const Theme& t = env.theme;
+        float inv = 1.f / ui_scale();
+        env.list.rect(bounds, t.surface_alt, t.radius);
+        float x = bounds.x;
+        for (size_t i = 0; i < items_.size(); ++i) {
+            float w = lays_[i].size.w * inv + 24.f;
+            Rect seg{x, bounds.y, w, bounds.h};
+            float ty = seg.center().y - lays_[i].size.h * inv * .5f;
+            if (long(i) == selected_) {
+                env.list.rect(seg, t.accent, t.radius);
+                paint_text(env, lays_[i], {x + 12, ty}, t.accent_text, inv);
+            } else {
+                Color txt = long(i) == hovered_ && enabled ? t.text : t.text_dim;
+                paint_text(env, lays_[i], {x + 12, ty}, txt, inv);
+            }
+            x += w;
+        }
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MouseMove:
+            hovered_ = index_at(e.pos.x);
+            return false;
+        case Event::Type::MousePress:
+            if (enabled && bounds.contains(e.pos)) {
+                long idx = index_at(e.pos.x);
+                if (idx >= 0) set_selected(idx);
+                return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    const char* widget_type() const override { return "Segmented"; }
+
+private:
+    long index_at(float x) const {
+        float inv = 1.f / ui_scale();
+        float acc = bounds.x;
+        for (size_t i = 0; i < items_.size(); ++i) {
+            acc += lays_[i].size.w * inv + 24.f;
+            if (x < acc) return long(i);
+        }
+        return -1;
+    }
+    void refresh_labels() const {
+        if (labels_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        lays_.clear();
+        for (auto& it : items_) lays_.push_back(ctx->font().layout(it, t.s(t.base_font_px)));
+        labels_valid_ = true;
+    }
+
+    std::vector<std::string> items_;
+    long selected_ = -1, hovered_ = -1;
+    std::function<void(size_t)> on_select_;
+    mutable std::vector<text::TextLayout> lays_;
+    mutable bool labels_valid_ = false;
 };
 
 // ---------------------------------------------------------------------------

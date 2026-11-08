@@ -136,6 +136,24 @@ public:
     Widget& set_tooltip(std::string t) { tooltip_ = std::move(t); return *this; }
     const std::string& tooltip() const { return tooltip_; }
 
+    // --- context menu ---
+    //
+    // Widget shown when the user right-clicks this widget or anything inside
+    // it (the nearest ancestor with one wins). Pass a Menu (widgets/menus.hpp;
+    // any popup-suitable widget works). Borrowed, never owned: keep it alive in
+    // your shell/app code for as long as this widget lives. Context::handle
+    // opens it as a floating popup at the cursor.
+    Widget& set_context_menu(Widget* w) { context_menu_ = w; return *this; }
+    Widget* context_menu() const { return context_menu_; }
+
+    // --- hover cursor ---
+    //
+    // Cursor shape requested while the mouse is over this widget (the nearest
+    // ancestor with a non-Arrow cursor wins). The host renders it; nothing
+    // happens without a host callback.
+    Widget& set_cursor(Cursor c) { hover_cursor_ = c; return *this; }
+    Cursor cursor() const { return hover_cursor_; }
+
     // --- texture ownership (Image and friends) ---
 
     // Widgets that own GPU-side textures (fonts, images) report pending
@@ -159,10 +177,16 @@ public:
 protected:
     Context* ctx = nullptr;     // set by Context::arrange_tree (theme/font access)
     std::string tooltip_;       // hover-delay tooltip text
+    Widget* context_menu_ = nullptr;  // right-click target (borrowed, see above)
+    Cursor hover_cursor_ = Cursor::Arrow; // requested while hovered
 
     friend class Context;
 
 public:
+
+    // The Context this widget is attached to (null while detached). Menus and
+    // other popup widgets read it off their anchor when first opened.
+    Context* context() const { return ctx; }
 
     // Invoke an event on the subtree, deepest-first, until consumed.
     bool dispatch(const Event& e) {

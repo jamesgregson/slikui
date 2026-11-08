@@ -12,6 +12,8 @@
 #include <slikui/slikui.hpp>
 #include <slikui/text/system_fonts.hpp>
 
+#include <slikui/widgets/all.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -175,6 +177,8 @@ int main(int argc, char** argv) {
     });
 
     // ---- sliders, progress, spinner ------------------------------------
+    // NOTE: keep in sync with the `editors` capture — `Slider`'s built-in
+    // label/value row is shown there.
     capture(dir, "sliders", 560, 168, [](Context& ctx, Column& root) {
         auto& cap = root.add<Row>();
         cap.set_gap(8);
@@ -207,6 +211,132 @@ int main(int argc, char** argv) {
         root.add<TextArea>().set_rows(3)
             .set_text("slikui renders this entirely on the CPU —\nno GPU, no window, no dependencies.");
     });
+
+    // ---- data display: plot + pad + tree + table + property grid ---------
+    capture(dir, "data", 560, 400, [](Context& ctx, Column& root) {
+        auto& cols = root.add<Row>();
+        cols.set_gap(14);
+        auto& left = cols.add<Column>();
+        left.set_gap(10);
+        auto& plot = left.add<Plot>();
+        plot.set_fill(true);
+        std::vector<Vec2> pts;
+        for (int i = 0; i < 48; ++i) {
+            float x = float(i) / 47.f * 6.2831f;
+            pts.push_back({x, std::sin(x) * std::exp(-x / 6.f)});
+        }
+        plot.add_series(pts, ctx.theme().accent);
+        left.add<Vec2Pad>().set_value({0.35f, 0.4f});
+
+        auto& right = cols.add<Column>();
+        right.set_gap(10);
+        right.add<TreeView>().set_rows({
+            {"Scene", 0, true},
+            {"Dragon", 1, false},
+            {"Suzanne", 1, false},
+            {"Lights", 0, true},
+            {"Sun", 1, false},
+            {"Rim", 1, false},
+        });
+        auto& table = right.add<Table>();
+        table.set_columns({{"Mesh", 100, false}, {"Tris", 60, true},
+                           {"Pass", 44, true}});
+        table.set_rows({{"Dragon", "870k", "4"}, {"Suzanne", "50k", "2"},
+                        {"Bunny", "69k", "2"}});
+        table.set_selected(1);
+
+        auto& grid = root.add<PropertyGrid>();
+        grid.add_property("Roughness").add<Slider>(0.f, 1.f).set_value(0.35f, false);
+        grid.add_property("Samples").add<DragValue>(64.f);
+        grid.add_section("Advanced");
+    });
+
+    // ---- menus: menu bar with the File menu open (click at frame 10) -----
+    capture(dir, "menus", 560, 300, [](Context&, Column& root) {
+        auto& bar = root.add<MenuBar>();
+        auto& file = bar.add_menu("File");
+        file.add_item("Open…", [] {}, "Ctrl+O");
+        file.add_item("Save", [] {}, "Ctrl+S");
+        file.add_separator();
+        file.add_item("Quit", [] {}, "Ctrl+Q");
+        auto& edit = bar.add_menu("Edit");
+        edit.add_item("Undo", [] {}, "Ctrl+Z");
+        edit.add_item("Redo", [] {}, "Ctrl+Shift+Z", false);
+    }, {.hover = {44.f, 40.f}, .click_at_hover = true, .frames = 80});
+
+    // ---- toolbar: icon buttons, separator, labeled button ----------------
+    capture(dir, "toolbar", 560, 120, [](Context&, Column& root) {
+        auto& bar = root.add<Toolbar>();
+        bar.add_button(Icon::Play, [] {}, "Run");
+        bar.add_button(Icon::Pause, [] {});
+        bar.add_button(Icon::StepForward, [] {});
+        bar.add_separator();
+        bar.add_button(Icon::Grid, [] {}, "Toggle grid");
+        bar.add_button(Icon::Camera, [] {}, "Screenshot");
+        bar.add_button(Icon::Save, "Save", [] {});
+        root.add<Label>("ghost fill fades in on hover");
+    });
+
+    // ---- shells: dialog + toast, group box, search, log, status, views --
+    capture(dir, "shells", 560, 470, [](Context& ctx, Column& root) {
+        auto grad = gradient_rgba();
+        std::vector<std::uint8_t> grad2 = grad;
+        for (std::size_t i = 0; i < grad2.size(); i += 4)
+            std::swap(grad2[i], grad2[i + 2]); // swap R/B for the B image
+
+        auto& top = root.add<Row>();
+        top.set_gap(10);
+        auto& left = top.add<Column>();
+        left.set_gap(8);
+        auto& gb = left.add<GroupBox>("Light");
+        gb.add<Checkbox>("Enabled", true);
+        gb.add<Slider>(0.f, 1.f);
+        left.add<SearchBox>().set_placeholder("Search assets…");
+        auto& log = top.add<LogView>();
+        log.log(LogView::Level::Info, "loaded scene.dragon (24 ms)");
+        log.log(LogView::Level::Warning, "missing texture: bark_d");
+        log.log(LogView::Level::Error, "shader compile failed");
+        log.log(LogView::Level::Success, "thumbnail bake complete");
+
+        auto mb = std::make_unique<MessageBox>("Export", "Render 128 frames at 4K?");
+        mb->add_button("Export", nullptr);
+        mb->add_button("Cancel", nullptr);
+        mb->set_position({300, 26});
+        ctx.open_dialog(std::move(mb));
+        auto toast = std::make_unique<Toast>("Screenshot saved");
+        toast->set_icon(Icon::Camera);
+        ctx.push_toast(std::move(toast), 60.0);
+
+        auto& views = root.add<Row>();
+        views.set_gap(10);
+        auto& iv = views.add<ImageView>();
+        iv.set_pixels(64, 48, grad.data());
+        auto& cv = views.add<CompareView>();
+        cv.set_pixels_a(64, 48, grad.data());
+        cv.set_pixels_b(64, 48, grad2.data());
+        cv.set_fraction(.62f);
+        root.add<StatusBar>().set_text("60 fps · 1,440 objects");
+    });
+
+    // ---- editors: segmented, vec/drag values, labeled slider, colors ----
+    // The color row sits last so the ColorEdit popup has room to open;
+    // hover+click the middle chip to show it (like the Dropdown above).
+    capture(dir, "editors", 560, 400, [](Context& ctx, Column& root) {
+        root.add<Segmented>().set_items({"Cube", "Sphere", "Torus"})
+            .set_selected(1);
+        static float light_dir[3] = {0.60f, 0.40f, 0.70f};
+        root.add<Vec3Edit>(light_dir, "XYZ");
+        root.add<DragValue>(1.5f).set_prefix("exp ").set_suffix(" EV");
+        root.add<Slider>(0.f, 1.f).set_label("Roughness")
+            .set_format("%.2f").set_value(0.35f);
+        auto& colors = root.add<Row>();
+        colors.set_gap(8);
+        colors.add<ColorEdit>(Color::from_hex(0xBF5C38));
+        colors.add<ColorEdit>(Color::from_hex(0x3F6FBF));
+        colors.add<ColorEdit>(Color::from_hex(0x46A758));
+        colors.add<Label>("#BF5C38 #3F6FBF #46A758")
+            .set_color(ctx.theme().text_dim);
+    }, {.hover = {71.f, 196.f}, .click_at_hover = true, .frames = 80});
 
     // ---- views: list, tabs, dropdown (popup open) ------------------------
     capture(dir, "views", 560, 316,

@@ -3,6 +3,10 @@ add_executable(slikui_tests
   test_core.cpp
   test_layout.cpp
   test_widgets.cpp
+  test_editors.cpp
+  test_menus.cpp
+  test_data.cpp
+  test_shells.cpp
   test_theme.cpp
   test_font.cpp
   test_golden.cpp)

@@ -132,6 +132,8 @@ inline Padding pad(float h, float v) { return Padding::sym(h, v); }
 
 #include <cstdint>
 #include <algorithm>
+#include <array>
+#include <cmath>
 
 namespace slikui {
 
@@ -183,6 +185,51 @@ struct Color {
                      std::uint8_t((v >> 16) & 0xFF), std::uint8_t((v >> 24) & 0xFF));
     }
 
+    // --- HSV (for color editors) -------------------------------------------------
+    // h in [0,1), s/v in [0,1]. Achromatic colors return h = 0, so the
+    // round-trip through from_hsv is exact for grays and the pure hues.
+    std::array<float, 3> to_hsv() const {
+        const float rf = r / 255.f, gf = g / 255.f, bf = b / 255.f;
+        const float mx = std::fmax(rf, std::fmax(gf, bf));
+        const float mn = std::fmin(rf, std::fmin(gf, bf));
+        const float d = mx - mn;
+        float h = 0.f;
+        if (d > 0.f) {
+            if (mx == rf)      h = std::fmod((gf - bf) / d, 6.f);
+            else if (mx == gf) h = (bf - rf) / d + 2.f;
+            else               h = (rf - gf) / d + 4.f;
+            h /= 6.f;
+            if (h < 0.f) h += 1.f;
+        }
+        return {h, mx > 0.f ? d / mx : 0.f, mx};
+    }
+
+    // h wraps (negative / >1 accepted); s/v clamp to [0,1].
+    static Color from_hsv(float h, float s, float v, std::uint8_t alpha = 255) {
+        h -= std::floor(h);
+        s = std::clamp(s, 0.f, 1.f);
+        v = std::clamp(v, 0.f, 1.f);
+        float hp = std::fmin(h * 6.f, 5.999999f);
+        int hi = int(hp);
+        float f = hp - float(hi);
+        float p = v * (1.f - s);
+        float q = v * (1.f - s * f);
+        float t = v * (1.f - s * (1.f - f));
+        float rf, gf, bf;
+        switch (hi) {
+        case 0:  rf = v; gf = t; bf = p; break;
+        case 1:  rf = q; gf = v; bf = p; break;
+        case 2:  rf = p; gf = v; bf = t; break;
+        case 3:  rf = p; gf = q; bf = v; break;
+        case 4:  rf = t; gf = p; bf = v; break;
+        default: rf = v; gf = p; bf = q; break;
+        }
+        auto ch = [](float x) {
+            return std::uint8_t(std::clamp(x, 0.f, 1.f) * 255.f + 0.5f);
+        };
+        return Color(ch(rf), ch(gf), ch(bf), alpha);
+    }
+
     static Color black()      { return Color(0, 0, 0); }
     static Color white()      { return Color(255, 255, 255); }
     static Color transparent(){ return Color(0, 0, 0, 0); }
@@ -225,6 +272,8 @@ enum class Key : std::uint32_t {
     Home, End, PageUp, PageDown,
     Insert, CapsLock,
     F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+    A, B, C, D, E, F, G, H, I, J, K, L, M,
+    N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
 };
 
 enum Mod : std::uint32_t {
@@ -265,6 +314,22 @@ struct Event {
     bool shift() const { return mods & ModShift; }
     bool ctrl()  const { return mods & ModCtrl; }
     bool alt()   const { return mods & ModAlt; }
+    bool super() const { return mods & ModSuper; }
+    // Copy/paste chords use Ctrl everywhere and Cmd on macOS.
+    bool shortcut_mod() const { return mods & (ModCtrl | ModSuper); }
+};
+
+// Mouse cursor shapes a widget can request while hovered. The host renders
+// them (GLFW standard cursors via GlfwWindow::attach; headless apps can
+// ignore the callback).
+enum class Cursor : std::uint8_t {
+    Arrow,     // default
+    IBeam,     // text fields
+    Hand,      // clickable
+    Grab,      // panning / dragging (maps to hand where unavailable)
+    Crosshair, // precise picking
+    ResizeH,   // horizontal resize (↔)
+    ResizeV,   // vertical resize (↕)
 };
 
 } // namespace slikui
@@ -472,6 +537,14 @@ public:
     void line(Vec2 a, Vec2 b, Color c, float thickness = 1) {
         push({DrawCmd::Type::Line, {a.x, a.y, b.x - a.x, b.y - a.y},
               0, thickness, false, c, 0, {}});
+    }
+
+    // n-point connected line strip (butt joints; degenerate segments skipped).
+    void polyline(const Vec2* pts, size_t n, Color c, float thickness = 1) {
+        for (size_t i = 1; i < n; ++i) {
+            if (pts[i - 1].x == pts[i].x && pts[i - 1].y == pts[i].y) continue;
+            line(pts[i - 1], pts[i], c, thickness);
+        }
     }
 
     void circle(Vec2 center, float radius, Color c) {
@@ -7053,6 +7126,24 @@ public:
     Widget& set_tooltip(std::string t) { tooltip_ = std::move(t); return *this; }
     const std::string& tooltip() const { return tooltip_; }
 
+    // --- context menu ---
+    //
+    // Widget shown when the user right-clicks this widget or anything inside
+    // it (the nearest ancestor with one wins). Pass a Menu (widgets/menus.hpp;
+    // any popup-suitable widget works). Borrowed, never owned: keep it alive in
+    // your shell/app code for as long as this widget lives. Context::handle
+    // opens it as a floating popup at the cursor.
+    Widget& set_context_menu(Widget* w) { context_menu_ = w; return *this; }
+    Widget* context_menu() const { return context_menu_; }
+
+    // --- hover cursor ---
+    //
+    // Cursor shape requested while the mouse is over this widget (the nearest
+    // ancestor with a non-Arrow cursor wins). The host renders it; nothing
+    // happens without a host callback.
+    Widget& set_cursor(Cursor c) { hover_cursor_ = c; return *this; }
+    Cursor cursor() const { return hover_cursor_; }
+
     // --- texture ownership (Image and friends) ---
 
     // Widgets that own GPU-side textures (fonts, images) report pending
@@ -7076,10 +7167,16 @@ public:
 protected:
     Context* ctx = nullptr;     // set by Context::arrange_tree (theme/font access)
     std::string tooltip_;       // hover-delay tooltip text
+    Widget* context_menu_ = nullptr;  // right-click target (borrowed, see above)
+    Cursor hover_cursor_ = Cursor::Arrow; // requested while hovered
 
     friend class Context;
 
 public:
+
+    // The Context this widget is attached to (null while detached). Menus and
+    // other popup widgets read it off their anchor when first opened.
+    Context* context() const { return ctx; }
 
     // Invoke an event on the subtree, deepest-first, until consumed.
     bool dispatch(const Event& e) {
@@ -7127,12 +7224,21 @@ inline bool hit(const Widget& w, Vec2 p) {
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace slikui {
+
+class Menu; // widgets/menus.hpp — borrowed popups, opened by right-click
+class Dialog; // widgets/shells.hpp — floating shell layer (see open_dialog)
+
+// Where an anchored popup opens relative to its anchor widget. When the
+// preferred side would leave the frame, the popup flips to the opposite side
+// and is then clamped fully inside the frame.
+enum class PopupDir : std::uint8_t { Below, Above, Right, Left };
 
 // Builds the tooltip popup for `w` at `pos`. Defined after Context (needs the
 // complete type); declared here so Context::show_tooltip can call it.
@@ -7157,6 +7263,37 @@ public:
 
     void set_frame_size(Vec2 size) { frame_ = size; }
     Vec2 frame_size() const { return frame_; }
+
+    // --- cursor shapes (host-provided) ---
+    //
+    // The host turns Cursor values into real system cursors (GLFW does this
+    // via attach); without a callback, widget cursor requests are no-ops.
+    Context& set_cursor_host(std::function<void(Cursor)> f) {
+        cursor_host_ = std::move(f);
+        return *this;
+    }
+
+    // --- clipboard (host-provided) ---
+    //
+    // The window system owns the real clipboard; slikui reaches it through two
+    // host callbacks (the GLFW wrapper installs glfwGetClipboardString /
+    // glfwSetClipboardString via GlfwWindow::attach). Headless hosts (tests)
+    // may inject fakes; with no callbacks set, clipboard operations are
+    // silent no-ops.
+    Context& set_clipboard_source(std::function<std::string()> f) {
+        clipboard_source_ = std::move(f);
+        return *this;
+    }
+    Context& set_clipboard_sink(std::function<void(std::string)> f) {
+        clipboard_sink_ = std::move(f);
+        return *this;
+    }
+    std::string clipboard_text() const {
+        return clipboard_source_ ? clipboard_source_() : std::string{};
+    }
+    void set_clipboard_text(std::string text) {
+        if (clipboard_sink_) clipboard_sink_(std::move(text));
+    }
 
     // --- tree ---
 
@@ -7185,8 +7322,11 @@ public:
         hover_since_ = -1;
         inside_press_ = false;
         popups_.clear();  // popup widgets may hold callbacks
+        dialogs_.clear(); // dialog entries (owned dialogs move to closing_)
+        toasts_.clear();
         root_.reset();    // the tree itself
         closing_.clear(); // widgets deferred by close_popups()
+        shortcuts_.clear(); // may hold Python callables
     }
 
     // --- input ---
@@ -7209,12 +7349,27 @@ public:
     // --- frame ---
 
     void tick(Time t) {
+        now_ = t.now;
         if (!root_) return;
         attach_tree(*root_);
         root_->measure(Constraints::tight({frame_.x, frame_.y}));
         root_->arrange({0, 0, frame_.x, frame_.y});
         root_->tick_tree(t);
-        for (auto& p : popups_) layout_popup(p);
+        for (auto& p : popups_) {
+            layout_popup(p);
+            p.widget->tick_tree(t); // menus animate hover, toasts fade
+        }
+        for (auto& d : dialogs_) {
+            layout_dialog(d);
+            d.widget->tick_tree(t);
+        }
+        // Expired toasts leave the popup stack.
+        for (size_t i = toasts_.size(); i-- > 0;) {
+            if (t.now >= toasts_[i].expires_at) {
+                close_popup_widget(toasts_[i].widget);
+                toasts_.erase(toasts_.begin() + long(i));
+            }
+        }
         update_tooltip(t);
     }
 
@@ -7226,31 +7381,156 @@ public:
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
+        if (Widget* modal = topmost_modal()) // dim everything under dialogs
+            list.rect({0, 0, frame_.x, frame_.y}, Color::black().faded(.45f));
+        for (auto& d : dialogs_) d.widget->paint_tree(env);
         sink_->render(list, frame_);
     }
 
     // --- popups ---
-
-    // Overlay rendered above everything; auto-dismissed when clicking outside.
+    //
+    // Popups float above the tree and are dismissed by clicking outside,
+    // Escape (topmost only), or FocusLost. They form a stack — a submenu is
+    // pushed above its parent menu — and clicks are resolved against the
+    // topmost popup containing the cursor: everything above it closes, the
+    // popup itself stays (unless the click lands outside every popup, which
+    // closes the whole stack).
+    //
+    // Two ownership flavors: owned popups (tooltips, Dropdown) are destroyed
+    // by Context on close; borrowed popups (Menu) stay owned by the caller and
+    // must outlive their time on the stack.
     Widget& push_popup(std::unique_ptr<Widget> w, Vec2 pos) {
         Widget::WidgetPtr owned(w.release());
         Widget& ref = *owned;
-        popups_.push_back({std::move(owned), pos});
+        popups_.push_back(Popup{std::move(owned), &ref, nullptr, pos, PopupDir::Below});
         attach_tree(ref);
         layout_popup(popups_.back());
         return ref;
     }
+    Widget& push_popup(Widget& w, Vec2 pos) {
+        popups_.push_back(Popup{nullptr, &w, nullptr, pos, PopupDir::Below});
+        attach_tree(w);
+        layout_popup(popups_.back());
+        return w;
+    }
+    // Anchored variants: open beside `anchor` toward `dir` (flipping to the
+    // opposite side and clamping into the frame when needed).
+    Widget& push_popup(std::unique_ptr<Widget> w, Widget& anchor, PopupDir dir) {
+        Widget::WidgetPtr owned(w.release());
+        Widget& ref = *owned;
+        popups_.push_back(Popup{std::move(owned), &ref, &anchor, {}, dir});
+        attach_tree(ref);
+        layout_popup(popups_.back());
+        return ref;
+    }
+    Widget& push_popup(Widget& w, Widget& anchor, PopupDir dir) {
+        popups_.push_back(Popup{nullptr, &w, &anchor, {}, dir});
+        attach_tree(w);
+        layout_popup(popups_.back());
+        return w;
+    }
+    // Open `w` (typically a Menu) as a floating popup at a screen position.
+    // The right-click handler calls this for widgets with a context menu;
+    // apps may call it directly for custom triggers.
+    template <class W>
+    Widget& open_context_menu(W& w, Vec2 pos) {
+        return push_popup(w, pos);
+    }
+
     void close_popups() {
         for (auto& p : popups_) {
-            Widget* root = p.widget.get();
+            Widget* root = p.widget;
             if (focused_ && inside(focused_, root)) set_focus(nullptr);
-            closing_.push_back(std::move(p.widget));
+            if (p.owned) closing_.push_back(std::move(p.owned));
         }
         popups_.clear();
     }
     bool has_popups() const { return !popups_.empty(); }
     size_t popup_count() const { return popups_.size(); }
-    Widget* popup(size_t i) { return popups_[i].widget.get(); }
+    Widget* popup(size_t i) { return popups_[i].widget; }
+    // Index of the popup whose widget is exactly `w`, or -1 (menus use this to
+    // detect "is my submenu already open" and toggle it).
+    long popup_index(const Widget* w) const {
+        for (size_t i = 0; i < popups_.size(); ++i)
+            if (popups_[i].widget == w) return long(i);
+        return -1;
+    }
+    bool popup_open(const Widget* w) const { return popup_index(w) >= 0; }
+    // Close every popup above the one containing `anchor` (menus: opening a
+    // submenu closes its siblings; an anchor outside all popups closes all).
+    // Also used as "close the topmost popup" via close_topmost_popup (Escape).
+    void close_popups_above(Widget& anchor) {
+        long k = -1;
+        for (long i = long(popups_.size()) - 1; i >= 0; --i)
+            if (inside(&anchor, popups_[size_t(i)].widget)) {
+                k = i;
+                break;
+            }
+        close_popups_above_index(k);
+    }
+    void close_topmost_popup() {
+        if (popups_.empty()) return;
+        close_popups_above_index(long(popups_.size()) - 2);
+    }
+
+    // --- dialogs ---
+    //
+    // Floating shell windows ABOVE the popup layer (Dialog, MessageBox,
+    // FileBrowser — widgets/dialogs.hpp). Borrowed entries are app-owned and
+    // must outlive their stay; owned entries are destroyed on close. A modal
+    // dialog dims the app and traps presses outside it.
+    template <class D>
+    Widget& open_dialog(std::unique_ptr<D> d) {
+        D& ref = *d; // D is complete at the call site
+        Widget::WidgetPtr owned(d.release());
+        dialogs_.push_back(DialogEntry{std::move(owned), &ref, ref.modal()});
+        attach_tree(ref);
+        layout_dialog(dialogs_.back());
+        return ref;
+    }
+    // Borrowed flavor: the app keeps the dialog alive (like Menu).
+    template <class D>
+    Widget& open_dialog(D& d) {
+        dialogs_.push_back(DialogEntry{nullptr, &d, d.modal()});
+        attach_tree(d);
+        layout_dialog(dialogs_.back());
+        return d;
+    }
+    void close_dialog(Widget& d) {
+        for (size_t i = dialogs_.size(); i-- > 0;) {
+            if (dialogs_[i].widget == &d) {
+                if (focused_ && inside(focused_, dialogs_[i].widget))
+                    set_focus(nullptr);
+                if (dialogs_[i].owned)
+                    closing_.push_back(std::move(dialogs_[i].owned));
+                dialogs_.erase(dialogs_.begin() + long(i));
+            }
+        }
+    }
+    size_t dialog_count() const { return dialogs_.size(); }
+    Widget* dialog(size_t i) { return dialogs_[i].widget; }
+
+    // --- toasts ---
+    //
+    // Transient corner notices on the popup layer: pushed owned, positioned
+    // in the bottom-right corner, removed automatically after `seconds`
+    // (measured from the last tick's time).
+    void push_toast(std::unique_ptr<Widget> w, double seconds) {
+        Widget* raw = w.get();
+        push_popup(std::move(w), {frame_.x - 12, frame_.y - 12});
+        toasts_.push_back(ToastEntry{raw, now_ + seconds});
+    }
+
+    // --- shortcuts ---
+    //
+    // Global accelerators, checked on KeyPress before widget dispatch. A
+    // shortcut requires at least one modifier so plain typing never fires one;
+    // matching is exact (Ctrl+S ≠ Ctrl+Shift+S).
+    Context& add_shortcut(Key key, unsigned mods, std::function<void()> action) {
+        shortcuts_.push_back(Shortcut{key, mods, std::move(action)});
+        return *this;
+    }
+    void clear_shortcuts() { shortcuts_.clear(); }
 
     // --- textures ---
 
@@ -7266,9 +7546,29 @@ public:
     }
 
 private:
+    struct Shortcut {
+        Key key;
+        unsigned mods;
+        std::function<void()> action;
+    };
+
+    struct DialogEntry {
+        Widget::WidgetPtr owned; // null for borrowed dialogs
+        Widget* widget = nullptr;
+        bool modal = false;
+        bool placed = false; // false until the first layout centers it
+    };
+    struct ToastEntry {
+        Widget* widget = nullptr;
+        double expires_at = 0;
+    };
+
     struct Popup {
-        Widget::WidgetPtr widget;
+        Widget::WidgetPtr owned;  // null for borrowed popups
+        Widget* widget = nullptr;
+        Widget* anchor = nullptr; // position beside this widget (null = at pos)
         Vec2 pos;
+        PopupDir dir = PopupDir::Below;
     };
 
     static bool inside(Widget* w, Widget* root) {
@@ -7277,14 +7577,80 @@ private:
         return false;
     }
 
+    // True when `pos` is inside `modal`'s subtree bounds (dialogs are roots).
+    bool inside_hit_any(Widget& modal, Vec2 pos) { return hit_test_in(modal, pos); }
+
+    // Resolve the hover cursor from the hit chain and notify the host on
+    // change (no-ops without a host callback).
+    void update_cursor(Widget* hit) {
+        Cursor cur = Cursor::Arrow;
+        for (Widget* chain = hit; chain; chain = chain->parent)
+            if (chain->cursor() != Cursor::Arrow) {
+                cur = chain->cursor();
+                break;
+            }
+        if (cur != cursor_current_) {
+            cursor_current_ = cur;
+            if (cursor_host_) cursor_host_(cur);
+        }
+    }
+
     void handle_event(const Event& e);
 
     void layout_popup(Popup& p) {
-        Size s = p.widget->measure(Constraints::loose({frame_.x, frame_.y}));
-        // Clamp inside the frame.
-        s.w = std::fmin(s.w, std::fmax(frame_.x - p.pos.x, 40.f));
-        s.h = std::fmin(s.h, std::fmax(frame_.y - p.pos.y, 40.f));
-        p.widget->arrange({p.pos.x, p.pos.y, s.w, s.h});
+        Size s = p.widget->measure(Constraints::loose(frame_));
+        s.w = std::fmin(s.w, std::fmax(frame_.x, 40.f));
+        s.h = std::fmin(s.h, std::fmax(frame_.y, 40.f));
+        Vec2 pos = p.pos;
+        if (p.anchor && p.anchor->ctx == this) {
+            const Rect& a = p.anchor->bounds;
+            switch (p.dir) {
+            case PopupDir::Below: pos = {a.x, a.bottom() + 2}; break;
+            case PopupDir::Above: pos = {a.x, a.y - s.h - 2}; break;
+            case PopupDir::Right: pos = {a.right() + 2, a.y}; break;
+            case PopupDir::Left:  pos = {a.x - s.w - 2, a.y}; break;
+            }
+            // Flip to the opposite side when the preferred one overflows.
+            switch (p.dir) {
+            case PopupDir::Below:
+                if (pos.y + s.h > frame_.y && a.y - s.h - 2 >= 0)
+                    pos.y = a.y - s.h - 2;
+                break;
+            case PopupDir::Above:
+                if (pos.y < 0 && a.bottom() + 2 + s.h <= frame_.y)
+                    pos.y = a.bottom() + 2;
+                break;
+            case PopupDir::Right:
+                if (pos.x + s.w > frame_.x && a.x - s.w - 2 >= 0)
+                    pos.x = a.x - s.w - 2;
+                break;
+            case PopupDir::Left:
+                if (pos.x < 0 && a.right() + 2 + s.w <= frame_.x)
+                    pos.x = a.right() + 2;
+                break;
+            }
+        }
+        // Clamp fully inside the frame (a free popup near an edge slides in
+        // instead of being clipped; a popup taller than the frame keeps its
+        // clamped size and sits at the top-left corner).
+        pos.x = std::clamp(pos.x, 0.f, std::fmax(frame_.x - s.w, 0.f));
+        pos.y = std::clamp(pos.y, 0.f, std::fmax(frame_.y - s.h, 0.f));
+        p.widget->arrange({pos.x, pos.y, s.w, s.h});
+    }
+
+    // Topmost popup whose bounds contain `pos`, or -1.
+    long topmost_popup_containing(Vec2 pos) const {
+        for (long i = long(popups_.size()) - 1; i >= 0; --i)
+            if (popups_[size_t(i)].widget->bounds.contains(pos)) return i;
+        return -1;
+    }
+    void close_popups_above_index(long k) {
+        for (long i = long(popups_.size()) - 1; i > k; --i) {
+            Popup& p = popups_[size_t(i)];
+            if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
+            if (p.owned) closing_.push_back(std::move(p.owned));
+        }
+        if (k + 1 < long(popups_.size())) popups_.resize(size_t(k + 1));
     }
 
     // Dispatch an event up the chain from `w` to the root, until consumed.
@@ -7356,10 +7722,44 @@ private:
 
     Widget* hit_test(Vec2 pos) {
         if (mouse_capture_) return mouse_capture_;
-        for (auto& p : popups_) { // popups float above the root tree
-            if (Widget* w = hit_test_in(*p.widget, pos)) return w;
+        for (auto it = dialogs_.rbegin(); it != dialogs_.rend(); ++it)
+            if (Widget* w = hit_test_in(*it->widget, pos)) return w;
+        for (auto it = popups_.rbegin(); it != popups_.rend(); ++it) {
+            // Popups float above the root tree; the topmost one wins so a
+            // submenu overlapping its parent menu gets the click.
+            if (Widget* w = hit_test_in(*it->widget, pos)) return w;
         }
         return root_ ? hit_test_in(*root_, pos) : nullptr;
+    }
+
+    void layout_dialog(DialogEntry& d) {
+        Size s = d.widget->measure(Constraints::loose(frame_));
+        s.w = std::fmin(s.w, std::fmax(frame_.x - 16.f, 60.f));
+        s.h = std::fmin(s.h, std::fmax(frame_.y - 16.f, 40.f));
+        // First layout centers; afterwards the widget's bounds carry the
+        // position (dragging moves bounds; Dialog::arrange re-pins + clamps).
+        Vec2 pos = d.placed
+                       ? Vec2{d.widget->bounds.x, d.widget->bounds.y}
+                       : Vec2{(frame_.x - s.w) * .5f, (frame_.y - s.h) * .5f};
+        d.widget->arrange({pos.x, pos.y, s.w, s.h});
+        d.placed = true;
+    }
+
+    Widget* topmost_modal() const {
+        for (auto it = dialogs_.rbegin(); it != dialogs_.rend(); ++it)
+            if (it->modal) return it->widget;
+        return nullptr;
+    }
+    // Remove one popup (used by toast expiry); moves owned storage to closing_.
+    void close_popup_widget(Widget* w) {
+        for (size_t i = 0; i < popups_.size(); ++i) {
+            if (popups_[i].widget == w) {
+                if (focused_ && inside(focused_, w)) set_focus(nullptr);
+                if (popups_[i].owned) closing_.push_back(std::move(popups_[i].owned));
+                popups_.erase(popups_.begin() + long(i));
+                return;
+            }
+        }
     }
 
     Widget* hit_test_in(Widget& w, Vec2 pos) {
@@ -7377,7 +7777,7 @@ private:
     void cycle_focus(bool backwards) {
         std::vector<Widget*> focusables;
         collect_focusables(root_.get(), focusables);
-        for (auto& p : popups_) collect_focusables(p.widget.get(), focusables);
+        for (auto& p : popups_) collect_focusables(p.widget, focusables);
         if (focusables.empty()) return;
         size_t idx = 0;
         for (size_t i = 0; i < focusables.size(); ++i)
@@ -7403,6 +7803,24 @@ private:
     std::vector<Widget::WidgetPtr> closing_; // deferred destruction
     bool inside_press_ = false; // mouse button held from a press inside the tree
     Widget* mouse_capture_ = nullptr;
+
+    // clipboard host callbacks (may be empty)
+    std::function<std::string()> clipboard_source_;
+    std::function<void(std::string)> clipboard_sink_;
+
+    // global accelerators (see add_shortcut)
+    std::vector<Shortcut> shortcuts_;
+
+    // floating shell layer above popups + toast expiry tracking
+    std::vector<DialogEntry> dialogs_;
+    std::vector<ToastEntry> toasts_;
+
+    // cursor shape host callback + last-requested shape
+    std::function<void(Cursor)> cursor_host_;
+    Cursor cursor_current_ = Cursor::Arrow;
+
+    // last tick's time (toast expiry reference)
+    double now_ = 0;
 
     // tooltip state
     Widget* hover_ = nullptr;
@@ -7497,6 +7915,7 @@ inline void Context::handle_event(const Event& e) {
         Widget* hit = hit_test(e.pos);
         if (hit) dispatch(*hit, e);
         set_hover(hit, e.pos);
+        update_cursor(hit);
         return;
     }
     case T::MousePress:
@@ -7505,13 +7924,29 @@ inline void Context::handle_event(const Event& e) {
             tooltip_open_ = false;
             hover_since_ = -1;
         }
-        if (e.button == MouseLeft) {
+        if (e.button == MouseRight) {
+            // Right-click opens the nearest ancestor's context menu, if any.
             if (Widget* hit = hit_test(e.pos)) {
-                // Click outside an open popup dismisses it and stops here.
-                bool hit_popup = false;
-                for (auto& p : popups_)
-                    if (p.widget->bounds.contains(e.pos)) hit_popup = true;
-                if (has_popups() && !hit_popup) {
+                for (Widget* chain = hit; chain; chain = chain->parent) {
+                    if (chain->context_menu_) {
+                        close_popups();
+                        open_context_menu(*chain->context_menu_, e.pos);
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+        if (e.button == MouseLeft) {
+            // A modal dialog traps presses outside it.
+            if (Widget* modal = topmost_modal()) {
+                if (!inside_hit_any(*modal, e.pos)) return;
+            }
+            if (Widget* hit = hit_test(e.pos)) {
+                // A click outside every popup closes the whole stack; a click
+                // inside one dispatches into it untouched — menu items manage
+                // their own sub-stack (toggle, sibling closing, self-dismiss).
+                if (has_popups() && topmost_popup_containing(e.pos) < 0) {
                     close_popups();
                     return;
                 }
@@ -7535,8 +7970,12 @@ inline void Context::handle_event(const Event& e) {
         return;
     case T::KeyPress: {
         if (e.key == Key::Escape) {
+            if (!dialogs_.empty()) {
+                close_dialog(*dialogs_.back().widget); // dialogs unwind first
+                return;
+            }
             if (has_popups()) {
-                close_popups();
+                close_topmost_popup(); // submenus unwind one level per Esc
                 return;
             }
             set_focus(nullptr);
@@ -7545,6 +7984,14 @@ inline void Context::handle_event(const Event& e) {
         if (e.key == Key::Tab) {
             cycle_focus(e.shift());
             return;
+        }
+        if (e.mods != 0 && !shortcuts_.empty()) {
+            for (auto& s : shortcuts_) {
+                if (s.key == e.key && s.mods == e.mods && s.action) {
+                    s.action();
+                    return;
+                }
+            }
         }
         if (focused_) {
             dispatch(*focused_, e);
@@ -8087,8 +8534,10 @@ private:
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace slikui {
 
@@ -8451,28 +8900,56 @@ public:
     }
     Slider& set_value(float v, bool fire_callback = true) {
         v = std::clamp(v, min_, max_);
+        if (step_ > 0) v = min_ + std::round((v - min_) / step_) * step_;
+        v = std::clamp(v, min_, max_);
         if (v == value_) return *this;
         value_ = v;
         fraction_.target = fraction();
+        label_valid_ = false;
         if (fire_callback && on_change_) on_change_(value_);
         return *this;
     }
     float value() const { return value_; }
     Slider& on_change(std::function<void(float)> f) { on_change_ = std::move(f); return *this; }
 
+    // Built-in label + live value row above the track (the demo helper this
+    // replaces was: Row[label, value-Label] + Slider underneath).
+    Slider& set_label(std::string label) { label_ = std::move(label); label_valid_ = false; return *this; }
+    // printf format for the value text; showing a value implies the label row.
+    Slider& set_format(std::string fmt) { fmt_ = std::move(fmt); fmt_set_ = true; label_valid_ = false; return *this; }
+    // Position maps through log(); requires min > 0 (silently ignored else).
+    Slider& set_log_scale(bool on) {
+        log_ = on && min_ > 0.f && max_ > min_;
+        set_value(value_, false);
+        return *this;
+    }
+    // Quantize values to multiples of step (step 1 = integer mode). 0 = off.
+    Slider& set_step(float step) { step_ = step; set_value(value_, false); return *this; }
+
     bool focusable() const override { return true; }
 
-    Size measure(const Constraints& c) override { return c.clamp({160.f, 22.f}); }
+    Size measure(const Constraints& c) override {
+        return c.clamp({160.f, shows_value() ? 37.f : 22.f});
+    }
 
     void paint(const PaintEnv& env) const override {
         const Theme& t = env.theme;
-        float cy = bounds.center().y;
+        refresh_value_text();
+        float inv = 1.f / ui_scale();
+        float label_h = shows_value() ? 15.f : 0.f;
+        float cy = bounds.y + label_h + (bounds.h - label_h) * .5f;
         float x0 = bounds.x + 8, x1 = bounds.right() - 8;
         env.list.line({x0, cy}, {x1, cy}, t.surface_alt, 4);
         float fx = x0 + fraction_.value * (x1 - x0);
         if (fx > x0) env.list.line({x0, cy}, {fx, cy}, t.accent, 4);
         env.list.circle({fx, cy}, 7, Color::white());
         env.list.circle({fx, cy}, 6, t.accent);
+        if (shows_value()) {
+            float ty = bounds.y + 1;
+            if (!label_.empty()) paint_text(env, label_lay_, {bounds.x, ty}, t.text_dim, inv);
+            float vw = value_lay_.size.w * inv;
+            paint_text(env, value_lay_, {bounds.right() - vw, ty}, t.text_dim, inv);
+        }
     }
 
     bool on_event(const Event& e) override {
@@ -8502,9 +8979,9 @@ public:
             if (!focused) return false;
             switch (e.key) {
             case Key::Left:
-            case Key::Down: set_value(value_ - (max_ - min_) / 20.f); return true;
+            case Key::Down: set_value(value_ - key_step()); return true;
             case Key::Right:
-            case Key::Up:   set_value(value_ + (max_ - min_) / 20.f); return true;
+            case Key::Up:   set_value(value_ + key_step()); return true;
             case Key::Home: set_value(min_); return true;
             case Key::End:  set_value(max_); return true;
             default: return false;
@@ -8522,19 +8999,139 @@ public:
     const char* widget_type() const override { return "Slider"; }
 
 private:
+    bool shows_value() const { return !label_.empty() || fmt_set_; }
+    float key_step() const { return step_ > 0 ? step_ : (max_ - min_) / 20.f; }
+
     float fraction() const {
-        return max_ > min_ ? clamp01((value_ - min_) / (max_ - min_)) : 0.f;
+        if (max_ <= min_) return 0.f;
+        if (log_) return clamp01(std::log(value_ / min_) / std::log(max_ / min_));
+        return clamp01((value_ - min_) / (max_ - min_));
     }
     void value_from_pos(float x) {
         float x0 = bounds.x + 8, x1 = bounds.right() - 8;
         float frac = x1 > x0 ? clamp01((x - x0) / (x1 - x0)) : 0.f;
-        set_value(min_ + frac * (max_ - min_));
+        float v = log_ ? min_ * std::pow(max_ / min_, frac) : min_ + frac * (max_ - min_);
+        set_value(v);
+    }
+
+    void refresh_value_text() const {
+        if (label_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        if (!label_.empty()) label_lay_ = ctx->font().layout(label_, t.s(t.base_font_px));
+        char buf[64];
+        std::snprintf(buf, sizeof buf, fmt_.c_str(), double(value_));
+        value_lay_ = ctx->font().layout(buf, t.s(t.base_font_px));
+        label_valid_ = true;
     }
 
     float min_, max_, value_;
+    std::string label_;
+    std::string fmt_ = "%.3g";
+    bool fmt_set_ = false, log_ = false;
+    float step_ = 0;
     bool dragging_ = false;
     Anim fraction_{0, 0, 20};
     std::function<void(float)> on_change_;
+    mutable text::TextLayout label_lay_, value_lay_;
+    mutable bool label_valid_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// Segmented — N-option single-select row (a Dropdown for 2-5 options)
+// ---------------------------------------------------------------------------
+class Segmented : public Widget {
+public:
+    explicit Segmented(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+
+    Segmented& set_items(std::vector<std::string> items) {
+        items_ = std::move(items);
+        selected_ = -1;
+        hovered_ = -1;
+        labels_valid_ = false;
+        return *this;
+    }
+    Segmented& set_selected(long index, bool fire_callback = true) {
+        if (index == selected_) return *this;
+        selected_ = index;
+        if (fire_callback && on_select_ && selected_ >= 0) on_select_(size_t(selected_));
+        return *this;
+    }
+    long selected() const { return selected_; }
+    Segmented& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+
+    bool stretch_cross() const override { return false; }
+
+    Size measure(const Constraints& c) override {
+        refresh_labels();
+        float inv = 1.f / ui_scale();
+        float w = 0;
+        for (auto& l : lays_) w += l.size.w * inv + 24.f;
+        return c.clamp({std::fmax(w, 60.f), 26.f});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        refresh_labels();
+        const Theme& t = env.theme;
+        float inv = 1.f / ui_scale();
+        env.list.rect(bounds, t.surface_alt, t.radius);
+        float x = bounds.x;
+        for (size_t i = 0; i < items_.size(); ++i) {
+            float w = lays_[i].size.w * inv + 24.f;
+            Rect seg{x, bounds.y, w, bounds.h};
+            float ty = seg.center().y - lays_[i].size.h * inv * .5f;
+            if (long(i) == selected_) {
+                env.list.rect(seg, t.accent, t.radius);
+                paint_text(env, lays_[i], {x + 12, ty}, t.accent_text, inv);
+            } else {
+                Color txt = long(i) == hovered_ && enabled ? t.text : t.text_dim;
+                paint_text(env, lays_[i], {x + 12, ty}, txt, inv);
+            }
+            x += w;
+        }
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MouseMove:
+            hovered_ = index_at(e.pos.x);
+            return false;
+        case Event::Type::MousePress:
+            if (enabled && bounds.contains(e.pos)) {
+                long idx = index_at(e.pos.x);
+                if (idx >= 0) set_selected(idx);
+                return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    const char* widget_type() const override { return "Segmented"; }
+
+private:
+    long index_at(float x) const {
+        float inv = 1.f / ui_scale();
+        float acc = bounds.x;
+        for (size_t i = 0; i < items_.size(); ++i) {
+            acc += lays_[i].size.w * inv + 24.f;
+            if (x < acc) return long(i);
+        }
+        return -1;
+    }
+    void refresh_labels() const {
+        if (labels_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        lays_.clear();
+        for (auto& it : items_) lays_.push_back(ctx->font().layout(it, t.s(t.base_font_px)));
+        labels_valid_ = true;
+    }
+
+    std::vector<std::string> items_;
+    long selected_ = -1, hovered_ = -1;
+    std::function<void(size_t)> on_select_;
+    mutable std::vector<text::TextLayout> lays_;
+    mutable bool labels_valid_ = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -8609,16 +9206,21 @@ private:
 
 #include <functional>
 #include <string>
+#include <utility>
 
 namespace slikui {
 
 class TextField : public Widget {
 public:
-    explicit TextField(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+    explicit TextField(std::string widget_id = {})
+        : Widget(std::move(widget_id)) {
+        hover_cursor_ = Cursor::IBeam; // text fields ask for the I-beam
+    }
 
     TextField& set_text(std::string t) {
         text_ = std::move(t);
         caret_ = text_.size();
+        clear_sel();
         return *this;
     }
     const std::string& text() const { return text_; }
@@ -8659,6 +9261,12 @@ public:
         if (!shown.empty()) {
             text::TextLayout lay = ctx->font().layout(shown, px);
             float text_y = bounds.center().y - lay.size.h * inv * .5f;
+            if (focused && has_sel()) {
+                auto [lo, hi] = sel_range();
+                float sx = bounds.x + pad_x + ctx->font().advance_upto(text_, lo, px) * inv;
+                float ex = bounds.x + pad_x + ctx->font().advance_upto(text_, hi, px) * inv;
+                env.list.rect({sx, text_y, ex - sx, lay.size.h * inv}, t.accent.faded(.35f), 2);
+            }
             paint_lay(env, lay, bounds.x + pad_x, text_y, t.text, inv);
             if (focused && caret_visible_) {
                 float cx = bounds.x + pad_x +
@@ -8677,15 +9285,24 @@ public:
         switch (e.type) {
         case Event::Type::MousePress:
             if (bounds.contains(e.pos)) {
-                // place caret at click position (approximate: walk codepoints)
-                float inv = 1.f / ui_scale();
-                float px = ctx->theme().s(ctx->theme().base_font_px);
-                float x = e.pos.x - bounds.x - 8;
-                size_t n = 0;
-                while (n < text_.size() &&
-                       ctx->font().advance_upto(text_, n + 1, px) * inv < x)
-                    ++n;
-                caret_ = n;
+                caret_ = caret_at(e.pos.x);
+                sel_anchor_ = long(caret_);
+                selecting_ = true;
+                ctx->capture_mouse(this);
+                return true;
+            }
+            return false;
+        case Event::Type::MouseMove:
+            if (selecting_) {
+                caret_ = caret_at(e.pos.x);
+                return true;
+            }
+            return false;
+        case Event::Type::MouseRelease:
+            if (selecting_) {
+                selecting_ = false;
+                ctx->release_mouse(this);
+                if (!has_sel()) clear_sel(); // a click with no drag: no selection
                 return true;
             }
             return false;
@@ -8693,44 +9310,111 @@ public:
         case Event::Type::TextInput: {
             if (!focused || e.codepoint == 0) return false;
             if (e.codepoint < 32) return false;
+            erase_selection();
             std::string insert = utf8_encode(e.codepoint);
             text_.insert(caret_, insert);
             caret_ += insert.size();
+            clear_sel(); // typing collapses the selection
             if (on_change_) on_change_(text_);
             return true;
         }
 
         case Event::Type::KeyPress: {
             if (!focused) return false;
+            // Ctrl/Cmd chords: select-all, copy, cut, paste (host clipboard).
+            if (e.shortcut_mod()) {
+                switch (e.key) {
+                case Key::A: caret_ = text_.size(); sel_anchor_ = 0; return true;
+                case Key::C:
+                    if (has_sel()) {
+                        auto [lo, hi] = sel_range();
+                        ctx->set_clipboard_text(text_.substr(lo, hi - lo));
+                    }
+                    return true;
+                case Key::X:
+                    if (has_sel()) {
+                        auto [lo, hi] = sel_range();
+                        ctx->set_clipboard_text(text_.substr(lo, hi - lo));
+                        text_.erase(lo, hi - lo);
+                        caret_ = lo;
+                        clear_sel();
+                        if (on_change_) on_change_(text_);
+                    }
+                    return true;
+                case Key::V: {
+                    std::string clip = ctx->clipboard_text();
+                    if (clip.empty()) return true;
+                    erase_selection();
+                    text_.insert(caret_, clip);
+                    caret_ += clip.size();
+                    clear_sel();
+                    if (on_change_) on_change_(text_);
+                    return true;
+                }
+                default: return false;
+                }
+            }
             switch (e.key) {
             case Key::Backspace:
-                if (caret_ > 0) {
+                if (has_sel()) {
+                    erase_selection();
+                    if (on_change_) on_change_(text_);
+                } else if (caret_ > 0) {
                     caret_ = prev_cp_boundary(caret_);
                     text_.erase(caret_, next_cp_boundary(caret_) - caret_);
+                    clear_sel();
                     if (on_change_) on_change_(text_);
                 }
                 return true;
             case Key::Delete:
-                if (caret_ < text_.size()) {
+                if (has_sel()) {
+                    erase_selection();
+                    if (on_change_) on_change_(text_);
+                } else if (caret_ < text_.size()) {
                     text_.erase(caret_, next_cp_boundary(caret_) - caret_);
+                    clear_sel();
                     if (on_change_) on_change_(text_);
                 }
                 return true;
             case Key::Left:
-                caret_ = prev_cp_boundary(caret_);
+                if (e.shift()) {
+                    if (sel_anchor_ < 0) sel_anchor_ = long(caret_);
+                    caret_ = prev_cp_boundary(caret_);
+                } else {
+                    clear_sel();
+                    caret_ = prev_cp_boundary(caret_);
+                }
                 return true;
             case Key::Right:
-                caret_ = next_cp_boundary(caret_);
+                if (e.shift()) {
+                    if (sel_anchor_ < 0) sel_anchor_ = long(caret_);
+                    caret_ = next_cp_boundary(caret_);
+                } else {
+                    clear_sel();
+                    caret_ = next_cp_boundary(caret_);
+                }
                 return true;
-            case Key::Home: caret_ = 0; return true;
-            case Key::End:  caret_ = text_.size(); return true;
+            case Key::Home:
+                if (e.shift()) {
+                    if (sel_anchor_ < 0) sel_anchor_ = long(caret_);
+                } else clear_sel();
+                caret_ = 0;
+                return true;
+            case Key::End:
+                if (e.shift()) {
+                    if (sel_anchor_ < 0) sel_anchor_ = long(caret_);
+                } else clear_sel();
+                caret_ = text_.size();
+                return true;
             case Key::Enter:
                 if (on_submit_) on_submit_(text_);
                 return true;
             case Key::Space:
                 // Space arrives as TextInput in most backends; also accept here.
+                erase_selection();
                 text_.insert(caret_, " ");
                 ++caret_;
+                clear_sel();
                 if (on_change_) on_change_(text_);
                 return true;
             default:
@@ -8764,6 +9448,32 @@ private:
 
     std::string display_text() const {
         return password_ ? std::string(text_.size(), '*') : text_;
+    }
+
+    // --- selection (byte offsets into text_) ---
+    bool has_sel() const { return sel_anchor_ >= 0 && size_t(sel_anchor_) != caret_; }
+    std::pair<size_t, size_t> sel_range() const {
+        size_t a = size_t(sel_anchor_), b = caret_;
+        return a < b ? std::pair{a, b} : std::pair{b, a};
+    }
+    void clear_sel() { sel_anchor_ = -1; }
+    void erase_selection() {
+        if (!has_sel()) return;
+        auto [lo, hi] = sel_range();
+        text_.erase(lo, hi - lo);
+        caret_ = lo;
+        clear_sel();
+    }
+    // Place the caret at a click position (approximate: walk codepoints).
+    size_t caret_at(float x) const {
+        float inv = 1.f / ui_scale();
+        float px = ctx->theme().s(ctx->theme().base_font_px);
+        float rel = x - bounds.x - 8;
+        size_t n = 0;
+        while (n < text_.size() &&
+               ctx->font().advance_upto(text_, n + 1, px) * inv < rel)
+            ++n;
+        return n;
     }
 
     size_t next_cp_boundary(size_t i) const {
@@ -8807,6 +9517,8 @@ private:
 
     std::string text_, placeholder_;
     size_t caret_ = 0;
+    long sel_anchor_ = -1; // byte offset where the selection was anchored
+    bool selecting_ = false;
     bool password_ = false;
     bool caret_visible_ = true;
     double blink_ = 0;
@@ -9694,7 +10406,1454 @@ private:
 // slikui/widgets/all.hpp — convenience include for the full widget set.
 
 // (already included above: slikui/widgets/containers.hpp)
+// ============================================================================
+// slikui/widgets/data.hpp
+// ============================================================================
+// slikui/widgets/data.hpp — Plot (+ histogram), TreeView, Table,
+// PropertyGrid, Vec2Pad: the data-display family for graphics-demo panels.
+//
+// All widgets follow the house pattern: fluent setters, theme tokens, cached
+// text layouts, mouse-capture drags. Series/rows are copied by value — apps
+// push new data with the setters each frame or on change.
+
+// (already included above: slikui/context.hpp)
+// (already included above: slikui/style/anim.hpp)
+// (already included above: slikui/widgets/containers.hpp)
+// (already included above: slikui/widgets/env.hpp)
+// (already included above: slikui/widgets/text.hpp)
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <functional>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace slikui {
+
+// ---------------------------------------------------------------------------
+// Plot — line series with autoscale, grid + tick labels, optional area fill,
+// markers, and a bars mode (= histogram for frame-time-style data).
+// ---------------------------------------------------------------------------
+class Plot : public Widget {
+public:
+    explicit Plot(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+
+    // xy data in data space; x must be increasing for fill/bars to read well.
+    Plot& add_series(std::vector<Vec2> pts, Color color) {
+        series_.push_back({std::move(pts), color});
+        data_version_++;
+        return *this;
+    }
+    // Single y-series with x = 0..n-1 (replaces existing series).
+    Plot& set_series(std::vector<float> ys, Color color) {
+        series_.clear();
+        std::vector<Vec2> pts;
+        pts.reserve(ys.size());
+        for (size_t i = 0; i < ys.size(); ++i) pts.push_back({float(i), ys[i]});
+        series_.push_back({std::move(pts), color});
+        data_version_++;
+        return *this;
+    }
+    Plot& clear_series() {
+        series_.clear();
+        data_version_++;
+        return *this;
+    }
+
+    // Fixed ranges; unset axes autoscale over the data (with a small margin).
+    Plot& set_x_range(float min, float max) { xr_ = {min, max}; data_version_++; return *this; }
+    Plot& set_y_range(float min, float max) { yr_ = {min, max}; data_version_++; return *this; }
+    // Bars mode draws series[0] as columns from the y baseline (histogram).
+    Plot& set_bars(bool on) { bars_ = on; return *this; }
+    // Fill the area under series[0] down to the baseline.
+    Plot& set_fill(bool on) { fill_ = on; return *this; }
+    Plot& set_markers(bool on) { markers_ = on; return *this; }
+
+    Size measure(const Constraints& c) override { return c.clamp({150.f, 90.f}); }
+    bool expands_main() const override { return true; }
+
+    void paint(const PaintEnv& env) const override {
+        const Theme& t = env.theme;
+        refresh_scale();
+        refresh_tick_labels(env);
+
+        env.list.rect(bounds, t.surface, t.radius);
+        env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
+
+        // Plot area: leave room for y labels on the left, x labels below.
+        Rect plot{bounds.x + 30, bounds.y + 6,
+                  std::fmax(bounds.w - 38, 10.f), std::fmax(bounds.h - 26, 10.f)};
+
+        env.list.push_clip(bounds);
+        // Grid + y tick labels.
+        for (int i = 0; i <= 3; ++i) {
+            float fy = float(i) / 3.f;
+            float gy = plot.y + fy * plot.h;
+            env.list.line({plot.x, gy}, {plot.right(), gy}, t.surface_alt, 1);
+            if (i < 3 && size_t(i) < ylabels_.size()) {
+                const auto& lab = ylabels_[size_t(i)];
+                float inv = 1.f / ui_scale();
+                float lx = std::fmax(bounds.x + 2, plot.x - 4 - lab.size.w * inv);
+                paint_text(env, lab, {lx, gy - lab.size.h * inv * .5f}, t.text_dim, inv);
+            }
+        }
+
+        if (!series_.empty()) {
+            const auto& s = series_[0];
+            float base_y = value_to_y(std::fmax(0.f, ylo_), plot);
+            if (fill_ && s.pts.size() >= 2) {
+                float dx = plot.w / std::fmax(float(s.pts.size() - 1), 1.f);
+                for (size_t i = 0; i < s.pts.size(); ++i) {
+                    float x = point_to_x(s.pts[i], plot);
+                    float y = value_to_y(s.pts[i].y, plot);
+                    env.list.line({x, y}, {x, base_y}, s.color.faded(.35f), dx + 1.f);
+                }
+            }
+            if (bars_) {
+                float n = float(s.pts.size());
+                float bw = plot.w / std::fmax(n, 1.f);
+                for (size_t i = 0; i < s.pts.size(); ++i) {
+                    float x = plot.x + (float(i) + 0.5f) * bw;
+                    float y = value_to_y(s.pts[i].y, plot);
+                    env.list.rect({x - bw * .8f * .5f, y, bw * .8f,
+                                   std::fmax(base_y - y, 0.f)}, s.color, 1);
+                }
+            } else {
+                // Map to screen space and draw as one polyline.
+                scratch_.clear();
+                for (const auto& p : s.pts) scratch_.push_back({point_to_x(p, plot),
+                                                               value_to_y(p.y, plot)});
+                if (scratch_.size() >= 2)
+                    env.list.polyline(scratch_.data(), scratch_.size(), s.color, 1.6f);
+                if (markers_)
+                    for (const auto& p : scratch_) env.list.circle(p, 2.5f, s.color);
+            }
+            // Further series are always lines.
+            for (size_t k = 1; k < series_.size(); ++k) {
+                const auto& s2 = series_[k];
+                scratch_.clear();
+                for (const auto& p : s2.pts) scratch_.push_back({point_to_x(p, plot),
+                                                                 value_to_y(p.y, plot)});
+                if (scratch_.size() >= 2)
+                    env.list.polyline(scratch_.data(), scratch_.size(), s2.color, 1.6f);
+            }
+        }
+        env.list.pop_clip();
+    }
+
+    const char* widget_type() const override { return "Plot"; }
+
+private:
+    struct SeriesData {
+        std::vector<Vec2> pts;
+        Color color;
+    };
+
+    void refresh_scale() const {
+        if (scale_valid_ && scale_version_ == data_version_) return;
+        float xlo = xr_.x >= 0 || xr_.y > xr_.x ? xr_.x : 0.f; // unset = {0,0}
+        bool have_x = xr_.y > xr_.x, have_y = yr_.y > yr_.x;
+        float xmin = have_x ? xr_.x : 0.f, xmax = have_x ? xr_.y : 1.f;
+        float ymin = have_y ? yr_.x : 0.f, ymax = have_y ? yr_.y : 1.f;
+        bool any = false;
+        for (const auto& s : series_)
+            for (const auto& p : s.pts) {
+                if (!any) {
+                    if (!have_x) { xmin = xmax = p.x; }
+                    if (!have_y) { ymin = ymax = p.y; }
+                    any = true;
+                }
+                if (!have_x) { xmin = std::fmin(xmin, p.x); xmax = std::fmax(xmax, p.x); }
+                if (!have_y) { ymin = std::fmin(ymin, p.y); ymax = std::fmax(ymax, p.y); }
+            }
+        if (!have_y && any) {
+            float pad = std::fmax((ymax - ymin) * .08f, 1e-3f);
+            ymin = std::fmin(ymin - pad, 0.f); // include the baseline when free
+            ymax += pad;
+        }
+        if (!have_x && any) xmax += (xmax - xmin) > 0 ? (xmax - xmin) * .01f : 1.f;
+        if (xmax <= xmin) xmax = xmin + 1.f;
+        if (ymax <= ymin) ymax = ymin + 1.f;
+        xlo_ = xmin;
+        ylo_ = ymin;
+        xscale_ = (xmax - xmin);
+        yscale_ = (ymax - ymin);
+        scale_valid_ = true;
+        scale_version_ = data_version_;
+        labels_valid_ = false;
+    }
+
+    void refresh_tick_labels(const PaintEnv& env) const {
+        if (labels_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        ylabels_.clear();
+        for (int i = 0; i < 3; ++i) {
+            float v = ylo_ + yscale_ * (1.f - float(i) / 3.f);
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%.4g", double(v));
+            ylabels_.push_back(ctx->font().layout(buf, t.s(t.small_font_px)));
+        }
+        labels_valid_ = true;
+    }
+
+    float point_to_x(Vec2 p, const Rect& plot) const {
+        float f = (p.x - xlo_) / xscale_;
+        return plot.x + clamp01(f) * plot.w;
+    }
+    float value_to_y(float v, const Rect& plot) const {
+        float f = (v - ylo_) / yscale_;
+        return plot.y + (1.f - clamp01(f)) * plot.h;
+    }
+
+    std::vector<SeriesData> series_;
+    Vec2 xr_{0, 0}, yr_{0, 0}; // y.x >= y.y means "unset"
+    bool bars_ = false, fill_ = false, markers_ = false;
+    mutable float xlo_ = 0, ylo_ = 0, xscale_ = 1, yscale_ = 1;
+    mutable std::uint64_t data_version_ = 0, scale_version_ = 0;
+    mutable bool scale_valid_ = false, labels_valid_ = false;
+    mutable std::vector<text::TextLayout> ylabels_;
+    mutable std::vector<Vec2> scratch_; // paint-time point mapping
+};
+
+// ---------------------------------------------------------------------------
+// Vec2Pad — 2D pad with a draggable dot (light direction, UV offsets,
+// camera nudge). Value is in data space; default range 0..1 per axis.
+// ---------------------------------------------------------------------------
+class Vec2Pad : public Widget {
+public:
+    explicit Vec2Pad(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+
+    Vec2Pad& set_value(Vec2 v, bool fire_callback = true) {
+        v = {std::clamp(v.x, min_.x, max_.x), std::clamp(v.y, min_.y, max_.y)};
+        if (v == value_) return *this;
+        value_ = v;
+        if (fire_callback && on_change_) on_change_(value_);
+        return *this;
+    }
+    Vec2 value() const { return value_; }
+    Vec2Pad& set_range(Vec2 min, Vec2 max) {
+        min_ = min;
+        max_ = max;
+        set_value(value_, false);
+        return *this;
+    }
+    Vec2Pad& on_change(std::function<void(Vec2)> f) { on_change_ = std::move(f); return *this; }
+
+    Size measure(const Constraints& c) override { return c.clamp({120.f, 120.f}); }
+
+    void paint(const PaintEnv& env) const override {
+        const Theme& t = env.theme;
+        env.list.rect(bounds, t.surface, t.radius);
+        env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
+        Vec2 p = to_screen(value_);
+        env.list.line({bounds.x, p.y}, {bounds.right(), p.y}, t.surface_alt, 1);
+        env.list.line({p.x, bounds.y}, {p.x, bounds.bottom()}, t.surface_alt, 1);
+        env.list.circle(p, 7, Color::white());
+        env.list.circle(p, 5, t.accent);
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MousePress:
+            if (enabled && bounds.contains(e.pos)) {
+                ctx->capture_mouse(this);
+                dragging_ = true;
+                set_value(to_value(e.pos));
+                return true;
+            }
+            return false;
+        case Event::Type::MouseMove:
+            if (dragging_) {
+                set_value(to_value(e.pos));
+                return true;
+            }
+            return false;
+        case Event::Type::MouseRelease:
+            if (dragging_) {
+                dragging_ = false;
+                ctx->release_mouse(this);
+                return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    const char* widget_type() const override { return "Vec2Pad"; }
+
+    bool stretch_cross() const override { return false; }
+
+private:
+    Vec2 to_screen(Vec2 v) const {
+        float sx = max_.x - min_.x, sy = max_.y - min_.y;
+        float fx = sx > 0 ? (v.x - min_.x) / sx : 0.f;
+        float fy = sy > 0 ? (v.y - min_.y) / sy : 0.f;
+        return {bounds.x + clamp01(fx) * (bounds.w - 12) + 6,
+                bounds.y + (1.f - clamp01(fy)) * (bounds.h - 12) + 6};
+    }
+    Vec2 to_value(Vec2 p) const {
+        float sx = max_.x - min_.x, sy = max_.y - min_.y;
+        float fx = bounds.w > 12 ? (p.x - bounds.x - 6) / (bounds.w - 12) : 0.f;
+        float fy = bounds.h > 12 ? (p.y - bounds.y - 6) / (bounds.h - 12) : 0.f;
+        return {min_.x + clamp01(fx) * sx, min_.y + (1.f - clamp01(fy)) * sy};
+    }
+
+    Vec2 value_{0.5f, 0.5f};
+    Vec2 min_{0, 0}, max_{1, 1};
+    bool dragging_ = false;
+    std::function<void(Vec2)> on_change_;
+};
+
+// ---------------------------------------------------------------------------
+// TreeView — indented hierarchy with expand arrows and selection. Rows are a
+// flat (label, depth) list; expansion state lives here, descendants of a
+// collapsed row are hidden. Apps mutate rows and call set_rows again.
+// ---------------------------------------------------------------------------
+class TreeView : public Widget {
+public:
+    struct Row {
+        std::string label;
+        int depth = 0;
+        bool expandable = false;
+    };
+
+    explicit TreeView(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+
+    TreeView& set_rows(std::vector<Row> rows) {
+        rows_ = std::move(rows);
+        expanded_.assign(rows_.size(), true);
+        selected_ = -1;
+        visible_valid_ = false;
+        return *this;
+    }
+    TreeView& set_expanded(size_t index, bool open) {
+        if (index < expanded_.size()) {
+            expanded_[index] = open;
+            visible_valid_ = false;
+        }
+        return *this;
+    }
+    bool expanded(size_t index) const {
+        return index < expanded_.size() && expanded_[index];
+    }
+    TreeView& set_selected(long index) { selected_ = index; return *this; }
+    long selected() const { return selected_; }
+    size_t visible_count() const {
+        refresh_visible();
+        return visible_.size();
+    }
+    TreeView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+
+    Size measure(const Constraints& c) override {
+        refresh_metrics();
+        refresh_visible();
+        return c.clamp({natural_w_ * ui_scale_inv(),
+                        float(visible_.size()) * row_height()});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        refresh_metrics();
+        refresh_visible();
+        const Theme& t = env.theme;
+        float inv = ui_scale_inv();
+        float y = bounds.y;
+        for (size_t vi = 0; vi < visible_.size(); ++vi) {
+            size_t i = visible_[vi];
+            const Row& r = rows_[i];
+            Rect row{bounds.x, y, bounds.w, row_height()};
+            if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
+            else if (long(vi) == hovered_ && enabled)
+                env.list.rect(row, t.surface_alt, 4);
+
+            float indent = bounds.x + 6 + float(r.depth) * 16.f;
+            if (r.expandable) {
+                // chevron right (closed) / down (open)
+                float cy = row.y + row_height() * .5f;
+                Color mark = t.text_dim;
+                if (expanded_[i]) {
+                    env.list.line({indent, cy - 2}, {indent + 4, cy + 2}, mark, 2);
+                    env.list.line({indent + 4, cy + 2}, {indent, cy + 6}, mark, 2);
+                } else {
+                    env.list.line({indent, cy - 4}, {indent + 4, cy}, mark, 2);
+                    env.list.line({indent + 4, cy}, {indent, cy + 4}, mark, 2);
+                }
+            }
+            float tx = indent + (r.expandable ? 16.f : 4.f);
+            float text_h = lays_[i].size.h * inv;
+            for (const auto& pg : lays_[i].glyphs) {
+                const text::Glyph& g = *pg.glyph;
+                if (g.uv.empty()) continue;
+                env.list.glyph({tx + pg.pos.x * inv,
+                                row.y + (row_height() - text_h) * .5f + pg.pos.y * inv,
+                                g.size.w * inv, g.size.h * inv},
+                               g.tex_id, g.uv, t.text);
+            }
+            y += row_height();
+        }
+    }
+
+    bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseMove) {
+            hovered_ = bounds.contains(e.pos) ? long(row_at(e.pos.y)) : -1;
+            return false;
+        }
+        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+            long vi = row_at(e.pos.y);
+            if (vi < 0) return false;
+            size_t i = visible_[size_t(vi)];
+            float chev_x = bounds.x + 6 + float(rows_[i].depth) * 16.f;
+            if (rows_[i].expandable && e.pos.x < chev_x + 14.f) {
+                expanded_[i] = !expanded_[i];
+                visible_valid_ = false;
+                return true;
+            }
+            selected_ = long(i);
+            if (on_select_) on_select_(i);
+            return true;
+        }
+        return false;
+    }
+
+    const char* widget_type() const override { return "TreeView"; }
+
+private:
+    float row_height() const { return 24.f; }
+    float ui_scale_inv() const { return 1.f / ui_scale(); }
+    long row_at(float y) const {
+        long r = long(std::floor((y - bounds.y) / row_height()));
+        return (r >= 0 && r < long(visible_.size())) ? r : -1;
+    }
+
+    void refresh_metrics() const {
+        if (metrics_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        lays_.assign(rows_.size(), text::TextLayout{});
+        natural_w_ = 40.f + (rows_.empty() ? 0.f
+                                           : float(rows_.back().depth) * 16.f);
+        for (size_t i = 0; i < rows_.size(); ++i) {
+            lays_[i] = ctx->font().layout(rows_[i].label, t.s(t.base_font_px));
+            natural_w_ = std::fmax(natural_w_,
+                                   6.f + float(rows_[i].depth) * 16.f +
+                                       (rows_[i].expandable ? 16.f : 4.f) +
+                                       lays_[i].size.w);
+        }
+        metrics_valid_ = true;
+    }
+
+    // Rows whose every ancestor is expanded, in display order.
+    void refresh_visible() const {
+        if (visible_valid_) return;
+        visible_.clear();
+        std::vector<bool> open_stack; // per-depth expansion of ancestors
+        for (size_t i = 0; i < rows_.size(); ++i) {
+            int d = rows_[i].depth;
+            if (size_t(d) > open_stack.size()) open_stack.resize(size_t(d), true);
+            bool ancestors_open = true;
+            for (int k = 0; k < d && ancestors_open; ++k)
+                ancestors_open = open_stack[size_t(k)];
+            open_stack.resize(size_t(d));
+            open_stack.push_back(expanded_[i]);
+            if (ancestors_open) visible_.push_back(i);
+        }
+        visible_valid_ = true;
+    }
+
+    std::vector<Row> rows_;
+    std::vector<bool> expanded_;
+    mutable std::vector<size_t> visible_;
+    mutable std::vector<text::TextLayout> lays_;
+    mutable float natural_w_ = 0;
+    mutable bool metrics_valid_ = false, visible_valid_ = false;
+    long selected_ = -1;
+    long hovered_ = -1;
+    std::function<void(size_t)> on_select_;
+};
+
+// ---------------------------------------------------------------------------
+// Table — columns + header + selectable rows. Fixed column widths (0 = 90);
+// cell text is clipped to its column. Non-virtualized by design for now.
+// ---------------------------------------------------------------------------
+class Table : public Widget {
+public:
+    struct ColumnSpec {
+        std::string title;
+        float width = 0;      // <=0 → default width
+        bool right_align = false;
+    };
+
+    explicit Table(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+
+    Table& set_columns(std::vector<ColumnSpec> cols) {
+        cols_ = std::move(cols);
+        metrics_valid_ = false;
+        return *this;
+    }
+    Table& set_rows(std::vector<std::vector<std::string>> rows) {
+        rows_ = std::move(rows);
+        selected_ = -1;
+        metrics_valid_ = false;
+        return *this;
+    }
+    Table& set_selected(long index) { selected_ = index; return *this; }
+    long selected() const { return selected_; }
+    Table& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+
+    Size measure(const Constraints& c) override {
+        refresh_metrics();
+        float h = header_height() + float(rows_.size()) * row_height();
+        return c.clamp({grid_w_, h});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        refresh_metrics();
+        const Theme& t = env.theme;
+        float inv = ui_scale_inv();
+
+        // Header strip.
+        env.list.rect({bounds.x, bounds.y, grid_w_, header_height()}, t.surface_alt, 4);
+        env.list.line({bounds.x, bounds.y + header_height()},
+                      {bounds.x + grid_w_, bounds.y + header_height()}, t.border, 1);
+        paint_row(env, head_lays_, bounds.y, t.text_dim, true);
+
+        float y = bounds.y + header_height();
+        for (size_t r = 0; r < rows_.size(); ++r) {
+            if (long(r) == selected_) {
+                env.list.rect({bounds.x, y, grid_w_, row_height()},
+                              t.accent.faded(.25f), 0);
+            } else if (long(r) == hovered_ && enabled) {
+                env.list.rect({bounds.x, y, grid_w_, row_height()}, t.surface_alt, 0);
+            }
+            paint_row(env, cell_lays_[r], y, t.text, false);
+            y += row_height();
+        }
+    }
+
+    bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseMove) {
+            hovered_ = bounds.contains(e.pos) ? row_at(e.pos.y) : -1;
+            return false;
+        }
+        if (e.type == Event::Type::MousePress && enabled && bounds.contains(e.pos)) {
+            long r = row_at(e.pos.y);
+            if (r >= 0) {
+                selected_ = r;
+                if (on_select_) on_select_(size_t(r));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    const char* widget_type() const override { return "Table"; }
+
+private:
+    float row_height() const { return 24.f; }
+    float header_height() const { return 24.f; }
+    long row_at(float y) const {
+        long r = long(std::floor((y - bounds.y - header_height()) / row_height()));
+        return (r >= 0 && r < long(rows_.size())) ? r : -1;
+    }
+    float ui_scale_inv() const { return 1.f / ui_scale(); }
+
+    void paint_row(const PaintEnv& env, const std::vector<text::TextLayout>& lays,
+                   float y, Color color, bool header) const {
+        float inv = ui_scale_inv();
+        float x = bounds.x;
+        for (size_t k = 0; k < lays.size(); ++k) {
+            const auto& lay = lays[k];
+            float col_w = cols_[k].width > 0 ? cols_[k].width : 90.f;
+            float tx = cols_[k].right_align && !header
+                           ? x + col_w - 8 - lay.size.w * inv
+                           : x + 8;
+            if (tx + lay.size.w * inv > x + col_w - 2) {
+                env.list.push_clip({x, y, col_w, row_height() + (header ? 0 : 0)});
+                paint_cells(env, lay, tx, y, color, inv);
+                env.list.pop_clip();
+            } else {
+                paint_cells(env, lay, tx, y, color, inv);
+            }
+            x += col_w;
+        }
+    }
+    void paint_cells(const PaintEnv& env, const text::TextLayout& lay, float tx,
+                     float y, Color color, float inv) const {
+        float text_h = lay.size.h * inv;
+        float cy = y + (row_height() - text_h) * .5f;
+        for (const auto& pg : lay.glyphs) {
+            const text::Glyph& g = *pg.glyph;
+            if (g.uv.empty()) continue;
+            env.list.glyph({tx + pg.pos.x * inv, cy + pg.pos.y * inv,
+                            g.size.w * inv, g.size.h * inv},
+                           g.tex_id, g.uv, color);
+        }
+    }
+
+    void refresh_metrics() const {
+        if (metrics_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        float base = t.s(t.base_font_px), small = t.s(t.small_font_px);
+        head_lays_.clear();
+        grid_w_ = 0;
+        for (const auto& col : cols_) {
+            head_lays_.push_back(ctx->font().layout(col.title, small));
+            grid_w_ += col.width > 0 ? col.width : 90.f;
+        }
+        cell_lays_.assign(rows_.size(), {});
+        for (size_t r = 0; r < rows_.size(); ++r) {
+            cell_lays_[r].reserve(rows_[r].size());
+            for (const auto& cell : rows_[r])
+                cell_lays_[r].push_back(ctx->font().layout(cell, base));
+        }
+        metrics_valid_ = true;
+    }
+
+    std::vector<ColumnSpec> cols_;
+    std::vector<std::vector<std::string>> rows_;
+    mutable std::vector<text::TextLayout> head_lays_;
+    mutable std::vector<std::vector<text::TextLayout>> cell_lays_;
+    mutable float grid_w_ = 0;
+    mutable bool metrics_valid_ = false;
+    long selected_ = -1, hovered_ = -1;
+    std::function<void(size_t)> on_select_;
+};
+
+// ---------------------------------------------------------------------------
+// PropertyGrid — the CG inspector: label|editor rows with collapsible
+// sections. Rows keep a fixed label column and give the editor the rest.
+// ---------------------------------------------------------------------------
+class PropertyRow : public Widget {
+public:
+    PropertyRow(std::string label, float label_w = 110.f, std::string widget_id = {})
+        : Widget(std::move(widget_id)), label_w_(label_w) {
+        Widget::add(std::make_unique<Label>(std::move(label)));
+    }
+
+    Label& label() { return *static_cast<Label*>(children[0].get()); }
+    Widget& editor() { return *children[1]; }
+
+    Size measure(const Constraints& c) override {
+        Size lab = children[0]->measure(Constraints::loose({label_w_, kInfinite}));
+        Size s{label_w_, lab.h};
+        if (children.size() > 1) {
+            Size ed = children[1]->measure(Constraints::loose({kInfinite, kInfinite}));
+            s.w += 8 + ed.w;
+            s.h = std::fmax(s.h, ed.h);
+        }
+        return c.clamp(s);
+    }
+
+    void arrange(const Rect& area) override {
+        bounds = area;
+        children[0]->arrange({area.x, area.y, label_w_, area.h});
+        if (children.size() > 1)
+            children[1]->arrange({area.x + label_w_ + 8, area.y,
+                                  std::fmax(area.w - label_w_ - 8, 0.f), area.h});
+    }
+
+    const char* widget_type() const override { return "PropertyRow"; }
+
+    bool stretch_cross() const override { return false; }
+
+private:
+    float label_w_;
+};
+
+class PropertyGrid : public Column {
+public:
+    using Column::Column;
+
+    // Returns the row; add the editor into it: `row.add<Slider>(0.f, 1.f)`.
+    PropertyRow& add_property(std::string label, float label_w = 110.f) {
+        return add<PropertyRow>(std::move(label), label_w);
+    }
+    // Collapsible section: returns the nested grid to fill.
+    PropertyGrid& add_section(std::string title, bool open = false) {
+        auto& exp = add<Expander>(std::move(title));
+        exp.set_open(open);
+        return exp.add<PropertyGrid>();
+    }
+
+    const char* widget_type() const override { return "PropertyGrid"; }
+};
+
+} // namespace slikui
+
 // (already included above: slikui/widgets/controls.hpp)
+// ============================================================================
+// slikui/widgets/editors.hpp
+// ============================================================================
+// slikui/widgets/editors.hpp — numeric and color editors for demo panels.
+//
+//   DragValue   click-drag to scrub a number; click to type it (Enter
+//               commits, Esc or focus loss cancels); Up/Down/Left/Right step.
+//   VecNEdit    N DragValues bound to a borrowed float[N] (zero-copy — the
+//               widget mirrors the array every tick).
+//   ColorEdit   color chip that opens a popup: SV square, hue bar, hex field,
+//               RGBA fields.
+//
+// All follow the house pattern: fluent setters, theme tokens, Anim hovers,
+// focusable keyboard support.
+
+// (already included above: slikui/context.hpp)
+// (already included above: slikui/style/anim.hpp)
+// (already included above: slikui/widgets/containers.hpp)
+// (already included above: slikui/widgets/env.hpp)
+// (already included above: slikui/widgets/inputs.hpp)
+// (already included above: slikui/widgets/widget.hpp)
+
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include <string>
+
+namespace slikui {
+
+// ---------------------------------------------------------------------------
+// DragValue
+// ---------------------------------------------------------------------------
+class DragValue : public Widget {
+public:
+    explicit DragValue(float value = 0, std::string widget_id = {})
+        : Widget(std::move(widget_id)), value_(value) {}
+
+    DragValue& set_value(float v, bool fire_callback = true) {
+        if (has_range_) v = std::clamp(v, min_, max_);
+        if (step_ > 0) v = min_ + std::round((v - min_) / step_) * step_;
+        if (has_range_) v = std::clamp(v, min_, max_);
+        if (int_mode_) v = std::round(v);
+        if (v == value_) return *this;
+        value_ = v;
+        label_valid_ = false;
+        if (fire_callback && on_change_) on_change_(value_);
+        return *this;
+    }
+    float value() const { return value_; }
+
+    DragValue& set_range(float min, float max) {
+        min_ = min;
+        max_ = max;
+        has_range_ = max > min;
+        set_value(value_, false);
+        return *this;
+    }
+    // Units per pixel of horizontal drag. Negative = auto (1/200 of range,
+    // or 0.02 when unbounded).
+    DragValue& set_speed(float units_per_px) { speed_ = units_per_px; return *this; }
+    // Keyboard step (Up/Down/Left/Right). 0 = auto (range/20, or 1).
+    DragValue& set_step(float step) { step_ = step; return *this; }
+    // Whole-number display + rounding. step 1 + int_mode = integer field.
+    DragValue& set_int_mode(bool on) { int_mode_ = on; set_value(value_, false); return *this; }
+    DragValue& set_prefix(std::string p) { prefix_ = std::move(p); label_valid_ = false; return *this; }
+    DragValue& set_suffix(std::string s) { suffix_ = std::move(s); label_valid_ = false; return *this; }
+    DragValue& set_format(std::function<std::string(float)> f) {
+        format_ = std::move(f);
+        label_valid_ = false;
+        return *this;
+    }
+    DragValue& on_change(std::function<void(float)> f) { on_change_ = std::move(f); return *this; }
+
+    bool focusable() const override { return true; }
+    bool stretch_cross() const override { return false; }
+
+    Size measure(const Constraints& c) override {
+        refresh_label();
+        float inv = 1.f / ui_scale();
+        return c.clamp({std::fmax(cached_w_ * inv + 16.f, 64.f), 24.f});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        refresh_label();
+        const Theme& t = env.theme;
+        env.list.rect(bounds, editing_ ? t.background : t.surface_alt, t.radius);
+        env.list.hollow_rect(bounds, focused ? t.accent : t.border, t.border_width, t.radius);
+        if (hover_.value > 0 && !editing_)
+            env.list.hollow_rect(bounds, t.accent.faded(.4f * hover_.value), t.border_width, t.radius);
+
+        float inv = 1.f / ui_scale();
+        float text_y = bounds.center().y - cached_lay_.size.h * inv * .5f;
+        paint_text(env, cached_lay_, {bounds.x + 8, text_y}, t.text, inv);
+        if (editing_ && caret_visible_) {
+            float px = t.s(t.base_font_px);
+            float cx = bounds.x + 8 + ctx->font().advance_upto(buffer_, buffer_.size(), px) * inv;
+            env.list.line({cx, text_y + 2}, {cx, text_y + cached_lay_.size.h * inv - 2}, t.text, 1);
+        }
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MousePress:
+            if (enabled && bounds.contains(e.pos)) {
+                ctx->capture_mouse(this);
+                dragging_ = true;
+                dragged_ = false;
+                press_x_ = e.pos.x;
+                press_value_ = value_;
+                return true;
+            }
+            return false;
+        case Event::Type::MouseMove:
+            if (dragging_) {
+                if (!dragged_ && std::fabs(e.pos.x - press_x_) > 3) dragged_ = true;
+                if (dragged_) set_value(press_value_ + (e.pos.x - press_x_) * scrub_speed());
+                return true;
+            }
+            hover_.target = bounds.contains(e.pos) ? 1.f : 0.f;
+            return false;
+        case Event::Type::MouseRelease:
+            if (dragging_) {
+                dragging_ = false;
+                ctx->release_mouse(this);
+                if (!dragged_) start_editing(); // a click, not a scrub
+                return true;
+            }
+            return false;
+        case Event::Type::TextInput: {
+            if (!editing_ || e.codepoint == 0 || e.codepoint < 32) return false;
+            char c = char(e.codepoint);
+            if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+') {
+                buffer_ += c;
+                label_valid_ = false;
+                return true;
+            }
+            return false;
+        }
+        case Event::Type::KeyPress: {
+            if (editing_) {
+                if (e.key == Key::V && e.shortcut_mod()) { // paste into the buffer
+                    for (char c : ctx->clipboard_text())
+                        if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+')
+                            buffer_ += c;
+                    label_valid_ = false;
+                    return true;
+                }
+                switch (e.key) {
+                case Key::Enter:   commit_editing(); return true;
+                case Key::Escape:  cancel_editing(); return true;
+                case Key::Backspace:
+                    if (!buffer_.empty()) {
+                        buffer_.pop_back();
+                        label_valid_ = false;
+                    }
+                    return true;
+                default: return false;
+                }
+            }
+            if (!focused) return false;
+            switch (e.key) {
+            case Key::Up:
+            case Key::Right: set_value(value_ + step()); return true;
+            case Key::Down:
+            case Key::Left:  set_value(value_ - step()); return true;
+            case Key::Enter: start_editing(); return true;
+            default: return false;
+            }
+        }
+        default:
+            return false;
+        }
+    }
+
+    void tick(Time t) override {
+        hover_.advance(t.dt);
+        // Focus was taken away while typing (Esc routes through Context, and
+        // so does any click outside): abandon the edit without committing.
+        if (editing_ && !focused) cancel_editing();
+        if (editing_) {
+            blink_ += t.dt;
+            if (blink_ > 0.53) blink_ = 0;
+            caret_visible_ = blink_ < 0.35;
+        }
+    }
+
+    const char* widget_type() const override { return "DragValue"; }
+
+private:
+    float scrub_speed() const {
+        if (speed_ >= 0) return speed_;
+        return has_range_ ? (max_ - min_) / 200.f : 0.02f;
+    }
+    float step() const {
+        if (step_ > 0) return step_;
+        if (int_mode_) return 1.f; // integer fields step whole numbers
+        return has_range_ ? (max_ - min_) / 20.f : 1.f;
+    }
+
+    void start_editing() {
+        editing_ = true;
+        blink_ = 0;
+        caret_visible_ = true;
+        buffer_.clear(); // fresh entry: typing replaces, not appends
+        label_valid_ = false;
+    }
+    void commit_editing() {
+        editing_ = false;
+        const char* s = buffer_.c_str();
+        char* end = nullptr;
+        double v = std::strtod(s, &end);
+        if (end != s) set_value(float(v));
+        label_valid_ = false;
+    }
+    void cancel_editing() {
+        editing_ = false;
+        label_valid_ = false;
+    }
+
+    void refresh_label() const {
+        if (label_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        char buf[64];
+        if (format_)                 text_ = format_(value_);
+        else if (int_mode_) { std::snprintf(buf, sizeof buf, "%d", int(std::lround(value_))); text_ = buf; }
+        else                 { std::snprintf(buf, sizeof buf, "%.3g", double(value_)); text_ = buf; }
+        cached_lay_ = ctx->font().layout(prefix_ + text_ + suffix_, t.s(t.base_font_px));
+        cached_w_ = cached_lay_.size.w;
+        label_valid_ = true;
+    }
+
+    float value_;
+    float min_ = 0, max_ = 0;
+    bool has_range_ = false;
+    float speed_ = -1, step_ = 0;
+    bool int_mode_ = false;
+    std::string prefix_, suffix_;
+    std::function<std::string(float)> format_;
+    std::function<void(float)> on_change_;
+
+    bool dragging_ = false, dragged_ = false, editing_ = false;
+    float press_x_ = 0, press_value_ = 0;
+    std::string buffer_;
+    double blink_ = 0;
+    bool caret_visible_ = true;
+    Anim hover_{0, 0, 20};
+
+    // paint/measure are const; caches go through the Button-style mutable set.
+    mutable std::string text_;
+    mutable text::TextLayout cached_lay_;
+    mutable float cached_w_ = 0;
+    mutable bool label_valid_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// VecNEdit — DragValue row bound to a borrowed float[N]
+// ---------------------------------------------------------------------------
+// `values` is borrowed, not copied: the widget writes edits straight into it
+// and re-reads it every tick, so external code can move the values (camera
+// params, material uniforms) and the fields follow. The array must outlive
+// the widget.
+template <size_t N>
+class VecNEdit : public Widget {
+public:
+    explicit VecNEdit(float* values, std::string labels = "XYZ", std::string widget_id = {})
+        : Widget(std::move(widget_id)), values_(values) {
+        Row& row = add<Row>();
+        row.set_gap(kGap);
+        for (size_t i = 0; i < N; ++i) {
+            DragValue& dv = row.add<DragValue>(values[i]);
+            if (i < labels.size()) dv.set_prefix(labels.substr(i, 1));
+            dv.on_change([this, i](float v) {
+                values_[i] = v;
+                if (on_change_) on_change_();
+            });
+        }
+    }
+
+    VecNEdit& set_labels(std::string labels) {
+        Row& row = static_cast<Row&>(*children[0]);
+        for (size_t i = 0; i < N; ++i)
+            static_cast<DragValue&>(*row.children[i])
+                .set_prefix(i < labels.size() ? labels.substr(i, 1) : std::string());
+        return *this;
+    }
+    VecNEdit& set_range(float min, float max) {
+        for (auto& c : children[0]->children) static_cast<DragValue&>(*c).set_range(min, max);
+        return *this;
+    }
+    VecNEdit& set_axis_range(size_t axis, float min, float max) {
+        if (axis < N) static_cast<DragValue&>(*children[0]->children[axis]).set_range(min, max);
+        return *this;
+    }
+    VecNEdit& set_int_mode(bool on) {
+        for (auto& c : children[0]->children) static_cast<DragValue&>(*c).set_int_mode(on);
+        return *this;
+    }
+    VecNEdit& set_step(float step) {
+        for (auto& c : children[0]->children) static_cast<DragValue&>(*c).set_step(step);
+        return *this;
+    }
+    VecNEdit& on_change(std::function<void()> f) { on_change_ = std::move(f); return *this; }
+
+    Size measure(const Constraints& c) override {
+        float w = float(N - 1) * kGap;
+        for (auto& ch : children[0]->children)
+            w += ch->measure(Constraints::loose({kInfinite, kInfinite})).w;
+        return c.clamp({w, 24.f});
+    }
+
+    void arrange(const Rect& area) override {
+        bounds = area;
+        Row& row = static_cast<Row&>(*children[0]);
+        row.arrange({area.x, area.y, area.w, area.h});
+    }
+
+    void tick(Time t) override {
+        // Mirror the borrowed array: external writes show up automatically.
+        Row& row = static_cast<Row&>(*children[0]);
+        for (size_t i = 0; i < N; ++i)
+            static_cast<DragValue&>(*row.children[i]).set_value(values_[i], false);
+        Widget::tick(t);
+    }
+
+    const char* widget_type() const override { return N == 2 ? "Vec2Edit" : N == 3 ? "Vec3Edit" : "Vec4Edit"; }
+    bool stretch_cross() const override { return false; }
+
+    static constexpr float kGap = 4;
+
+private:
+    float* values_;
+    std::function<void()> on_change_;
+};
+
+using Vec2Edit = VecNEdit<2>;
+using Vec3Edit = VecNEdit<3>;
+using Vec4Edit = VecNEdit<4>;
+
+// ---------------------------------------------------------------------------
+// ColorEdit — chip + popup editor
+// ---------------------------------------------------------------------------
+class ColorEdit;
+
+// Popup body for ColorEdit. The SV square and hue bar are self-painted (the
+// software rasterizer has no gradient primitive: the square is a grid of
+// quads, the bar a row of them). The hex field and RGBA fields are real
+// children so focus/typing come for free. Changes flow through apply() into
+// the owning ColorEdit, which fires its on_change.
+class ColorPopup : public Widget {
+public:
+    ColorPopup(ColorEdit* owner, Color initial);
+
+    Size measure(const Constraints& c) override { return c.clamp({kW, kH}); }
+
+    void arrange(const Rect& area) override;
+
+    void paint(const PaintEnv& env) const override;
+
+    bool on_event(const Event& e) override;
+
+    const char* widget_type() const override { return "ColorPopup"; }
+
+    static constexpr float kW = 176;
+    static constexpr float kH = 198;
+    static constexpr float kPad = 8;
+
+private:
+    static constexpr float kSvW = kW - 2 * kPad;  // 160
+    static constexpr float kSvH = 108;
+    static constexpr float kHueH = 10;
+
+    Rect sv_rect() const { return {bounds.x + kPad, bounds.y + kPad, kSvW, kSvH}; }
+    Rect hue_rect() const { return {bounds.x + kPad, bounds.y + kPad + kSvH + 6, kSvW, kHueH}; }
+    Rect row_rect() const { return {bounds.x + kPad, bounds.y + kPad + kSvH + 6 + kHueH + 6, kSvW, 24}; }
+    Rect hex_rect() const {
+        return {bounds.x + kPad, bounds.y + kPad + kSvH + 6 + kHueH + 6 + 24 + 4, kSvW, 24};
+    }
+
+    void apply(Color c);
+    void refresh_fields();
+
+    ColorEdit* owner_;
+    float h_ = 0, s_ = 0, v_ = 1, alpha_ = 1;
+    bool guard_ = false; // suppresses feedback while pushing values into fields
+    bool dragging_sv_ = false, dragging_hue_ = false;
+};
+
+class ColorEdit : public Widget {
+public:
+    explicit ColorEdit(Color color = Color::white(), std::string widget_id = {})
+        : Widget(std::move(widget_id)), color_(color) {}
+
+    ColorEdit& set_color(Color c, bool fire_callback = true) {
+        color_ = c;
+        if (fire_callback && on_change_) on_change_(color_);
+        return *this;
+    }
+    const Color& color() const { return color_; }
+    ColorEdit& on_change(std::function<void(Color)> f) { on_change_ = std::move(f); return *this; }
+
+    bool stretch_cross() const override { return false; }
+
+    Size measure(const Constraints& c) override { return c.clamp({26.f, 26.f}); }
+
+    void paint(const PaintEnv& env) const override {
+        const Theme& t = env.theme;
+        env.list.rect(bounds, color_, 4);
+        env.list.hollow_rect(bounds, hover_.value > 0 ? t.text_dim : t.border, 1, 4);
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MousePress:
+            if (enabled && bounds.contains(e.pos)) {
+                auto popup = std::make_unique<ColorPopup>(this, color_);
+                ctx->push_popup(std::move(popup), {bounds.x, bounds.bottom() + 2});
+                return true;
+            }
+            return false;
+        case Event::Type::MouseMove:
+            hover_.target = bounds.contains(e.pos) ? 1.f : 0.f;
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    void tick(Time t) override { hover_.advance(t.dt); }
+
+    const char* widget_type() const override { return "ColorEdit"; }
+
+    // Called by the popup (single direction: popup -> chip). External
+    // set_color while the popup is open only updates the chip.
+    void apply_color(Color c) {
+        color_ = c;
+        if (on_change_) on_change_(color_);
+    }
+
+private:
+    Color color_;
+    std::function<void(Color)> on_change_;
+    Anim hover_{0, 0, 20};
+};
+
+inline ColorPopup::ColorPopup(ColorEdit* owner, Color initial) : owner_(owner) {
+    auto hsv = initial.to_hsv();
+    h_ = hsv[0];
+    s_ = hsv[1];
+    v_ = hsv[2];
+    alpha_ = float(initial.a) / 255.f;
+
+    auto& row = add<Row>();
+    row.set_gap(4);
+    const char* names = "RGBA";
+    for (int i = 0; i < 4; ++i) {
+        DragValue& dv = row.add<DragValue>(i < 3 ? (&initial.r)[i] : initial.a);
+        dv.set_prefix(std::string(1, names[i])).set_range(0, 255).set_step(1).set_int_mode(true);
+        dv.on_change([this, i](float v) {
+            if (guard_) return;
+            Color c = owner_->color();
+            (&c.r)[i] = std::uint8_t(std::clamp(v, 0.f, 255.f));
+            apply(c);
+        });
+    }
+    // (arranged manually below; paint_tree still recurses into children)
+
+    auto& hex = add<TextField>();
+    hex.on_change([this](std::string_view text) {
+        if (guard_) return;
+        std::string s(text);
+        if (!s.empty() && s.front() == '#') s.erase(0, 1);
+        if (s.size() > 2 && (s[0] == '0') && (s[1] == 'x' || s[1] == 'X')) s.erase(0, 2);
+        if (s.size() != 6) return;
+        for (char ch : s)
+            if (!std::isxdigit(unsigned(ch))) return;
+        apply(Color(std::uint8_t(std::strtoul(s.substr(0, 2).c_str(), nullptr, 16)),
+                    std::uint8_t(std::strtoul(s.substr(2, 2).c_str(), nullptr, 16)),
+                    std::uint8_t(std::strtoul(s.substr(4, 2).c_str(), nullptr, 16)),
+                    owner_->color().a));
+    });
+    refresh_fields();
+}
+
+inline void ColorPopup::arrange(const Rect& area) {
+    bounds = area;
+    // The Row/TextField are arranged by hand: their order in the popup does
+    // not follow container layout, and Widget::paint_tree only needs bounds.
+    Row& row = static_cast<Row&>(*children[0]);
+    row.bounds = row_rect();
+    float fw = (kSvW - 3 * 4) / 4;
+    float x = row.bounds.x;
+    for (auto& c : row.children) {
+        c->arrange({x, row.bounds.y, fw, row.bounds.h});
+        x += fw + 4;
+    }
+    static_cast<TextField&>(*children[1]).arrange(hex_rect());
+}
+
+inline void ColorPopup::paint(const PaintEnv& env) const {
+    const Theme& t = env.theme;
+    env.list.rect(bounds, t.surface, t.radius);
+    env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
+
+    // SV square: saturation across, value down. Grid of quads — cheap in the
+    // software rasterizer and exact enough to look like a gradient.
+    Rect sv = sv_rect();
+    constexpr int kCols = 32, kRows = 24;
+    float cw = sv.w / kCols, chh = sv.h / kRows;
+    for (int gy = 0; gy < kRows; ++gy)
+        for (int gx = 0; gx < kCols; ++gx)
+            env.list.rect({sv.x + gx * cw, sv.y + gy * chh, cw + .5f, chh + .5f},
+                          Color::from_hsv(h_, float(gx) / (kCols - 1), 1.f - float(gy) / (kRows - 1)));
+    // SV cursor: little ring at the current s/v.
+    Vec2 cur{sv.x + s_ * sv.w, sv.y + (1.f - v_) * sv.h};
+    env.list.circle(cur, 5, Color::white());
+    env.list.circle(cur, 4, Color::from_hsv(h_, s_, v_));
+
+    // Hue bar: 32 segments across the wheel.
+    Rect hue = hue_rect();
+    float hw = hue.w / 32;
+    for (int i = 0; i < 32; ++i)
+        env.list.rect({hue.x + i * hw, hue.y, hw + .5f, hue.h}, Color::from_hsv(float(i) / 32.f, 1, 1));
+    float hx = hue.x + h_ * hue.w;
+    env.list.line({hx, hue.y - 1}, {hx, hue.y + hue.h + 1}, Color::white(), 2);
+
+    // Fields are painted by paint_tree (Row + TextField children).
+}
+
+inline bool ColorPopup::on_event(const Event& e) {
+    Rect sv = sv_rect(), hue = hue_rect();
+    switch (e.type) {
+    case Event::Type::MousePress:
+        if (sv.contains(e.pos) || hue.contains(e.pos)) {
+            ctx->capture_mouse(this);
+            dragging_sv_ = sv.contains(e.pos);
+            dragging_hue_ = hue.contains(e.pos);
+        } else {
+            break;
+        }
+        [[fallthrough]];
+    case Event::Type::MouseMove: {
+        if (dragging_sv_ && sv.w > 0 && sv.h > 0) {
+            s_ = clamp01((e.pos.x - sv.x) / sv.w);
+            v_ = 1.f - clamp01((e.pos.y - sv.y) / sv.h);
+            apply(Color::from_hsv(h_, s_, v_, owner_->color().a));
+            return true;
+        }
+        if (dragging_hue_ && hue.w > 0) {
+            h_ = clamp01((e.pos.x - hue.x) / hue.w);
+            apply(Color::from_hsv(h_, s_, v_, owner_->color().a));
+            return true;
+        }
+        return false;
+    }
+    case Event::Type::MouseRelease:
+        if (dragging_sv_ || dragging_hue_) {
+            dragging_sv_ = dragging_hue_ = false;
+            ctx->release_mouse(this);
+            return true;
+        }
+        return false;
+    default:
+        return false;
+    }
+    return false; // press that landed outside SV/hue (breaks out of the switch)
+}
+
+inline void ColorPopup::apply(Color c) {
+    if (guard_) return;
+    guard_ = true;
+    owner_->apply_color(c);
+    auto hsv = c.to_hsv();
+    h_ = hsv[0];
+    s_ = hsv[1];
+    v_ = hsv[2];
+    alpha_ = float(c.a) / 255.f;
+    refresh_fields();
+    guard_ = false;
+}
+
+inline void ColorPopup::refresh_fields() {
+    Color c = Color::from_hsv(h_, s_, v_, std::uint8_t(alpha_ * 255.f + .5f));
+    Row& row = static_cast<Row&>(*children[0]);
+    for (int i = 0; i < 4; ++i)
+        static_cast<DragValue&>(*row.children[i]).set_value((&c.r)[i], false);
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "%02X%02X%02X", c.r, c.g, c.b);
+    static_cast<TextField&>(*children[1]).set_text(buf);
+}
+
+} // namespace slikui
+
+// ============================================================================
+// slikui/widgets/icons.hpp
+// ============================================================================
+// slikui/widgets/icons.hpp — procedural icon set painted from DrawList
+// primitives. No icon font, no assets: theme-tinted, resolution-independent,
+// zero bytes shipped. Designed on a 24x24 grid and scaled to the target box.
+
+// (already included above: slikui/core/math.hpp)
+// (already included above: slikui/render/draw_list.hpp)
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+
+namespace slikui {
+
+enum class Icon : std::uint8_t {
+    Play, Pause, Stop, Record, StepForward, StepBack,
+    Grid, Camera, Save, Folder, Refresh,
+    Plus, Minus, Close, Check,
+    ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
+    Eye, Gear, Search, Trash, Copy, Lock, Sun,
+};
+
+inline const char* icon_name(Icon icon) {
+    switch (icon) {
+    case Icon::Play: return "play";
+    case Icon::Pause: return "pause";
+    case Icon::Stop: return "stop";
+    case Icon::Record: return "record";
+    case Icon::StepForward: return "step_forward";
+    case Icon::StepBack: return "step_back";
+    case Icon::Grid: return "grid";
+    case Icon::Camera: return "camera";
+    case Icon::Save: return "save";
+    case Icon::Folder: return "folder";
+    case Icon::Refresh: return "refresh";
+    case Icon::Plus: return "plus";
+    case Icon::Minus: return "minus";
+    case Icon::Close: return "close";
+    case Icon::Check: return "check";
+    case Icon::ChevronLeft: return "chevron_left";
+    case Icon::ChevronRight: return "chevron_right";
+    case Icon::ChevronUp: return "chevron_up";
+    case Icon::ChevronDown: return "chevron_down";
+    case Icon::Eye: return "eye";
+    case Icon::Gear: return "gear";
+    case Icon::Search: return "search";
+    case Icon::Trash: return "trash";
+    case Icon::Copy: return "copy";
+    case Icon::Lock: return "lock";
+    case Icon::Sun: return "sun";
+    }
+    return "unknown";
+}
+
+// Paint `icon` centered inside `area`, tinted `color`. `thickness` 0 picks a
+// stroke that stays legible at small sizes.
+inline void paint_icon(DrawList& list, Icon icon, Rect area, Color color,
+                       float thickness = 0.f) {
+    float side = std::fmin(area.w, area.h);
+    float k = side / 24.f; // design grid -> px
+    float t = thickness > 0 ? thickness : std::fmax(1.5f, 2.f * k);
+    auto P = [&](float x, float y) { return Vec2{area.x + x * k, area.y + y * k}; };
+    auto L = [&](float x1, float y1, float x2, float y2) {
+        list.line(P(x1, y1), P(x2, y2), color, t);
+    };
+    auto F = [&](float x, float y, float w, float h, float rad = 0.f) {
+        list.rect({area.x + x * k, area.y + y * k, w * k, h * k}, color, rad * k);
+    };
+    auto O = [&](float x, float y, float w, float h, float rad) {
+        list.hollow_rect({area.x + x * k, area.y + y * k, w * k, h * k}, color, t,
+                         rad * k);
+    };
+    auto C = [&](float cx, float cy, float r) { list.circle(P(cx, cy), r * k, color); };
+    auto Ring = [&](float cx, float cy, float r) {
+        list.hollow_rect(
+            {area.x + (cx - r) * k, area.y + (cy - r) * k, 2 * r * k, 2 * r * k},
+            color, t, r * k);
+    };
+
+    switch (icon) {
+    case Icon::Play:
+        L(8, 5, 18, 12); L(18, 12, 8, 19); L(8, 19, 8, 5);
+        break;
+    case Icon::Pause:
+        L(9, 6, 9, 18); L(15, 6, 15, 18);
+        break;
+    case Icon::Stop:
+        O(6.5f, 6.5f, 11, 11, 2);
+        break;
+    case Icon::Record:
+        C(12, 12, 5);
+        break;
+    case Icon::StepForward:
+        L(7, 6, 15, 12); L(15, 12, 7, 18); L(7, 18, 7, 6); L(18, 6, 18, 18);
+        break;
+    case Icon::StepBack:
+        L(17, 6, 9, 12); L(9, 12, 17, 18); L(17, 18, 17, 6); L(6, 6, 6, 18);
+        break;
+    case Icon::Grid:
+        L(9, 4, 9, 20); L(15, 4, 15, 20); L(4, 9, 20, 9); L(4, 15, 20, 15);
+        break;
+    case Icon::Camera:
+        O(4, 8, 16, 11, 2.5f); O(9.5f, 5, 5, 3, 1); Ring(12, 13.5f, 3);
+        break;
+    case Icon::Save:
+        O(5, 5, 14, 14, 2); F(8, 13, 8, 6, 1);
+        L(8, 5, 8, 10); L(13, 5, 13, 10); L(8, 10, 13, 10);
+        break;
+    case Icon::Folder:
+        O(4, 8, 16, 11, 2); L(4, 5, 10, 5); L(10, 5, 10, 8);
+        break;
+    case Icon::Refresh:
+        Ring(12, 12, 7); L(16, 3, 20, 6); L(20, 6, 16, 9);
+        break;
+    case Icon::Plus:
+        L(12, 6, 12, 18); L(6, 12, 18, 12);
+        break;
+    case Icon::Minus:
+        L(6, 12, 18, 12);
+        break;
+    case Icon::Close:
+        L(7, 7, 17, 17); L(17, 7, 7, 17);
+        break;
+    case Icon::Check:
+        L(6, 12.5f, 10, 17); L(10, 17, 18, 7);
+        break;
+    case Icon::ChevronLeft:
+        L(15, 6, 9, 12); L(9, 12, 15, 18);
+        break;
+    case Icon::ChevronRight:
+        L(9, 6, 15, 12); L(15, 12, 9, 18);
+        break;
+    case Icon::ChevronUp:
+        L(6, 15, 12, 9); L(12, 9, 18, 15);
+        break;
+    case Icon::ChevronDown:
+        L(6, 9, 12, 15); L(12, 15, 18, 9);
+        break;
+    case Icon::Eye:
+        Ring(12, 12, 6.5f); C(12, 12, 2.5f);
+        break;
+    case Icon::Gear:
+        Ring(12, 12, 5);
+        for (int i = 0; i < 8; ++i) {
+            float a = 3.14159265f * float(i) / 4.f;
+            L(12 + std::cos(a) * 7, 12 + std::sin(a) * 7,
+              12 + std::cos(a) * 10, 12 + std::sin(a) * 10);
+        }
+        break;
+    case Icon::Search:
+        Ring(10.5f, 10.5f, 6); L(15, 15, 20, 20);
+        break;
+    case Icon::Trash:
+        L(5, 7, 19, 7); O(7, 7, 10, 13, 1.5f); O(10, 4, 4, 3, 1);
+        L(10, 10, 10, 17); L(14, 10, 14, 17);
+        break;
+    case Icon::Copy:
+        O(9, 9, 10, 10, 2); L(5, 15, 5, 7); L(5, 7, 15, 7);
+        break;
+    case Icon::Lock:
+        O(6, 11, 12, 9, 2); L(9, 11, 9, 8); L(9, 8, 15, 8); L(15, 8, 15, 11);
+        F(11, 14, 2, 3, 1);
+        break;
+    case Icon::Sun:
+        C(12, 12, 4);
+        for (int i = 0; i < 8; ++i) {
+            float a = 3.14159265f * float(i) / 4.f;
+            L(12 + std::cos(a) * 7, 12 + std::sin(a) * 7,
+              12 + std::cos(a) * 9.5f, 12 + std::sin(a) * 9.5f);
+        }
+        break;
+    }
+}
+
+} // namespace slikui
+
 // ============================================================================
 // slikui/widgets/image.hpp
 // ============================================================================
@@ -17799,7 +19958,1505 @@ private:
 } // namespace slikui
 
 // (already included above: slikui/widgets/inputs.hpp)
+// ============================================================================
+// slikui/widgets/menus.hpp
+// ============================================================================
+// slikui/widgets/menus.hpp — Menu, MenuItem, MenuBar, shortcut labels.
+//
+// Menus are BORROWED popups: build them once (a MenuBar owns its menus; a
+// standalone Menu is app-owned, e.g. as a widget's context menu) and opening
+// pushes the existing object onto Context's popup stack. Nothing is cloned, so
+// checkmark state read through callbacks stays live across opens.
+//
+// Popup-stack rules (see Context): opening a submenu closes its sibling
+// submenus; clicking elsewhere in the parent menu closes the open submenu;
+// Escape unwinds one level per press; click outside every popup closes all.
+
+// (already included above: slikui/context.hpp)
+// (already included above: slikui/style/anim.hpp)
+// (already included above: slikui/widgets/containers.hpp)
+// (already included above: slikui/widgets/env.hpp)
+// (already included above: slikui/widgets/widget.hpp)
+
+#include <cstdio>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace slikui {
+
+// Human-readable shortcut hint for menus and tooltips: "Ctrl+Shift+S"
+// ("⌘⇧S" on Apple). Complements Context::add_shortcut, which fires actions.
+inline std::string shortcut_label(Key key, unsigned mods) {
+    std::string out;
+#if defined(__APPLE__)
+    if (mods & ModSuper) out += "⌘";
+    if (mods & ModCtrl) out += "⌃";
+    if (mods & ModAlt) out += "⌥";
+    if (mods & ModShift) out += "⇧";
+#else
+    if (mods & ModCtrl) out += "Ctrl+";
+    if (mods & ModSuper) out += "Cmd+";
+    if (mods & ModAlt) out += "Alt+";
+    if (mods & ModShift) out += "Shift+";
+#endif
+    int k = int(key);
+    if (k >= int(Key::A) && k <= int(Key::Z)) {
+        out += char('A' + k - int(Key::A));
+        return out;
+    }
+    switch (key) {
+    case Key::Enter: out += "Enter"; break;
+    case Key::Escape: out += "Esc"; break;
+    case Key::Space: out += "Space"; break;
+    case Key::Tab: out += "Tab"; break;
+    case Key::Backspace: out += "Bksp"; break;
+    case Key::Delete: out += "Del"; break;
+    case Key::Left: out += "←"; break;
+    case Key::Right: out += "→"; break;
+    case Key::Up: out += "↑"; break;
+    case Key::Down: out += "↓"; break;
+    case Key::Home: out += "Home"; break;
+    case Key::End: out += "End"; break;
+    case Key::PageUp: out += "PgUp"; break;
+    case Key::PageDown: out += "PgDn"; break;
+    default:
+        if (k >= int(Key::F1) && k <= int(Key::F12))
+            out += "F" + std::to_string(k - int(Key::F1) + 1);
+        break;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// MenuItem — one row of a Menu: label, optional checkmark, right-aligned
+// shortcut hint, optional submenu (owned; pushed as its own popup on
+// hover/click), disabled state.
+// ---------------------------------------------------------------------------
+class MenuItem : public Widget {
+public:
+    MenuItem(std::string label, std::function<void()> action, std::string hint = {},
+             bool enabled = true, std::string widget_id = {})
+        : Widget(std::move(widget_id)), label_(std::move(label)),
+          action_(std::move(action)), hint_(std::move(hint)), enabled_(enabled) {}
+
+    MenuItem& set_enabled(bool on) { enabled_ = on; return *this; }
+    bool enabled() const { return enabled_; }
+    // Checkmark state is read through a callback at paint time, so it stays
+    // live however the app mutates its state.
+    MenuItem& set_checked_fn(std::function<bool()> f) {
+        checked_fn_ = std::move(f);
+        return *this;
+    }
+    bool checked() const { return checked_fn_ && checked_fn_(); }
+    // Non-owning: the parent Menu (or the app, for borrowed submenus) keeps
+    // the Menu alive.
+    void set_submenu(Menu* sub) { submenu_ = sub; }
+    Menu* submenu() { return submenu_; }
+
+    Size measure(const Constraints& c) override {
+        refresh();
+        float inv = 1.f / ui_scale();
+        float w = 10 + 18 + lays_.label.size.w * inv;
+        if (!hint_.empty()) w += 16 + lays_.hint.size.w * inv;
+        if (submenu_) w += 16;
+        w += 10;
+        float h = std::fmax(lays_.label.line_height * inv, 16.f) + 9.f;
+        return c.clamp({w, h});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        refresh();
+        const Theme& t = env.theme;
+        float inv = 1.f / ui_scale();
+        if (enabled_ && hover_.value > 0)
+            env.list.rect(bounds,
+                          t.surface_alt.lerp(t.hover(t.surface_alt), hover_.value), 4);
+        float cy = bounds.center().y;
+        if (checked()) {
+            Color mark = enabled_ ? t.accent : t.text_dim;
+            env.list.line({bounds.x + 11, cy}, {bounds.x + 15, cy + 4}, mark, 2);
+            env.list.line({bounds.x + 15, cy + 4}, {bounds.x + 22, cy - 5}, mark, 2);
+        }
+        float tx = bounds.x + 32;
+        paint_text(env, lays_.label, {tx, cy - lays_.label.size.h * inv * .5f},
+                   enabled_ ? t.text : t.text_dim, inv);
+        if (!hint_.empty()) {
+            float hx = bounds.right() - 10 - lays_.hint.size.w * inv;
+            paint_text(env, lays_.hint, {hx, cy - lays_.hint.size.h * inv * .5f},
+                       t.text_dim.faded(enabled_ ? 1.f : .4f), inv);
+        }
+        if (submenu_) {
+            float cx = bounds.right() - 14;
+            Color mark = enabled_ ? t.text_dim : t.text_dim.faded(.4f);
+            env.list.line({cx - 2, cy - 4}, {cx + 2, cy}, mark, 2);
+            env.list.line({cx + 2, cy}, {cx - 2, cy + 4}, mark, 2);
+        }
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MouseMove: {
+            bool over = bounds.contains(e.pos);
+            hover_.target = over && enabled_ ? 1.f : 0.f;
+            if (over && enabled_ && submenu_ && !submenu_open())
+                open_submenu(); // defined after Menu (needs the complete type)
+            return false;
+        }
+        case Event::Type::MousePress:
+            if (!bounds.contains(e.pos)) return false;
+            if (!enabled_) return true; // swallow: disabled rows don't dismiss
+            if (submenu_) {
+                if (submenu_open()) close_submenu();
+                else open_submenu();
+                return true;
+            }
+            if (action_) action_();
+            if (ctx) ctx->close_popups();
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    void tick(Time t) override { hover_.advance(t.dt); }
+
+    const char* widget_type() const override { return "MenuItem"; }
+
+    bool stretch_cross() const override { return false; }
+
+private:
+    friend class Menu;
+
+    // Defined after Menu (Menu must be complete to convert Menu* to Widget&
+    // for the Context popup-stack calls).
+    void open_submenu();
+    void close_submenu();
+    bool submenu_open() const;
+    Menu* owner_menu();
+    void note_opened_from(Menu* m) { opened_from_ = m; }
+
+    void refresh() const {
+        if (valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        lays_.label = ctx->font().layout(label_, t.s(t.base_font_px));
+        if (!hint_.empty())
+            lays_.hint = ctx->font().layout(hint_, t.s(t.small_font_px));
+        valid_ = true;
+    }
+
+    struct Lays {
+        text::TextLayout label, hint;
+    };
+    std::string label_, hint_;
+    std::function<void()> action_;
+    std::function<bool()> checked_fn_;
+    Menu* submenu_ = nullptr; // non-owning (Menu pool or app-owned)
+    Menu* opened_from_ = nullptr; // set while this item's submenu is open
+    bool enabled_ = true;
+    Anim hover_{0, 0, 15};
+    mutable Lays lays_;
+    mutable bool valid_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// Menu — vertical list of MenuItems inside a bordered panel. Build once, open
+// many times: open_for() pushes this object onto the popup stack.
+// ---------------------------------------------------------------------------
+class Menu : public Panel {
+public:
+    explicit Menu(std::string title = {}, std::string widget_id = {})
+        : Panel(std::move(widget_id)), title_(std::move(title)) {
+        set_padding(4).set_gap(1);
+    }
+
+    const std::string& title() const { return title_; }
+    Menu& set_min_width(float w) { min_width_ = w; return *this; }
+    // Fired each time the menu is about to open — refresh enabled flags there
+    // (checkmarks read live through MenuItem::set_checked_fn callbacks).
+    Menu& on_open(std::function<void()> f) { on_open_ = std::move(f); return *this; }
+
+    Menu& add_item(std::string label, std::function<void()> action,
+                   std::string hint = {}, bool enabled = true) {
+        add<MenuItem>(std::move(label), std::move(action), std::move(hint), enabled);
+        return *this;
+    }
+    Menu& add_checkable(std::string label, std::function<bool()> is_checked,
+                        std::function<void()> toggle, std::string hint = {},
+                        bool enabled = true) {
+        auto& it = add<MenuItem>(std::move(label), std::move(toggle), std::move(hint),
+                                 enabled);
+        it.set_checked_fn(std::move(is_checked));
+        return *this;
+    }
+    // The submenu is owned by this Menu (C++ callers) and pushed as its own
+    // popup when its item is hovered/clicked (right, or left at the edge).
+    Menu& add_submenu(std::string label, std::unique_ptr<Menu> sub,
+                      std::string hint = {}, bool enabled = true) {
+        Menu& ref = *sub;
+        owned_submenus_.push_back(std::move(sub));
+        attach_submenu(label, ref, std::move(hint), enabled);
+        return ref;
+    }
+    // Borrowed flavor: the caller keeps the submenu alive (Python bindings
+    // use this — keep a reference to the Menu on the Python side).
+    Menu& add_submenu(std::string label, Menu& sub, std::string hint = {},
+                      bool enabled = true) {
+        attach_submenu(label, sub, std::move(hint), enabled);
+        return sub;
+    }
+    Menu& add_separator() {
+        add<Divider>(true);
+        return *this;
+    }
+
+    // Open beside `anchor` (a MenuBar title or a parent-menu item) with menu
+    // stack discipline: everything above the anchor's popup closes first.
+    // The menu takes its Context from the anchor — standalone menus aren't
+    // attached to any tree until first opened.
+    void open_for(Widget& anchor, PopupDir dir = PopupDir::Below) {
+        Context* c = ctx ? ctx : anchor.context();
+        if (!c) return;
+        if (on_open_) on_open_();
+        c->close_popups_above(anchor);
+        c->push_popup(*this, anchor, dir);
+    }
+
+    Size measure(const Constraints& c) override {
+        Size s = Panel::measure(c);
+        s.w = std::fmax(s.w, min_width_);
+        return c.clamp(s);
+    }
+
+    bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseMove && ctx && opened_item_ &&
+            ctx->popup_open(opened_item_->submenu_) &&
+            !opened_item_->bounds.contains(e.pos)) {
+            // Cursor moved to a different row: close the open submenu.
+            ctx->close_popups_above(*this);
+            opened_item_->note_opened_from(nullptr);
+            opened_item_ = nullptr;
+        }
+        if (e.type == Event::Type::MousePress && ctx && opened_item_ &&
+            ctx->popup_open(opened_item_->submenu_) &&
+            bounds.contains(e.pos)) {
+            // Click on this menu's dead area (padding, separator): the open
+            // submenu closes; items manage their own clicks.
+            ctx->close_popups_above(*this);
+            opened_item_->note_opened_from(nullptr);
+            opened_item_ = nullptr;
+        }
+        return false;
+    }
+
+    const char* widget_type() const override { return "Menu"; }
+
+private:
+    friend class MenuItem;
+
+    void note_submenu_open(MenuItem* item) {
+        if (opened_item_ && opened_item_ != item && ctx &&
+            ctx->popup_open(opened_item_->submenu_))
+            ctx->close_popups_above(*this);
+        if (opened_item_) opened_item_->note_opened_from(nullptr);
+        opened_item_ = item;
+        item->note_opened_from(this);
+    }
+
+    std::string title_;
+    float min_width_ = 140.f;
+    std::function<void()> on_open_;
+    std::vector<std::unique_ptr<Menu>> owned_submenus_;
+    MenuItem* opened_item_ = nullptr; // item whose submenu is currently open
+
+    void attach_submenu(std::string& label, Menu& sub, std::string hint, bool enabled) {
+        auto& it = add<MenuItem>(std::move(label), std::function<void()>{},
+                                 std::move(hint), enabled);
+        it.set_submenu(&sub);
+    }
+};
+
+inline void MenuItem::open_submenu() {
+    if (!ctx || !submenu_) return;
+    if (Menu* m = owner_menu()) {
+        m->note_submenu_open(this);
+        ctx->close_popups_above(*m);
+    }
+    ctx->push_popup(*submenu_, *this, PopupDir::Right);
+}
+
+inline void MenuItem::close_submenu() {
+    if (!ctx || !submenu_) return;
+    if (Menu* m = owner_menu()) ctx->close_popups_above(*m);
+    else ctx->close_topmost_popup();
+}
+
+inline bool MenuItem::submenu_open() const {
+    return ctx && ctx->popup_open(submenu_);
+}
+
+inline Menu* MenuItem::owner_menu() {
+    for (Widget* p = parent; p; p = p->parent)
+        if (auto* m = dynamic_cast<Menu*>(p)) return m;
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// MenuBar — top strip of menu titles. Click a title to open its menu below it;
+// with a menu already open, moving over another title switches to it.
+// ---------------------------------------------------------------------------
+class MenuBar : public Row {
+public:
+    explicit MenuBar(std::string widget_id = {}) : Row(std::move(widget_id)) {
+        set_gap(2);
+    }
+
+    // Creates the menu (owned by the bar) and its title button; fill the
+    // returned Menu with items.
+    Menu& add_menu(std::string title) {
+        menus_.push_back(std::make_unique<Menu>(std::move(title)));
+        Menu& m = *menus_.back();
+        add<MenuButton>(this, &m);
+        return m;
+    }
+
+    Size measure(const Constraints& c) override {
+        Size s = Row::measure(c);
+        s.h = std::fmax(s.h, 26.f);
+        return c.clamp(s);
+    }
+
+    void paint(const PaintEnv& env) const override {
+        env.list.rect(bounds, env.theme.surface, 0);
+        env.list.line({bounds.x, bounds.bottom() - 1},
+                      {bounds.right(), bounds.bottom() - 1}, env.theme.border, 1);
+    }
+
+    const char* widget_type() const override { return "MenuBar"; }
+
+    // Implementation detail, public only so Widget::add<MenuButton> can
+    // instantiate (nested-private classes are inaccessible in the template).
+    class MenuButton : public Widget {
+    public:
+        MenuButton(MenuBar* bar, Menu* menu) : bar_(bar), menu_(menu) {}
+
+        bool open() const { return ctx && ctx->popup_open(menu_); }
+
+        Size measure(const Constraints& c) override {
+            refresh();
+            float inv = 1.f / ui_scale();
+            return c.clamp({lay_.size.w * inv + 20.f,
+                            std::fmax(lay_.line_height * inv + 8.f, 24.f)});
+        }
+
+        void paint(const PaintEnv& env) const override {
+            refresh();
+            const Theme& t = env.theme;
+            float inv = 1.f / ui_scale();
+            if (open())
+                env.list.rect(bounds, t.surface_alt, t.radius);
+            else if (hover_.value > 0)
+                env.list.rect(bounds, t.surface_alt.lerp(t.hover(t.surface_alt),
+                                                         hover_.value * .6f),
+                              t.radius);
+            paint_text(env, lay_, {bounds.x + 10,
+                                   bounds.center().y - lay_.size.h * inv * .5f},
+                       t.text, inv);
+        }
+
+        bool on_event(const Event& e) override {
+            switch (e.type) {
+            case Event::Type::MouseMove: {
+                bool over = bounds.contains(e.pos);
+                hover_.target = over ? 1.f : 0.f;
+                // Hover-while-open: only when the topmost popup is a Menu, so
+                // an unrelated context menu isn't swapped away.
+                if (over && ctx && ctx->has_popups() && !open()) {
+                    Widget* top = ctx->popup(ctx->popup_count() - 1);
+                    if (dynamic_cast<Menu*>(top)) open_menu();
+                }
+                return false;
+            }
+            case Event::Type::MousePress:
+                if (bounds.contains(e.pos)) {
+                    if (open()) ctx->close_popups();
+                    else open_menu();
+                    return true;
+                }
+                return false;
+            default:
+                return false;
+            }
+        }
+
+        void tick(Time t) override { hover_.advance(t.dt); }
+
+        const char* widget_type() const override { return "MenuButton"; }
+
+        bool stretch_cross() const override { return false; }
+
+    private:
+        void open_menu() { menu_->open_for(*this, PopupDir::Below); }
+        void refresh() const {
+            if (valid_ || !ctx) return;
+            lay_ = ctx->font().layout(menu_->title(),
+                                      ctx->theme().s(ctx->theme().base_font_px));
+            valid_ = true;
+        }
+
+        MenuBar* bar_; // (reserved: per-bar open-state coordination)
+        Menu* menu_;
+        Anim hover_{0, 0, 15};
+        mutable text::TextLayout lay_;
+        mutable bool valid_ = false;
+    };
+
+    std::vector<std::unique_ptr<Menu>> menus_;
+};
+
+} // namespace slikui
+
+// ============================================================================
+// slikui/widgets/shells.hpp
+// ============================================================================
+// slikui/widgets/shells.hpp — Phase D floating shells & feedback:
+// Dialog, MessageBox, FileBrowser (floating layer), Toast, StatusBar,
+// LogView, SearchBox, GroupBox, ImageView, CompareView.
+//
+// Dialogs live on Context's dialog layer (above popups; modal dialogs dim
+// the app and trap outside presses). They are borrowed like Menus: build
+// once, open/close many times — or hand Context ownership with
+// open_dialog(std::unique_ptr<Dialog>).
+
+// (already included above: slikui/context.hpp)
+// (already included above: slikui/style/anim.hpp)
+// (already included above: slikui/widgets/containers.hpp)
+// (already included above: slikui/widgets/controls.hpp)
+// (already included above: slikui/widgets/icons.hpp)
+// (already included above: slikui/widgets/image.hpp)
+// (already included above: slikui/widgets/inputs.hpp)
 // (already included above: slikui/widgets/text.hpp)
+// ============================================================================
+// slikui/widgets/toolbar.hpp
+// ============================================================================
+// slikui/widgets/toolbar.hpp — IconButton + Toolbar.
+//
+// IconButton is Button's geometry and interaction with a procedural icon
+// (widgets/icons.hpp) instead of text — Ghost by default, the way toolbar
+// buttons read. Toolbar is a Row of them with separators, a bottom rule and
+// an optional icon-over-label mode for chunkier app-toolbars.
+
+// (already included above: slikui/style/anim.hpp)
+// (already included above: slikui/widgets/containers.hpp)
+// (already included above: slikui/widgets/controls.hpp)
+// (already included above: slikui/widgets/icons.hpp)
+// (already included above: slikui/widgets/text.hpp)
+
+#include <algorithm>
+#include <functional>
+#include <string>
+#include <utility>
+
+namespace slikui {
+
+// ---------------------------------------------------------------------------
+// IconButton — small square button with an icon instead of text.
+// ---------------------------------------------------------------------------
+class IconButton : public Widget {
+public:
+    IconButton(Icon icon, std::string widget_id = {})
+        : Widget(std::move(widget_id)), icon_(icon) {}
+
+    IconButton& set_icon(Icon i) { icon_ = i; return *this; }
+    Icon icon() const { return icon_; }
+    IconButton& set_variant(Button::Variant v) { variant_ = v; return *this; }
+    Button::Variant variant() const { return variant_; }
+    IconButton& set_icon_px(float px) { icon_px_ = px; return *this; }
+    IconButton& on_click(std::function<void()> f) { on_click_ = std::move(f); return *this; }
+
+    bool focusable() const override { return true; }
+
+    Size measure(const Constraints& c) override {
+        return c.clamp({icon_px_ + pad_h_ * 2,
+                        std::fmax(icon_px_ + pad_v_ * 2, 26.f)});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        const Theme& t = env.theme;
+        Color base = base_color(t);
+        Color fill = base;
+        if (variant_ != Button::Variant::Ghost || hover_.value > 0)
+            fill = base.lerp(t.hover(base), hover_.value);
+        fill = fill.lerp(t.press(base), pressed_.value);
+        if (!enabled) fill = t.surface_alt.faded(.6f);
+
+        env.list.rect(bounds, fill, t.radius);
+        if (variant_ != Button::Variant::Ghost)
+            env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
+
+        float side = std::fmin(bounds.w, bounds.h);
+        paint_icon(env.list, icon_,
+                   {bounds.center().x - side * .5f, bounds.center().y - side * .5f,
+                    side, side},
+                   enabled ? icon_color(t) : t.text_dim);
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MouseMove:
+            hover_.target = bounds.contains(e.pos) ? 1.f : 0.f;
+            return false;
+        case Event::Type::MousePress:
+            if (enabled && bounds.contains(e.pos)) {
+                armed_ = true;
+                pressed_.target = 1;
+                return true;
+            }
+            return false;
+        case Event::Type::MouseRelease:
+            if (armed_) {
+                armed_ = false;
+                pressed_.target = 0;
+                if (enabled && bounds.contains(e.pos) && on_click_) on_click_();
+                return true;
+            }
+            return false;
+        case Event::Type::KeyPress:
+            if (focused && (e.key == Key::Enter || e.key == Key::Space)) {
+                if (enabled && on_click_) on_click_();
+                return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    void tick(Time t) override {
+        hover_.advance(t.dt);
+        pressed_.advance(t.dt);
+    }
+
+    const char* widget_type() const override { return "IconButton"; }
+
+    bool stretch_cross() const override { return false; }
+
+private:
+    Color base_color(const Theme& t) const {
+        switch (variant_) {
+        case Button::Variant::Primary: return t.accent;
+        case Button::Variant::Danger: return t.danger;
+        case Button::Variant::Ghost: return Color::transparent();
+        default: return t.surface_alt;
+        }
+    }
+    Color icon_color(const Theme& t) const {
+        switch (variant_) {
+        case Button::Variant::Primary:
+        case Button::Variant::Danger:
+            return t.accent_text;
+        default:
+            return t.text;
+        }
+    }
+
+    Icon icon_;
+    Button::Variant variant_ = Button::Variant::Ghost;
+    float icon_px_ = 16, pad_h_ = 7, pad_v_ = 5;
+    Anim hover_{0, 0, 15}, pressed_{0, 0, 25};
+    bool armed_ = false;
+    std::function<void()> on_click_;
+};
+
+// ---------------------------------------------------------------------------
+// Toolbar — horizontal strip of IconButtons with separators and a bottom
+// rule. `add_button(icon, label, ...)` renders the label under the icon.
+// ---------------------------------------------------------------------------
+class Toolbar : public Row {
+public:
+    explicit Toolbar(std::string widget_id = {}) : Row(std::move(widget_id)) {
+        set_padding(4).set_gap(2).set_cross(CrossMode::Center);
+    }
+
+    Toolbar& set_background(Color c) { background_ = c; return *this; }
+    Toolbar& set_icon_px(float px) { icon_px_ = px; return *this; }
+
+    IconButton& add_button(Icon icon, std::function<void()> on_click,
+                           std::string tip = {}) {
+        auto& b = add<IconButton>(icon);
+        b.set_icon_px(icon_px_).on_click(std::move(on_click));
+        if (!tip.empty()) b.set_tooltip(std::move(tip));
+        return b;
+    }
+    // Icon with a small label underneath (a hugging cell keeps them together;
+    // a plain Column would stretch to the toolbar's cross size).
+    IconButton& add_button(Icon icon, std::string label,
+                           std::function<void()> on_click, std::string tip = {}) {
+        auto& cell = add<LabelCell>();
+        cell.set_gap(2).set_cross(CrossMode::Center);
+        auto& b = cell.add<IconButton>(icon);
+        b.set_icon_px(icon_px_).on_click(std::move(on_click));
+        if (!tip.empty()) b.set_tooltip(std::move(tip));
+        if (!label.empty())
+            cell.add<Label>(std::move(label)).set_font_size(12.f); // small caption
+        return b;
+    }
+    void add_separator() { add<Divider>(false); }
+
+    Size measure(const Constraints& c) override {
+        Size s = Row::measure(c);
+        s.h = std::fmax(s.h, 30.f);
+        return c.clamp(s);
+    }
+
+    void paint(const PaintEnv& env) const override {
+        if (background_.a > 0) env.list.rect(bounds, background_, 0);
+        env.list.line({bounds.x, bounds.bottom() - 1},
+                      {bounds.right(), bounds.bottom() - 1}, env.theme.border, 1);
+    }
+
+    const char* widget_type() const override { return "Toolbar"; }
+
+    class LabelCell : public Column {
+    public:
+        using Column::Column;
+        bool stretch_cross() const override { return false; }
+    };
+
+private:
+    Color background_ = Color::transparent();
+    float icon_px_ = 16;
+};
+
+} // namespace slikui
+
+// (already included above: slikui/widgets/views.hpp)
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace slikui {
+
+// ---------------------------------------------------------------------------
+// Dialog — floating window: draggable title bar with a close button over a
+// content column. Opened via Context::open_dialog; closed by the ✕ button,
+// close_dialog(), or Escape (topmost first). A modal dialog dims the app and
+// swallows presses outside it.
+// ---------------------------------------------------------------------------
+class Dialog : public Panel {
+public:
+    Dialog(std::string title, std::string widget_id = {})
+        : Panel(std::move(widget_id)), title_(std::move(title)) {
+        set_padding(0).set_gap(0);
+        auto& bar = Widget::add<Row>();
+        bar.set_padding(8).set_gap(8);
+        bar.add<Label>(title_);
+        bar.add<Spacer>();
+        bar.add<IconButton>(Icon::Close)
+            .on_click([this] { request_close(); });
+        content_ = &Widget::add<Column>();
+        content_->set_padding(12).set_gap(8);
+    }
+
+    Column& content() { return *content_; }
+    const std::string& title() const { return title_; }
+    IconButton& close_button() { return *static_cast<IconButton*>(children[0]->children[2].get()); }
+    Dialog& set_title(std::string t) {
+        title_ = std::move(t);
+        title_valid_ = false;
+        static_cast<Label&>(*children[0]->children[0]).set_text(title_);
+        return *this;
+    }
+    Dialog& set_modal(bool m) { modal_ = m; return *this; }
+    bool modal() const { return modal_; }
+    // Pin the dialog somewhere other than the default centered spot.
+    Dialog& set_position(Vec2 p) { pos_ = p; pos_set_ = true; return *this; }
+    Vec2 position() const { return pos_; }
+    Dialog& on_close(std::function<void()> f) { on_close_ = std::move(f); return *this; }
+
+    void request_close() {
+        if (ctx) ctx->close_dialog(*this);
+        if (on_close_) on_close_();
+    }
+
+    void attached(Context& c) override {
+        Panel::attached(c);
+        radius_ = c.theme().radius;
+        draw_border_ = true;
+    }
+
+    // Pin to the requested position (set_position / drags) and stay inside
+    // the frame — Context lays out at the current bounds, this corrects them.
+    void arrange(const Rect& area) override {
+        Rect a = area;
+        if (pos_set_) {
+            a.x = pos_.x;
+            a.y = pos_.y;
+        }
+        Panel::arrange(a);
+        if (ctx) {
+            Vec2 lim = {std::fmax(ctx->frame_size().x - bounds.w, 0.f),
+                        std::fmax(ctx->frame_size().y - bounds.h, 0.f)};
+            bounds.x = std::clamp(bounds.x, 0.f, lim.x);
+            bounds.y = std::clamp(bounds.y, 0.f, lim.y);
+        }
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MousePress:
+            if (enabled && children[0]->bounds.contains(e.pos) &&
+                !children[0]->children[2]->bounds.contains(e.pos)) {
+                ctx->capture_mouse(this);
+                dragging_ = true;
+                last_ = e.pos;
+                return true;
+            }
+            return false;
+        case Event::Type::MouseMove:
+            if (dragging_) {
+                // Move the live bounds; pos_ follows so arrange stays pinned.
+                bounds.x += e.pos.x - last_.x;
+                bounds.y += e.pos.y - last_.y;
+                pos_ = {bounds.x, bounds.y};
+                pos_set_ = true;
+                last_ = e.pos;
+                return true;
+            }
+            return false;
+        case Event::Type::MouseRelease:
+            if (dragging_) {
+                dragging_ = false;
+                ctx->release_mouse(this);
+                return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    const char* widget_type() const override { return "Dialog"; }
+
+private:
+    std::string title_;
+    Column* content_ = nullptr;
+    bool modal_ = false, dragging_ = false, pos_set_ = false, title_valid_ = false;
+    Vec2 pos_{}, last_{};
+    std::function<void()> on_close_;
+};
+
+// ---------------------------------------------------------------------------
+// MessageBox — a Dialog with a message and an action-button row.
+// ---------------------------------------------------------------------------
+class MessageBox : public Dialog {
+public:
+    MessageBox(std::string title, std::string message, std::string widget_id = {})
+        : Dialog(std::move(title), std::move(widget_id)) {
+        auto& text = content().add<Label>(std::move(message));
+        (void)text;
+        buttons_ = &content().add<Row>();
+        buttons_->set_gap(8);
+    }
+
+    // Adds a right-aligned action button; the callback runs before close.
+    Button& add_button(std::string label, std::function<void()> action) {
+        auto& b = buttons_->add<Button>(std::move(label));
+        b.on_click([this, action] {
+            if (action) action();
+            request_close();
+        });
+        return b;
+    }
+
+    const char* widget_type() const override { return "MessageBox"; }
+
+private:
+    Row* buttons_ = nullptr;
+};
+
+// ---------------------------------------------------------------------------
+// GroupBox — titled panel section.
+// ---------------------------------------------------------------------------
+class GroupBox : public Panel {
+public:
+    explicit GroupBox(std::string title, std::string widget_id = {})
+        : Panel(std::move(widget_id)), title_(std::move(title)) {
+        set_padding(10).set_gap(6);
+        title_label_ = &Widget::add<Label>(title_);
+        title_label_->set_color(Color::transparent()); // resolved at paint
+    }
+
+    GroupBox& set_title(std::string t) {
+        title_ = std::move(t);
+        title_label_->set_text(title_);
+        return *this;
+    }
+    const std::string& title() const { return title_; }
+
+    void attached(Context& c) override {
+        Panel::attached(c);
+        radius_ = c.theme().radius;
+        draw_border_ = true;
+        title_label_->set_color(c.theme().text_dim);
+        title_label_->set_font_size(c.theme().small_font_px);
+    }
+
+    const char* widget_type() const override { return "GroupBox"; }
+
+private:
+    std::string title_;
+    Label* title_label_ = nullptr;
+};
+
+// ---------------------------------------------------------------------------
+// SearchBox — magnifier + field + clear button, one control.
+// ---------------------------------------------------------------------------
+class SearchBox : public Widget {
+public:
+    explicit SearchBox(std::string widget_id = {}) : Widget(std::move(widget_id)) {
+        Widget::add(std::make_unique<IconButton>(Icon::Search));
+        icon_ = static_cast<IconButton*>(children[0].get());
+        icon_->set_variant(Button::Variant::Ghost);
+        auto field = std::make_unique<TextField>();
+        field_ = field.get();
+        Widget::add(std::move(field));
+        Widget::add(std::make_unique<IconButton>(Icon::Close));
+        clear_ = static_cast<IconButton*>(children[2].get());
+        clear_->set_variant(Button::Variant::Ghost);
+        clear_->visible = false;
+        clear_->on_click([this] {
+            field_->set_text("");
+            if (on_change_) on_change_("");
+        });
+        field_->on_change([this](std::string_view t) {
+            clear_->visible = !t.empty();
+            if (on_change_) on_change_(t);
+        });
+    }
+
+    SearchBox& set_text(std::string t) {
+        field_->set_text(std::move(t));
+        clear_->visible = !field_->text().empty();
+        return *this;
+    }
+    const std::string& text() const { return field_->text(); }
+    SearchBox& set_placeholder(std::string p) {
+        field_->set_placeholder(std::move(p));
+        return *this;
+    }
+    SearchBox& on_change(std::function<void(std::string_view)> f) {
+        on_change_ = std::move(f);
+        return *this;
+    }
+    SearchBox& on_submit(std::function<void(std::string_view)> f) {
+        field_->on_submit(std::move(f));
+        return *this;
+    }
+    TextField& field() { return *field_; }
+    IconButton& icon_button() { return *icon_; }
+    IconButton& clear_button() { return *clear_; }
+
+    // Not focusable itself — Tab reaches the inner TextField directly.
+
+    Size measure(const Constraints& c) override {
+        Size s = children[1]->measure(Constraints::loose({kInfinite, kInfinite}));
+        return c.clamp({s.w + 44, std::fmax(s.h, 28.f)});
+    }
+
+    void arrange(const Rect& area) override {
+        bounds = area;
+        children[0]->arrange({area.x, area.y, 22, area.h});
+        float right_pad = clear_->visible ? 22.f : 0.f;
+        children[1]->arrange({area.x + 22, area.y,
+                              std::fmax(area.w - 22 - right_pad, 0.f), area.h});
+        if (clear_->visible)
+            children[2]->arrange({area.right() - 22, area.y, 22, area.h});
+    }
+
+    const char* widget_type() const override { return "SearchBox"; }
+
+private:
+    IconButton* icon_ = nullptr;
+    TextField* field_ = nullptr;
+    IconButton* clear_ = nullptr;
+    std::function<void(std::string_view)> on_change_;
+};
+
+// ---------------------------------------------------------------------------
+// StatusBar — bottom strip: status text, transient messages, app-added
+// widgets (ProgressBar/Spinner/labels) on the right.
+// ---------------------------------------------------------------------------
+class StatusBar : public Row {
+public:
+    explicit StatusBar(std::string widget_id = {}) : Row(std::move(widget_id)) {
+        set_padding(4).set_gap(10);
+        text_ = &add<Label>("");
+        add<Spacer>();
+    }
+
+    StatusBar& set_text(std::string t) {
+        base_ = std::move(t);
+        transient_until_ = -1;
+        text_->set_text(base_);
+        return *this;
+    }
+    const std::string& text() const { return base_; }
+    // Transient message shown for `seconds`, then the base text returns.
+    StatusBar& show_message(std::string msg, double seconds = 3.0) {
+        text_->set_text(std::move(msg));
+        transient_until_ = last_now_ + seconds;
+        return *this;
+    }
+
+    void tick(Time t) override {
+        last_now_ = t.now;
+        if (transient_until_ >= 0 && t.now >= transient_until_) {
+            transient_until_ = -1;
+            text_->set_text(base_);
+        }
+    }
+
+    const char* widget_type() const override { return "StatusBar"; }
+
+private:
+    Label* text_ = nullptr;
+    std::string base_;
+    double transient_until_ = -1;
+    double last_now_ = 0;
+};
+
+// ---------------------------------------------------------------------------
+// LogView — severity-colored, autoscrolling console (shows the tail).
+// ---------------------------------------------------------------------------
+class LogView : public Widget {
+public:
+    enum class Level : std::uint8_t { Info, Success, Warning, Error };
+
+    explicit LogView(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+
+    LogView& log(Level level, std::string text) {
+        // One line per entry; embedded newlines become spaces.
+        for (auto& ch : text)
+            if (ch == '\n' || ch == '\r') ch = ' ';
+        lines_.push_back({std::move(text), level});
+        if (lines_.size() > kMaxLines) {
+            lines_.erase(lines_.begin(),
+                         lines_.begin() + long(lines_.size() - kMaxLines));
+            lays_valid_ = false; // indices shifted; rebuild
+        }
+        lays_valid_ = false;
+        return *this;
+    }
+    LogView& clear() {
+        lines_.clear();
+        lays_valid_ = false;
+        return *this;
+    }
+    size_t line_count() const { return lines_.size(); }
+
+    Size measure(const Constraints& c) override {
+        // Layouts are built here (not in paint) so new glyphs reach the font
+        // atlas in the same frame's texture upload.
+        refresh_layouts();
+        return c.clamp({220.f, 100.f});
+    }
+    bool expands_main() const override { return true; }
+
+    void paint(const PaintEnv& env) const override {
+        refresh_layouts();
+        const Theme& t = env.theme;
+        float inv = ui_scale_inv();
+        float line_h = line_height_ * inv;
+        env.list.rect(bounds, t.surface, t.radius);
+        env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
+        if (line_h <= 0) return;
+        size_t shown = size_t(std::fmax(bounds.h / line_h, 1.f));
+        size_t first = lines_.size() > shown ? lines_.size() - shown : 0;
+
+        env.list.push_clip(bounds);
+        float y = bounds.y;
+        for (size_t i = first; i < lines_.size(); ++i) {
+            const auto& lay = lays_[i];
+            float text_h = lay.size.h * inv;
+            for (const auto& pg : lay.glyphs) {
+                const text::Glyph& g = *pg.glyph;
+                if (g.uv.empty()) continue;
+                env.list.glyph({bounds.x + 8 + pg.pos.x * inv,
+                                y + (line_h - text_h) * .5f + pg.pos.y * inv,
+                                g.size.w * inv, g.size.h * inv},
+                               g.tex_id, g.uv, level_color(t, lines_[i].level));
+            }
+            y += line_h;
+        }
+        env.list.pop_clip();
+    }
+
+    const char* widget_type() const override { return "LogView"; }
+
+private:
+    struct Line {
+        std::string text;
+        Level level;
+    };
+    static constexpr size_t kMaxLines = 512;
+
+    static Color level_color(const Theme& t, Level l) {
+        switch (l) {
+        case Level::Success: return t.success;
+        case Level::Warning: return t.warning;
+        case Level::Error: return t.danger;
+        default: return t.text;
+        }
+    }
+    float ui_scale_inv() const { return 1.f / ui_scale(); }
+
+    void refresh_layouts() const {
+        if (lays_valid_ || !ctx) return;
+        const Theme& t = ctx->theme();
+        lays_.resize(lines_.size());
+        line_height_ = 0;
+        for (size_t i = 0; i < lines_.size(); ++i) {
+            lays_[i] = ctx->font().layout(lines_[i].text, t.s(t.small_font_px));
+            line_height_ = std::fmax(line_height_, lays_[i].line_height);
+        }
+        lays_valid_ = true;
+    }
+
+    std::vector<Line> lines_;
+    mutable std::vector<text::TextLayout> lays_;
+    mutable float line_height_ = 0;
+    mutable bool lays_valid_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// FileBrowser — in-UI directory listing + name field on a Dialog shell.
+// Directories navigate on click; files land in the name field. Open/Save
+// commits through on_pick; Cancel closes. `..` navigates up.
+// ---------------------------------------------------------------------------
+class FileBrowser : public Dialog {
+public:
+    enum class Mode : std::uint8_t { Open, Save };
+
+    FileBrowser(Mode mode, std::string title = {}, std::string widget_id = {})
+        : Dialog(title.empty() ? (mode == Mode::Open ? "Open" : "Save As")
+                               : std::move(title),
+                 std::move(widget_id)),
+          mode_(mode) {
+        path_label_ = &content().add<Label>("");
+        list_ = &content().add<ListView>();
+        list_->on_select([this](size_t i) { entry_clicked(long(i)); });
+        name_ = &content().add<TextField>();
+        name_->set_placeholder("file name");
+        auto& buttons = content().add<Row>();
+        buttons.set_gap(8);
+        buttons.add<Spacer>();
+        buttons.add<Button>("Cancel").on_click([this] { request_close(); });
+        open_button_ = &buttons.add<Button>(mode_ == Mode::Open ? "Open" : "Save");
+        open_button_->set_variant(Button::Variant::Primary)
+            .on_click([this] { commit(); });
+        set_path(".");
+    }
+
+    FileBrowser& set_path(std::string dir) {
+        path_ = std::filesystem::path(std::move(dir)).lexically_normal();
+        refresh();
+        return *this;
+    }
+    std::string path() const { return path_.string(); }
+    // The selected file (path + name field); empty when nothing is chosen.
+    std::string selection() const {
+        if (name_->text().empty()) return {};
+        return (path_ / name_->text()).lexically_normal().string();
+    }
+    FileBrowser& on_pick(std::function<void(std::string)> f) {
+        on_pick_ = std::move(f);
+        return *this;
+    }
+    ListView& list() { return *list_; }
+    TextField& name_field() { return *name_; }
+    Button& open_button() { return *open_button_; }
+
+    void attached(Context& c) override {
+        Dialog::attached(c);
+        path_label_->set_color(c.theme().text_dim);
+    }
+
+    const char* widget_type() const override { return "FileBrowser"; }
+
+private:
+    void refresh() {
+        entries_.clear();
+        is_dir_.clear();
+        std::error_code ec;
+        std::vector<std::string> dirs;
+        if (path_.has_parent_path()) {
+            entries_.push_back("..");
+            is_dir_.push_back(true);
+        }
+        std::vector<std::string> files;
+        for (const auto& it : std::filesystem::directory_iterator(path_, ec)) {
+            bool dir = it.is_directory(ec);
+            if (dir) {
+                dirs.push_back(it.path().filename().string() + "/");
+            } else {
+                files.push_back(it.path().filename().string());
+            }
+        }
+        std::sort(dirs.begin(), dirs.end());
+        std::sort(files.begin(), files.end());
+        for (auto& d : dirs) {
+            entries_.push_back(d);
+            is_dir_.push_back(true);
+        }
+        for (auto& f : files) {
+            entries_.push_back(f);
+            is_dir_.push_back(false);
+        }
+        list_->set_items(entries_).set_selected(-1);
+        path_label_->set_text(path_.string());
+    }
+
+    void entry_clicked(long i) {
+        if (i < 0 || size_t(i) >= entries_.size()) return;
+        if (is_dir_[size_t(i)]) {
+            std::string name = entries_[size_t(i)];
+            if (name == "..") path_ = path_.parent_path();
+            else path_ /= name.substr(0, name.size() - 1); // strip "/"
+            refresh();
+        } else {
+            name_->set_text(entries_[size_t(i)]);
+        }
+    }
+
+    void commit() {
+        std::string sel = selection();
+        if (sel.empty()) return;
+        if (on_pick_) on_pick_(sel);
+        request_close();
+    }
+
+    Mode mode_;
+    Label* path_label_ = nullptr;
+    ListView* list_ = nullptr;
+    TextField* name_ = nullptr;
+    Button* open_button_ = nullptr;
+    std::filesystem::path path_;
+    std::vector<std::string> entries_;
+    std::vector<bool> is_dir_;
+    std::function<void(std::string)> on_pick_;
+};
+
+// ---------------------------------------------------------------------------
+// Toast — transient corner notice. Pushed owned via Context::push_toast:
+// positioned in the bottom-right corner, removed automatically after the
+// requested seconds (see Context::tick).
+// ---------------------------------------------------------------------------
+class Toast : public Widget {
+public:
+    explicit Toast(std::string text, std::string widget_id = {})
+        : Widget(std::move(widget_id)), text_(std::move(text)) {}
+
+    Toast& set_icon(Icon icon) {
+        icon_ = icon;
+        has_icon_ = true;
+        return *this;
+    }
+
+    Size measure(const Constraints& c) override {
+        refresh();
+        float inv = ui_scale_inv();
+        float w = 14 + (has_icon_ ? 20.f : 0.f) + lay_.size.w * inv + 14;
+        return c.clamp({w, lay_.size.h * inv + 12.f});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        refresh();
+        const Theme& t = env.theme;
+        float inv = ui_scale_inv();
+        env.list.rect(bounds, t.surface_alt, t.radius);
+        env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
+        float x = bounds.x + 14;
+        if (has_icon_) {
+            float side = bounds.h - 10;
+            paint_icon(env.list, icon_, {x, bounds.center().y - side * .5f, side, side},
+                       t.accent);
+            x += 20;
+        }
+        paint_text(env, lay_, {x, bounds.center().y - lay_.size.h * inv * .5f},
+                   t.text, inv);
+    }
+
+    const char* widget_type() const override { return "Toast"; }
+
+    bool stretch_cross() const override { return false; }
+
+private:
+    float ui_scale_inv() const { return 1.f / ui_scale(); }
+    void refresh() const {
+        if (valid_ || !ctx) return;
+        lay_ = ctx->font().layout(text_, ctx->theme().s(ctx->theme().base_font_px));
+        valid_ = true;
+    }
+
+    std::string text_;
+    bool has_icon_ = false;
+    Icon icon_ = Icon::Check;
+    mutable text::TextLayout lay_;
+    mutable bool valid_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// ImageView — pan/zoom preview over an RGBA bitmap (textures, render
+// targets). Wheel zooms around the cursor, drag pans (grab cursor),
+// checkerboard shows through transparent regions.
+// ---------------------------------------------------------------------------
+class ImageView : public Widget {
+public:
+    explicit ImageView(std::string widget_id = {})
+        : Widget(std::move(widget_id)) {
+        hover_cursor_ = Cursor::Grab;
+    }
+
+    ImageView& set_pixels(int w, int h, const std::uint8_t* rgba) {
+        if (w <= 0 || h <= 0 || !rgba) return *this;
+        w_ = w;
+        h_ = h;
+        pixels_.assign(rgba, rgba + size_t(w) * h * 4);
+        dirty_ = true;
+        fit_pending_ = true;
+        return *this;
+    }
+    bool set_file(const std::string& path) {
+        int w = 0, h = 0, n = 0;
+        std::uint8_t* px = stbi_load(path.c_str(), &w, &h, &n, 4);
+        if (!px) return false;
+        set_pixels(w, h, px);
+        stbi_image_free(px);
+        return true;
+    }
+    int width() const { return w_; }
+    int height() const { return h_; }
+    float zoom() const { return zoom_; }
+    Vec2 pan() const { return pan_; }
+
+    void attached(Context& c) override { tex_id_ = c.next_texture_id(); }
+
+    Size measure(const Constraints& c) override { return c.clamp({200.f, 150.f}); }
+    bool expands_main() const override { return true; }
+
+    void paint(const PaintEnv& env) const override {
+        const Theme& t = env.theme;
+        // checkerboard: 8px squares in two grays
+        float cell = 8.f;
+        Color a = t.surface_alt, b = t.surface;
+        for (float y = bounds.y; y < bounds.bottom(); y += cell)
+            for (float x = bounds.x; x < bounds.right(); x += cell) {
+                bool odd = (int(std::floor(x / cell)) + int(std::floor(y / cell))) % 2;
+                env.list.rect({x, y, std::fmin(cell, bounds.right() - x),
+                               std::fmin(cell, bounds.bottom() - y)},
+                              odd ? b : a, 0);
+            }
+        if (w_ <= 0) return;
+        if (fit_pending_) {
+            zoom_ = std::fmin(bounds.w / float(w_), bounds.h / float(h_));
+            pan_ = {0, 0};
+            fit_pending_ = false;
+        }
+        env.list.push_clip(bounds);
+        Rect dst{bounds.center().x - float(w_) * zoom_ * .5f + pan_.x,
+                 bounds.center().y - float(h_) * zoom_ * .5f + pan_.y,
+                 float(w_) * zoom_, float(h_) * zoom_};
+        env.list.image(dst, tex_id_, {0, 0, float(w_), float(h_)});
+        env.list.pop_clip();
+        env.list.hollow_rect(bounds, t.border, t.border_width, 0);
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::Scroll:
+            if (!bounds.contains(e.pos)) return false;
+            zoom_at(e.pos, std::exp(e.scroll.y * .15f)); // wheel up = zoom in
+            return true;
+        case Event::Type::MousePress:
+            if (enabled && bounds.contains(e.pos)) {
+                ctx->capture_mouse(this);
+                panning_ = true;
+                last_ = e.pos;
+                return true;
+            }
+            return false;
+        case Event::Type::MouseMove:
+            if (panning_) {
+                pan_ += {e.pos.x - last_.x, e.pos.y - last_.y};
+                last_ = e.pos;
+                return true;
+            }
+            return false;
+        case Event::Type::MouseRelease:
+            if (panning_) {
+                panning_ = false;
+                ctx->release_mouse(this);
+                return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    void collect_uploads(std::vector<TexUpload>& out) override {
+        if (dirty_ && !pixels_.empty() && tex_id_) {
+            out.push_back(TexUpload{tex_id_, w_, h_, TexFormat::Rgba8, pixels_.data()});
+            dirty_ = false;
+        }
+    }
+
+    const char* widget_type() const override { return "ImageView"; }
+
+private:
+    void zoom_at(Vec2 anchor, float factor) {
+        float old = zoom_;
+        zoom_ = std::clamp(zoom_ * factor, .05f, 32.f);
+        if (zoom_ == old) return;
+        // keep the anchored point fixed: adjust pan around the view center
+        Vec2 c = bounds.center();
+        Vec2 rel{anchor.x - c.x - pan_.x, anchor.y - c.y - pan_.y};
+        pan_.x += rel.x * (1.f - zoom_ / old);
+        pan_.y += rel.y * (1.f - zoom_ / old);
+    }
+
+    int w_ = 0, h_ = 0;
+    std::vector<std::uint8_t> pixels_;
+    std::uint32_t tex_id_ = 0;
+    bool dirty_ = false, panning_ = false;
+    mutable bool fit_pending_ = false;
+    mutable float zoom_ = 1;
+    mutable Vec2 pan_{};
+    Vec2 last_{};
+};
+
+// ---------------------------------------------------------------------------
+// CompareView — before/after A|B split: two images drawn over the same rect,
+// each clipped to its side of a draggable divider (tonemap/filter A-B).
+// ---------------------------------------------------------------------------
+class CompareView : public Widget {
+public:
+    explicit CompareView(std::string widget_id = {})
+        : Widget(std::move(widget_id)) {
+        hover_cursor_ = Cursor::ResizeH;
+    }
+
+    // Both images are stretched over the full view; A fills [0, frac],
+    // B fills [frac, 1]. Call both setters once per frame at most.
+    CompareView& set_pixels_a(int w, int h, const std::uint8_t* rgba) {
+        return store(a_, w, h, rgba);
+    }
+    CompareView& set_pixels_b(int w, int h, const std::uint8_t* rgba) {
+        return store(b_, w, h, rgba);
+    }
+    CompareView& set_fraction(float f) {
+        fraction_ = clamp01(f);
+        return *this;
+    }
+    float fraction() const { return fraction_; }
+
+    void attached(Context& c) override {
+        tex_a_ = c.next_texture_id();
+        tex_b_ = c.next_texture_id();
+    }
+
+    Size measure(const Constraints& c) override { return c.clamp({220.f, 140.f}); }
+
+    void paint(const PaintEnv& env) const override {
+        const Theme& t = env.theme;
+        float split = bounds.x + fraction_ * bounds.w;
+        if (a_.w > 0) {
+            env.list.push_clip({bounds.x, bounds.y, split - bounds.x, bounds.h});
+            env.list.image(bounds, tex_a_, {0, 0, float(a_.w), float(a_.h)});
+            env.list.pop_clip();
+        }
+        if (b_.w > 0) {
+            env.list.push_clip({split, bounds.y, bounds.right() - split, bounds.h});
+            env.list.image(bounds, tex_b_, {0, 0, float(b_.w), float(b_.h)});
+            env.list.pop_clip();
+        }
+        env.list.line({split, bounds.y}, {split, bounds.bottom()}, Color::white(), 2);
+    }
+
+    bool on_event(const Event& e) override {
+        switch (e.type) {
+        case Event::Type::MousePress:
+            if (enabled && bounds.contains(e.pos) &&
+                std::fabs(e.pos.x - (bounds.x + fraction_ * bounds.w)) < 8.f) {
+                ctx->capture_mouse(this);
+                dragging_ = true;
+                return true;
+            }
+            return false;
+        case Event::Type::MouseMove:
+            if (dragging_) {
+                set_fraction((e.pos.x - bounds.x) / std::fmax(bounds.w, 1.f));
+                return true;
+            }
+            return false;
+        case Event::Type::MouseRelease:
+            if (dragging_) {
+                dragging_ = false;
+                ctx->release_mouse(this);
+                return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    void collect_uploads(std::vector<TexUpload>& out) override {
+        if (a_.dirty && tex_a_) {
+            out.push_back(TexUpload{tex_a_, a_.w, a_.h, TexFormat::Rgba8, a_.px.data()});
+            a_.dirty = false;
+        }
+        if (b_.dirty && tex_b_) {
+            out.push_back(TexUpload{tex_b_, b_.w, b_.h, TexFormat::Rgba8, b_.px.data()});
+            b_.dirty = false;
+        }
+    }
+
+    const char* widget_type() const override { return "CompareView"; }
+
+private:
+    struct Slot {
+        int w = 0, h = 0;
+        std::vector<std::uint8_t> px;
+        bool dirty = false;
+    };
+    CompareView& store(Slot& s, int w, int h, const std::uint8_t* rgba) {
+        if (w <= 0 || h <= 0 || !rgba) return *this;
+        s.w = w;
+        s.h = h;
+        s.px.assign(rgba, rgba + size_t(w) * h * 4);
+        s.dirty = true;
+        return *this;
+    }
+
+    Slot a_, b_;
+    std::uint32_t tex_a_ = 0, tex_b_ = 0;
+    float fraction_ = .5f;
+    bool dragging_ = false;
+};
+
+} // namespace slikui
+
+// (already included above: slikui/widgets/text.hpp)
+// (already included above: slikui/widgets/toolbar.hpp)
 // (already included above: slikui/widgets/views.hpp)
 
 
@@ -18539,6 +22196,32 @@ inline Key map_key(int glfw_key) {
     case GLFW_KEY_F10: return Key::F10;
     case GLFW_KEY_F11: return Key::F11;
     case GLFW_KEY_F12: return Key::F12;
+    case GLFW_KEY_A: return Key::A;
+    case GLFW_KEY_B: return Key::B;
+    case GLFW_KEY_C: return Key::C;
+    case GLFW_KEY_D: return Key::D;
+    case GLFW_KEY_E: return Key::E;
+    case GLFW_KEY_F: return Key::F;
+    case GLFW_KEY_G: return Key::G;
+    case GLFW_KEY_H: return Key::H;
+    case GLFW_KEY_I: return Key::I;
+    case GLFW_KEY_J: return Key::J;
+    case GLFW_KEY_K: return Key::K;
+    case GLFW_KEY_L: return Key::L;
+    case GLFW_KEY_M: return Key::M;
+    case GLFW_KEY_N: return Key::N;
+    case GLFW_KEY_O: return Key::O;
+    case GLFW_KEY_P: return Key::P;
+    case GLFW_KEY_Q: return Key::Q;
+    case GLFW_KEY_R: return Key::R;
+    case GLFW_KEY_S: return Key::S;
+    case GLFW_KEY_T: return Key::T;
+    case GLFW_KEY_U: return Key::U;
+    case GLFW_KEY_V: return Key::V;
+    case GLFW_KEY_W: return Key::W;
+    case GLFW_KEY_X: return Key::X;
+    case GLFW_KEY_Y: return Key::Y;
+    case GLFW_KEY_Z: return Key::Z;
     default: return Key::Unknown;
     }
 }
@@ -18682,6 +22365,47 @@ public:
     void swap() { glfwSwapBuffers(window_); }
 
     GLFWwindow* handle() { return window_; }
+
+    // Wire host services that live on the window (system clipboard). Call
+    // once after creating the Context.
+    void attach(Context& ctx) {
+        ctx.set_clipboard_source([] {
+            const char* s = glfwGetClipboardString(nullptr);
+            return s ? std::string(s) : std::string{};
+        });
+        ctx.set_clipboard_sink([](std::string text) {
+            glfwSetClipboardString(nullptr, text.c_str());
+        });
+        // Cursor shapes → GLFW standard cursors (created lazily, cached).
+        struct Cursors {
+            GLFWcursor* map[7] = {};
+            GLFWcursor* get(int shape, int slot) {
+                if (!map[slot]) map[slot] = glfwCreateStandardCursor(shape);
+                return map[slot];
+            }
+        };
+        static Cursors cursors;
+        ctx.set_cursor_host([this](slikui::Cursor c) {
+            int shape = GLFW_ARROW_CURSOR, slot = 0;
+            switch (c) {
+            case slikui::Cursor::IBeam: shape = GLFW_IBEAM_CURSOR; slot = 1; break;
+            case slikui::Cursor::Hand: shape = GLFW_HAND_CURSOR; slot = 2; break;
+            case slikui::Cursor::Grab: shape = GLFW_HAND_CURSOR; slot = 3; break;
+            case slikui::Cursor::Crosshair:
+                shape = GLFW_CROSSHAIR_CURSOR;
+                slot = 4;
+                break;
+            case slikui::Cursor::ResizeH: shape = GLFW_HRESIZE_CURSOR; slot = 5; break;
+            case slikui::Cursor::ResizeV: shape = GLFW_VRESIZE_CURSOR; slot = 6; break;
+            default: break;
+            }
+            if (slot == 0) {
+                glfwSetCursor(window_, nullptr); // default arrow
+                return;
+            }
+            glfwSetCursor(window_, cursors.get(shape, slot));
+        });
+    }
 
 private:
     void push(const Event& e) { events_.push_back(e); }

@@ -42,8 +42,11 @@ controls grouped in an accordion panel](docs/images/cube_viewer.png)
 - [Component reference](#component-reference)
   - [Buttons](#buttons) · [Checkbox, Radio, Switch](#checkbox-radio-switch) ·
     [Slider, ProgressBar, Spinner](#slider-progressbar-spinner) · [Label](#label) ·
-    [TextField, TextArea](#textfield-textarea) ·
+    [TextField, TextArea](#textfield-textarea) · [Editors](#editors) ·
     [ListView, Tabs, Dropdown](#listview-tabs-dropdown) ·
+    [Menus & shortcuts](#menus--shortcuts) · [Toolbar, IconButton, icons](#toolbar-iconbutton-icons) ·
+    [Plot, TreeView, Table, PropertyGrid](#plot-treeview-table-propertygrid) ·
+    [Dialogs, toasts, status & logs](#dialogs-toasts-status--logs) ·
     [Panel, Row, Column, Spacer, Divider](#panel-row-column-spacer-divider) ·
     [Expander, Accordion, Splitter](#expander-accordion-splitter) ·
     [Image](#image) · [Tooltips](#tooltips) · [Theming](#theming)
@@ -76,10 +79,15 @@ controls grouped in an accordion panel](docs/images/cube_viewer.png)
   system fonts — `ctx.load_font_memory(slikui::text::default_font_data(),
   slikui::text::default_font_size())`. Licence:
   `third_party/fonts/LICENSE-DejaVu.txt`; ship it with your app.
-- **Widget set** — Label, Button (variants), Checkbox, Radio, Switch, Slider,
-  ProgressBar, Spinner, TextField, TextArea (multiline), ScrollArea, ListView,
-  Tabs, Dropdown (popup), Expander, Accordion, Splitter, Image, hover tooltips;
-  Panel, Column, Row, Spacer, Divider — see `slikui/widgets/all.hpp`.
+- **Widget set** — Label, Button (variants), Checkbox, Radio, Switch, Slider
+  (label/format/log/step), ProgressBar, Spinner, TextField (selection +
+  clipboard), TextArea (multiline), ScrollArea, ListView, Tabs, Dropdown
+  (popup), Expander, Accordion, Splitter, Image, hover tooltips; DragValue,
+  Vec2/3/4Edit (borrowed numpy buffers), ColorEdit (SV + hue popup),
+  Segmented; MenuBar/Menu (context menus, shortcut table), Toolbar/
+  IconButton with a procedural icon set; Plot (lines/bars/fill), TreeView,
+  Table, PropertyGrid, Vec2Pad; Panel, Column, Row, Spacer, Divider — see
+  `slikui/widgets/all.hpp` and `docs/widgets-roadmap.md` for what's next.
 - **Theme + animation** — palette-driven styling with 8 built-in presets
   (Dark, Light, Nord, Dracula, Gruvbox, Mocha, Solarized, Phosphor),
   hover/press transitions, `Anim` tween helper.
@@ -132,10 +140,13 @@ row.add<slikui::Switch>().set_checked(false);
 
 ### Slider, ProgressBar, Spinner
 
-`Slider` drives a float range (`set_range`, `set_value`, `on_change`);
-`ProgressBar` shows a clamped 0–1 fraction; `Spinner` animates forever and
-takes `set_speed` (degrees per second) — it is driven by the time you pass to
-`ctx.tick`, so it pauses with your app.
+`Slider` drives a float range (`set_range`, `set_value`, `on_change`) and can
+carry its own caption row — `set_label` adds a title with a live formatted
+value on the right (`set_format`, e.g. `"%.2f"`), `set_log_scale` makes
+picking across magnitudes sane, and `set_step` quantizes clicks and wheel
+ticks. `ProgressBar` shows a clamped 0–1 fraction; `Spinner` animates forever
+and takes `set_speed` (degrees per second) — it is driven by the time you
+pass to `ctx.tick`, so it pauses with your app.
 
 ```cpp
 auto& cap = root.add<slikui::Row>();
@@ -165,9 +176,12 @@ root.add<Label>("Accent-colored label.").set_color(ctx.theme().accent);
 
 ### TextField, TextArea
 
-Single-line and multiline editing with caret, selection, Home/End/arrow
-navigation, clipboard, and auto-scroll. `on_change` fires on every edit,
+Single-line and multiline editing with caret, drag/Shift+arrow selection,
+Home/End/arrow navigation, and auto-scroll. `on_change` fires on every edit,
 `on_submit` on Enter (TextField). `set_password` masks a TextField.
+Ctrl/Cmd+A/C/X/V read and write the host clipboard via
+`ctx.set_clipboard_source/sink` (the GLFW backend wires the system
+clipboard; without a host the shortcuts are silent no-ops).
 
 ```cpp
 root.add<TextField>().set_text("jane@example.com").set_placeholder("you@host");
@@ -178,6 +192,32 @@ root.add<TextArea>().set_rows(3)
 ```
 
 ![inputs](docs/images/inputs.png)
+
+### Editors
+
+Widgets for tuning numbers and colors in demo panels — all C++ core, so the
+Python bindings get the same surface (see `python/tests/test_editors.py`).
+
+`DragValue` scrubs a value like Blender number fields: drag horizontally to
+change it, click to type, Enter commits, Escape cancels, arrows nudge when
+focused. `Vec2Edit`/`Vec3Edit`/`Vec4Edit` give one labeled field per axis and
+**borrow** the caller's `float[N]` — edits write into it and external writes
+mirror back on the next tick (numpy arrays work as-is). `ColorEdit` is a
+swatch that opens an SV square + hue popup with hex and RGBA fields.
+`Segmented` is a compact radio-style row.
+
+```cpp
+root.add<Segmented>().set_items({"Cube", "Sphere", "Torus"}).set_selected(1);
+static float light_dir[3] = {0.60f, 0.40f, 0.70f};
+root.add<Vec3Edit>(light_dir, "XYZ");   // borrows the array, mirrors it each tick
+root.add<DragValue>(1.5f).set_prefix("exp ").set_suffix(" EV");
+root.add<Slider>(0.f, 1.f).set_label("Roughness").set_format("%.2f").set_value(0.35f);
+auto& colors = root.add<Row>();
+colors.set_gap(8);
+colors.add<ColorEdit>(Color::from_hex(0xBF5C38));  // click → SV + hue popup
+```
+
+![editors](docs/images/editors.png)
 
 ### ListView, Tabs, Dropdown
 
@@ -194,6 +234,124 @@ col.add<Dropdown>().set_items({"Linear", "Nearest", "Cubic", "Lanczos"})
 ```
 
 ![views](docs/images/views.png)
+
+### Menus & shortcuts
+
+`MenuBar` is a top strip of menu titles: click to open, click again to close,
+and with a menu open, hovering another title switches to it. `Menu` holds
+items (`add_item`, `add_checkable`, `add_submenu`, `add_separator`) with
+right-aligned shortcut hints; disabled items swallow clicks. Menus are
+**borrowed** popups — build once, open many times; checkmark state is read
+through a callback at paint time and `on_open` fires before each show so you
+can refresh enabled flags. Escape unwinds submenus one level per press.
+
+Any widget can carry a right-click menu: `widget.set_context_menu(&menu)` —
+the nearest ancestor with one wins. Global accelerators live on the Context:
+`ctx.add_shortcut(Key::S, ModCtrl, save)` fires before widget dispatch (a
+modifier is required, so typing never triggers one).
+
+```cpp
+auto& bar = root.add<MenuBar>();
+auto& file = bar.add_menu("File");
+file.add_item("Open…", open_fn, "Ctrl+O");
+file.add_item("Save", save_fn, shortcut_label(Key::S, ModCtrl));
+file.add_separator();
+file.add_item("Quit", quit_fn, "Ctrl+Q");
+auto& view = bar.add_menu("View");
+view.add_checkable("Grid", [] { return show_grid; },
+                   [&](bool) { show_grid = !show_grid; });
+viewport.set_context_menu(&view_menu);          // right-click
+ctx.add_shortcut(Key::R, ModCtrl, render_fn);   // global accelerator
+```
+
+![menus](docs/images/menus.png)
+
+### Toolbar, IconButton, icons
+
+`Toolbar` is a strip of `IconButton`s — Button interaction (hover/press
+animation, keyboard activation, variants) with a procedural icon instead of
+text. The icon set in `widgets/icons.hpp` (~26: play, pause, step, grid,
+camera, save, refresh, search, …) is painted from DrawList primitives —
+no icon font, no assets, resolution-independent and theme-tinted.
+`add_button(icon, label, …)` renders a small caption under the icon.
+
+```cpp
+auto& bar = root.add<Toolbar>();
+bar.add_button(Icon::Play, run_fn, "Run");
+bar.add_button(Icon::Pause, pause_fn);
+bar.add_separator();
+bar.add_button(Icon::Grid, grid_fn, "Toggle grid");
+bar.add_button(Icon::Save, "Save", save_fn);   // labeled
+```
+
+![toolbar](docs/images/toolbar.png)
+
+### Plot, TreeView, Table, PropertyGrid
+
+The data-display family for demo panels. `Plot` draws line series with
+autoscale (or `set_x_range`/`set_y_range`), grid + tick labels, optional
+area fill, markers — and `set_bars` turns series 0 into a histogram.
+`TreeView` takes a flat `(label, depth, expandable)` row list; expansion
+state lives in the widget, chevron clicks toggle, rows select.
+`Table` is columns + header + selectable rows with per-column alignment and
+cell clipping. `PropertyGrid` is the inspector: `add_property(label)` rows
+with a fixed label column (drop any editor into the returned row) and
+collapsible `add_section`s. `Vec2Pad` (bottom left) is a 2D pad with a
+draggable dot — light direction, UV offsets.
+
+```cpp
+auto& plot = left.add<Plot>().set_fill(true);
+plot.set_series(frame_times_ms, ctx.theme().accent);   // numpy or std::vector
+plot.set_bars(false).set_markers(false);
+
+right.add<TreeView>().set_rows({
+    {"Scene", 0, true}, {"Dragon", 1}, {"Lights", 0, true}, {"Sun", 1},
+});
+auto& table = right.add<Table>();
+table.set_columns({{"Mesh", 100}, {"Tris", 60, true_align_right…}});
+table.set_rows({{"Dragon", "870k", "4"}}).set_selected(0);
+
+auto& grid = root.add<PropertyGrid>();
+grid.add_property("Roughness").add<Slider>(0.f, 1.f);
+auto& mat = grid.add_section("Material", true);
+mat.add_property("Metallic").add<Slider>(0.f, 1.f);
+```
+
+![data](docs/images/data.png)
+
+### Dialogs, toasts, status & logs
+
+Floating shells live on their own layer above popups. `Dialog` has a
+draggable title bar with a close button and a `content()` column;
+`MessageBox` adds an action-button row; a **modal** dialog dims the app and
+traps presses outside it. `StatusBar` shows status text with transient
+messages plus right-side widgets, `Toast` posts auto-dismissing corner
+notices, and `LogView` is a severity-colored autoscrolling console.
+`FileBrowser` lists real directories (Open/Save), `ImageView` pans/zooms
+bitmaps over a checkerboard, `CompareView` splits two images with a
+draggable divider. Widgets can request cursor shapes via `set_cursor`
+(hosts map them to system cursors — `GlfwWindow::attach` does this).
+
+```cpp
+auto mb = std::make_unique<slikui::MessageBox>("Delete", "Remove \'dragon.obj\'?");
+mb->set_modal(true);
+mb->add_button("Delete", [&] { remove_item(); });
+mb->add_button("Cancel", nullptr);
+ctx.open_dialog(std::move(mb));   // owned; or open_dialog(mb) to borrow
+ctx.push_toast(std::make_unique<slikui::Toast>("Saved"), 3.0);
+```
+
+```python
+mb = slikui.MessageBox("Delete", "Remove \'dragon.obj\'?")
+mb.set_modal(True)
+mb.add_button("Delete", lambda: remove_item())
+mb.add_button("Cancel", lambda: None)
+ui.ctx.open_dialog(mb)            # borrowed — keep the Python object alive
+ui.ctx.push_toast("Saved", 3.0)
+```
+
+![shells](docs/images/shells.png)
+
 
 ### Panel, Row, Column, Spacer, Divider
 
@@ -341,14 +499,24 @@ ctest --test-dir build          # golden-image pixel checks included
 ./build/examples/03_gallery/slikui_gallery
 ./build/examples/04_glfw_opengl     # 3D shape viewer: orbit + zoom + accordion panel
 ./build/examples/04_glfw_software   # same UI, CPU-rasterized scene
+./build/examples/05_showcase/slikui_showcase
+./build/examples/05_showcase/slikui_showcase --smoke showcase.png   # headless scripted pass
 ```
 
 Examples: `01_hello` (GLFW+GL), `02_raw_pixels` (headless, writes a PPM),
 `03_gallery` (all widgets), `04_glfw_opengl`, `04_glfw_software` (CPU
-rasterizer in a window). `04_glfw_opengl` renders a lit reference shape
-(cube, sphere or torus — pick it in the **Shape** section) over a procedural
-sky, and edits material, environment, light and camera state live from an
-accordion control panel; drag to orbit, scroll to zoom.
+rasterizer in a window), `05_showcase` (every widget live). `04_glfw_opengl`
+renders a lit reference shape (cube, sphere or torus — pick it in the
+**Shape** section) over a procedural sky, and edits material, environment,
+light and camera state live from an accordion control panel; drag to orbit,
+scroll to zoom. `05_showcase` puts every component in one window — menu bar,
+toolbar, splitter with six tabbed pages, status bar — and each one logs its
+state changes into the on-screen event log as you use it; two custom widgets
+(an expanding `Fill` wrapper and a `LevelMeter` with click/drag scrubbing,
+peak-hold and a warning above 90%) show the measure/paint/event/tick
+contract. `--smoke` drives a scripted pass over all of it headlessly
+(synthetic mouse/key/scroll events) and writes a screenshot; its transcript
+is byte-identical to the Python twin's (`python/examples/showcase.py`).
 
 Regenerate the images above with:
 
@@ -367,7 +535,8 @@ for f in docs/images/*.ppm; do python3 tools/ppm2png.py "$f" "${f%.ppm}.png"; do
 
 ## Roadmap
 
-Toasts, tree/table views, resizable floating windows, per-widget style
-overrides, dirty-region relayout.
+Tracked in `docs/widgets-roadmap.md`: dialogs & file browser, tree/table
+views, property grid, plots, toasts. Beyond that: resizable floating
+windows, per-widget style overrides, dirty-region relayout.
 
 MIT licensed. stb libraries are public domain.

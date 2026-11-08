@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <algorithm>
+#include <array>
+#include <cmath>
 
 namespace slikui {
 
@@ -52,6 +54,51 @@ struct Color {
     static Color from_abgr(std::uint32_t v) {
         return Color(std::uint8_t(v & 0xFF), std::uint8_t((v >> 8) & 0xFF),
                      std::uint8_t((v >> 16) & 0xFF), std::uint8_t((v >> 24) & 0xFF));
+    }
+
+    // --- HSV (for color editors) -------------------------------------------------
+    // h in [0,1), s/v in [0,1]. Achromatic colors return h = 0, so the
+    // round-trip through from_hsv is exact for grays and the pure hues.
+    std::array<float, 3> to_hsv() const {
+        const float rf = r / 255.f, gf = g / 255.f, bf = b / 255.f;
+        const float mx = std::fmax(rf, std::fmax(gf, bf));
+        const float mn = std::fmin(rf, std::fmin(gf, bf));
+        const float d = mx - mn;
+        float h = 0.f;
+        if (d > 0.f) {
+            if (mx == rf)      h = std::fmod((gf - bf) / d, 6.f);
+            else if (mx == gf) h = (bf - rf) / d + 2.f;
+            else               h = (rf - gf) / d + 4.f;
+            h /= 6.f;
+            if (h < 0.f) h += 1.f;
+        }
+        return {h, mx > 0.f ? d / mx : 0.f, mx};
+    }
+
+    // h wraps (negative / >1 accepted); s/v clamp to [0,1].
+    static Color from_hsv(float h, float s, float v, std::uint8_t alpha = 255) {
+        h -= std::floor(h);
+        s = std::clamp(s, 0.f, 1.f);
+        v = std::clamp(v, 0.f, 1.f);
+        float hp = std::fmin(h * 6.f, 5.999999f);
+        int hi = int(hp);
+        float f = hp - float(hi);
+        float p = v * (1.f - s);
+        float q = v * (1.f - s * f);
+        float t = v * (1.f - s * (1.f - f));
+        float rf, gf, bf;
+        switch (hi) {
+        case 0:  rf = v; gf = t; bf = p; break;
+        case 1:  rf = q; gf = v; bf = p; break;
+        case 2:  rf = p; gf = v; bf = t; break;
+        case 3:  rf = p; gf = q; bf = v; break;
+        case 4:  rf = t; gf = p; bf = v; break;
+        default: rf = v; gf = p; bf = q; break;
+        }
+        auto ch = [](float x) {
+            return std::uint8_t(std::clamp(x, 0.f, 1.f) * 255.f + 0.5f);
+        };
+        return Color(ch(rf), ch(gf), ch(bf), alpha);
     }
 
     static Color black()      { return Color(0, 0, 0); }

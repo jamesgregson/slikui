@@ -74,6 +74,32 @@ inline Key map_key(int glfw_key) {
     case GLFW_KEY_F10: return Key::F10;
     case GLFW_KEY_F11: return Key::F11;
     case GLFW_KEY_F12: return Key::F12;
+    case GLFW_KEY_A: return Key::A;
+    case GLFW_KEY_B: return Key::B;
+    case GLFW_KEY_C: return Key::C;
+    case GLFW_KEY_D: return Key::D;
+    case GLFW_KEY_E: return Key::E;
+    case GLFW_KEY_F: return Key::F;
+    case GLFW_KEY_G: return Key::G;
+    case GLFW_KEY_H: return Key::H;
+    case GLFW_KEY_I: return Key::I;
+    case GLFW_KEY_J: return Key::J;
+    case GLFW_KEY_K: return Key::K;
+    case GLFW_KEY_L: return Key::L;
+    case GLFW_KEY_M: return Key::M;
+    case GLFW_KEY_N: return Key::N;
+    case GLFW_KEY_O: return Key::O;
+    case GLFW_KEY_P: return Key::P;
+    case GLFW_KEY_Q: return Key::Q;
+    case GLFW_KEY_R: return Key::R;
+    case GLFW_KEY_S: return Key::S;
+    case GLFW_KEY_T: return Key::T;
+    case GLFW_KEY_U: return Key::U;
+    case GLFW_KEY_V: return Key::V;
+    case GLFW_KEY_W: return Key::W;
+    case GLFW_KEY_X: return Key::X;
+    case GLFW_KEY_Y: return Key::Y;
+    case GLFW_KEY_Z: return Key::Z;
     default: return Key::Unknown;
     }
 }
@@ -217,6 +243,47 @@ public:
     void swap() { glfwSwapBuffers(window_); }
 
     GLFWwindow* handle() { return window_; }
+
+    // Wire host services that live on the window (system clipboard). Call
+    // once after creating the Context.
+    void attach(Context& ctx) {
+        ctx.set_clipboard_source([] {
+            const char* s = glfwGetClipboardString(nullptr);
+            return s ? std::string(s) : std::string{};
+        });
+        ctx.set_clipboard_sink([](std::string text) {
+            glfwSetClipboardString(nullptr, text.c_str());
+        });
+        // Cursor shapes → GLFW standard cursors (created lazily, cached).
+        struct Cursors {
+            GLFWcursor* map[7] = {};
+            GLFWcursor* get(int shape, int slot) {
+                if (!map[slot]) map[slot] = glfwCreateStandardCursor(shape);
+                return map[slot];
+            }
+        };
+        static Cursors cursors;
+        ctx.set_cursor_host([this](slikui::Cursor c) {
+            int shape = GLFW_ARROW_CURSOR, slot = 0;
+            switch (c) {
+            case slikui::Cursor::IBeam: shape = GLFW_IBEAM_CURSOR; slot = 1; break;
+            case slikui::Cursor::Hand: shape = GLFW_HAND_CURSOR; slot = 2; break;
+            case slikui::Cursor::Grab: shape = GLFW_HAND_CURSOR; slot = 3; break;
+            case slikui::Cursor::Crosshair:
+                shape = GLFW_CROSSHAIR_CURSOR;
+                slot = 4;
+                break;
+            case slikui::Cursor::ResizeH: shape = GLFW_HRESIZE_CURSOR; slot = 5; break;
+            case slikui::Cursor::ResizeV: shape = GLFW_VRESIZE_CURSOR; slot = 6; break;
+            default: break;
+            }
+            if (slot == 0) {
+                glfwSetCursor(window_, nullptr); // default arrow
+                return;
+            }
+            glfwSetCursor(window_, cursors.get(shape, slot));
+        });
+    }
 
 private:
     void push(const Event& e) { events_.push_back(e); }

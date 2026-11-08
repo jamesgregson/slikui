@@ -49,6 +49,30 @@ ui.handle(slikui.text_input("h"))         # into the focused TextField
 ui.handle(slikui.scroll(pos, (0, -1)))    # wheel, "ctrl+shift" mods supported
 ```
 
+**Editors for demo panels.** `DragValue` scrubs numbers (click to type,
+Enter commits), `Vec2Edit`/`Vec3Edit`/`Vec4Edit` bind a borrowed numpy
+`float32` array — edits write into it, external writes mirror back each tick —
+`ColorEdit` opens an SV/hue popup, and `Slider` grows a built-in
+label + live-value row (`label=`, `format=`, `log_scale=`, `step=`).
+`TextField` has selection and Ctrl/Cmd+A/C/X/V via host clipboard callbacks
+(`ctx.set_clipboard_source/sink`; the GLFW backend wires the system
+clipboard). New widgets land C++-first so both languages get them — see
+`docs/widgets-roadmap.md`.
+
+**Menus, toolbars, data display.** `MenuBar`/`Menu` build once and open as
+borrowed popups (checkmarks read through callbacks, `on_open` refresh hook,
+submenus, right-aligned shortcut hints via `slikui.shortcut_label`);
+`ctx.add_shortcut(key, mods, fn)` runs global accelerators, and
+`widget.set_context_menu(menu)` right-clicks. `Toolbar` lays out
+`IconButton`s with a procedural icon set (`slikui.Icon.*` — painted from
+draw-list primitives, no assets). For data panels: `Plot` (numpy series,
+autoscale or fixed ranges, bars/fill/markers), `TreeView` (flat
+`TreeView.Row` lists with expand/collapse), `Table` (`Table.ColumnSpec`
+columns, selectable rows), `PropertyGrid` (`add_property("Roughness")` then
+`row.add(slikui.Slider, 0, 1)`), and `Vec2Pad` for 2D values.
+
+**Dialogs, toasts, logs & image views.** `Dialog`/`MessageBox` float on the shell layer above popups (`ctx.open_dialog` — Escape or the ✕ button closes; modal dialogs dim + trap). `ctx.push_toast(text, seconds)` posts auto-dismissing corner notices. `StatusBar`/`LogView` give feedback, `SearchBox`/`GroupBox` wrap inputs, `FileBrowser` browses real directories (Open/Save + `on_pick`), and `ImageView`/`CompareView` pan, zoom and split RGBA bitmaps. Widgets request cursor shapes (`slikui.Cursor`) through `ctx.set_cursor_host`.
+
 Interactive demo — a Python-native GLFW + OpenGL host with the slikui software
 rasterizer as the UI layer (`pip install glfw PyOpenGL`):
 
@@ -59,6 +83,17 @@ python python/examples/glfw_demo.py
 Lit cube/sphere/torus over a procedural sky; the controls panel is rasterized
 on the CPU into a `uint32` buffer and blended over the GL scene as one
 texture. Drag orbits, wheel zooms, the panel edits material/sky/light/camera.
+
+The showcase twin — every widget live in one window, each printing its state
+changes into the on-screen event log, with two custom widgets (`Fill` and a
+scrubbable `LevelMeter`) exercising the measure/paint/event/tick contract.
+It is the one-for-one mirror of the C++ `examples/05_showcase`; their
+`--smoke` transcripts match line for line:
+
+```
+python python/examples/showcase.py              # interactive GLFW window
+python python/examples/showcase.py --smoke out.png   # headless scripted pass
+```
 
 **Your own renderer.** `slikui.RenderSink` is a trampoline over C++
 `IRenderSink`: subclass it, implement `upload(tex)` and `render(commands,
@@ -106,14 +141,12 @@ colors. Add instances with `container.add_widget(obj)` or
 `container.add(Meter, ...)`; a custom root is `context.set_root_widget(...)`.
 Note: subclasses must call `super().__init__()`, and subclassing the bound C++
 widget types (Column, Row, ...) is rejected — build layouts from Python code
-instead. See `docs/python-custom-widgets.md`,
-`python/examples/custom_widget.py`, and the pixel-parity test against the C++
-`Swatch` in `python/tests/test_custom_widgets.py`.
+instead. See `python/examples/custom_widget.py` and the pixel-parity test
+against the C++ `Swatch` in `python/tests/test_custom_widgets.py`.
 
 ![The Meter — a pure-Python custom widget rendered by the C++ core](../docs/images/custom_widget.png)
 
-Design and milestones: `docs/python-custom-widgets.md` — design notes for the
-custom-widget trampoline (ownership model, spike results) plus the retired
-bindings plan: M0 (values, software backend, core widgets), M1 (full widget
+Milestones: M0 (values, software backend, core widgets), M1 (full widget
 surface + themes), M2 (events, popups, tooltips, simulated-input tests) and
-M3 (wheels/CI/docs) are done; M4 (GLFW+GL backend bindings) is tabled.
+M3 (wheels/CI/docs) are done; M4 (GLFW+GL backend bindings) is tabled. The
+widget set itself is tracked in `docs/widgets-roadmap.md`.

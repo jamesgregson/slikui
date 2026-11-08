@@ -7,16 +7,21 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 
 namespace slikui {
 
 class TextField : public Widget {
 public:
-    explicit TextField(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
+    explicit TextField(std::string widget_id = {})
+        : Widget(std::move(widget_id)) {
+        hover_cursor_ = Cursor::IBeam; // text fields ask for the I-beam
+    }
 
     TextField& set_text(std::string t) {
         text_ = std::move(t);
         caret_ = text_.size();
+        clear_sel();
         return *this;
     }
     const std::string& text() const { return text_; }
@@ -57,6 +62,12 @@ public:
         if (!shown.empty()) {
             text::TextLayout lay = ctx->font().layout(shown, px);
             float text_y = bounds.center().y - lay.size.h * inv * .5f;
+            if (focused && has_sel()) {
+                auto [lo, hi] = sel_range();
+                float sx = bounds.x + pad_x + ctx->font().advance_upto(text_, lo, px) * inv;
+                float ex = bounds.x + pad_x + ctx->font().advance_upto(text_, hi, px) * inv;
+                env.list.rect({sx, text_y, ex - sx, lay.size.h * inv}, t.accent.faded(.35f), 2);
+            }
             paint_lay(env, lay, bounds.x + pad_x, text_y, t.text, inv);
             if (focused && caret_visible_) {
                 float cx = bounds.x + pad_x +
@@ -75,15 +86,24 @@ public:
         switch (e.type) {
         case Event::Type::MousePress:
             if (bounds.contains(e.pos)) {
-                // place caret at click position (approximate: walk codepoints)
-                float inv = 1.f / ui_scale();
-                float px = ctx->theme().s(ctx->theme().base_font_px);
-                float x = e.pos.x - bounds.x - 8;
-                size_t n = 0;
-                while (n < text_.size() &&
-                       ctx->font().advance_upto(text_, n + 1, px) * inv < x)
-                    ++n;
-                caret_ = n;
+                caret_ = caret_at(e.pos.x);
+                sel_anchor_ = long(caret_);
+                selecting_ = true;
+                ctx->capture_mouse(this);
+                return true;
+            }
+            return false;
+        case Event::Type::MouseMove:
+            if (selecting_) {
+                caret_ = caret_at(e.pos.x);
+                return true;
+            }
+            return false;
+        case Event::Type::MouseRelease:
+            if (selecting_) {
+                selecting_ = false;
+                ctx->release_mouse(this);
+                if (!has_sel()) clear_sel(); // a click with no drag: no selection
                 return true;
             }
             return false;
@@ -91,44 +111,111 @@ public:
         case Event::Type::TextInput: {
             if (!focused || e.codepoint == 0) return false;
             if (e.codepoint < 32) return false;
+            erase_selection();
             std::string insert = utf8_encode(e.codepoint);
             text_.insert(caret_, insert);
             caret_ += insert.size();
+            clear_sel(); // typing collapses the selection
             if (on_change_) on_change_(text_);
             return true;
         }
 
         case Event::Type::KeyPress: {
             if (!focused) return false;
+            // Ctrl/Cmd chords: select-all, copy, cut, paste (host clipboard).
+            if (e.shortcut_mod()) {
+                switch (e.key) {
+                case Key::A: caret_ = text_.size(); sel_anchor_ = 0; return true;
+                case Key::C:
+                    if (has_sel()) {
+                        auto [lo, hi] = sel_range();
+                        ctx->set_clipboard_text(text_.substr(lo, hi - lo));
+                    }
+                    return true;
+                case Key::X:
+                    if (has_sel()) {
+                        auto [lo, hi] = sel_range();
+                        ctx->set_clipboard_text(text_.substr(lo, hi - lo));
+                        text_.erase(lo, hi - lo);
+                        caret_ = lo;
+                        clear_sel();
+                        if (on_change_) on_change_(text_);
+                    }
+                    return true;
+                case Key::V: {
+                    std::string clip = ctx->clipboard_text();
+                    if (clip.empty()) return true;
+                    erase_selection();
+                    text_.insert(caret_, clip);
+                    caret_ += clip.size();
+                    clear_sel();
+                    if (on_change_) on_change_(text_);
+                    return true;
+                }
+                default: return false;
+                }
+            }
             switch (e.key) {
             case Key::Backspace:
-                if (caret_ > 0) {
+                if (has_sel()) {
+                    erase_selection();
+                    if (on_change_) on_change_(text_);
+                } else if (caret_ > 0) {
                     caret_ = prev_cp_boundary(caret_);
                     text_.erase(caret_, next_cp_boundary(caret_) - caret_);
+                    clear_sel();
                     if (on_change_) on_change_(text_);
                 }
                 return true;
             case Key::Delete:
-                if (caret_ < text_.size()) {
+                if (has_sel()) {
+                    erase_selection();
+                    if (on_change_) on_change_(text_);
+                } else if (caret_ < text_.size()) {
                     text_.erase(caret_, next_cp_boundary(caret_) - caret_);
+                    clear_sel();
                     if (on_change_) on_change_(text_);
                 }
                 return true;
             case Key::Left:
-                caret_ = prev_cp_boundary(caret_);
+                if (e.shift()) {
+                    if (sel_anchor_ < 0) sel_anchor_ = long(caret_);
+                    caret_ = prev_cp_boundary(caret_);
+                } else {
+                    clear_sel();
+                    caret_ = prev_cp_boundary(caret_);
+                }
                 return true;
             case Key::Right:
-                caret_ = next_cp_boundary(caret_);
+                if (e.shift()) {
+                    if (sel_anchor_ < 0) sel_anchor_ = long(caret_);
+                    caret_ = next_cp_boundary(caret_);
+                } else {
+                    clear_sel();
+                    caret_ = next_cp_boundary(caret_);
+                }
                 return true;
-            case Key::Home: caret_ = 0; return true;
-            case Key::End:  caret_ = text_.size(); return true;
+            case Key::Home:
+                if (e.shift()) {
+                    if (sel_anchor_ < 0) sel_anchor_ = long(caret_);
+                } else clear_sel();
+                caret_ = 0;
+                return true;
+            case Key::End:
+                if (e.shift()) {
+                    if (sel_anchor_ < 0) sel_anchor_ = long(caret_);
+                } else clear_sel();
+                caret_ = text_.size();
+                return true;
             case Key::Enter:
                 if (on_submit_) on_submit_(text_);
                 return true;
             case Key::Space:
                 // Space arrives as TextInput in most backends; also accept here.
+                erase_selection();
                 text_.insert(caret_, " ");
                 ++caret_;
+                clear_sel();
                 if (on_change_) on_change_(text_);
                 return true;
             default:
@@ -162,6 +249,32 @@ private:
 
     std::string display_text() const {
         return password_ ? std::string(text_.size(), '*') : text_;
+    }
+
+    // --- selection (byte offsets into text_) ---
+    bool has_sel() const { return sel_anchor_ >= 0 && size_t(sel_anchor_) != caret_; }
+    std::pair<size_t, size_t> sel_range() const {
+        size_t a = size_t(sel_anchor_), b = caret_;
+        return a < b ? std::pair{a, b} : std::pair{b, a};
+    }
+    void clear_sel() { sel_anchor_ = -1; }
+    void erase_selection() {
+        if (!has_sel()) return;
+        auto [lo, hi] = sel_range();
+        text_.erase(lo, hi - lo);
+        caret_ = lo;
+        clear_sel();
+    }
+    // Place the caret at a click position (approximate: walk codepoints).
+    size_t caret_at(float x) const {
+        float inv = 1.f / ui_scale();
+        float px = ctx->theme().s(ctx->theme().base_font_px);
+        float rel = x - bounds.x - 8;
+        size_t n = 0;
+        while (n < text_.size() &&
+               ctx->font().advance_upto(text_, n + 1, px) * inv < rel)
+            ++n;
+        return n;
     }
 
     size_t next_cp_boundary(size_t i) const {
@@ -205,6 +318,8 @@ private:
 
     std::string text_, placeholder_;
     size_t caret_ = 0;
+    long sel_anchor_ = -1; // byte offset where the selection was anchored
+    bool selecting_ = false;
     bool password_ = false;
     bool caret_visible_ = true;
     double blink_ = 0;

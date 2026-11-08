@@ -15,12 +15,21 @@
 #include "slikui/widgets/env.hpp"
 #include "slikui/widgets/widget.hpp"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace slikui {
+
+class Menu; // widgets/menus.hpp — borrowed popups, opened by right-click
+class Dialog; // widgets/shells.hpp — floating shell layer (see open_dialog)
+
+// Where an anchored popup opens relative to its anchor widget. When the
+// preferred side would leave the frame, the popup flips to the opposite side
+// and is then clamped fully inside the frame.
+enum class PopupDir : std::uint8_t { Below, Above, Right, Left };
 
 // Builds the tooltip popup for `w` at `pos`. Defined after Context (needs the
 // complete type); declared here so Context::show_tooltip can call it.
@@ -45,6 +54,37 @@ public:
 
     void set_frame_size(Vec2 size) { frame_ = size; }
     Vec2 frame_size() const { return frame_; }
+
+    // --- cursor shapes (host-provided) ---
+    //
+    // The host turns Cursor values into real system cursors (GLFW does this
+    // via attach); without a callback, widget cursor requests are no-ops.
+    Context& set_cursor_host(std::function<void(Cursor)> f) {
+        cursor_host_ = std::move(f);
+        return *this;
+    }
+
+    // --- clipboard (host-provided) ---
+    //
+    // The window system owns the real clipboard; slikui reaches it through two
+    // host callbacks (the GLFW wrapper installs glfwGetClipboardString /
+    // glfwSetClipboardString via GlfwWindow::attach). Headless hosts (tests)
+    // may inject fakes; with no callbacks set, clipboard operations are
+    // silent no-ops.
+    Context& set_clipboard_source(std::function<std::string()> f) {
+        clipboard_source_ = std::move(f);
+        return *this;
+    }
+    Context& set_clipboard_sink(std::function<void(std::string)> f) {
+        clipboard_sink_ = std::move(f);
+        return *this;
+    }
+    std::string clipboard_text() const {
+        return clipboard_source_ ? clipboard_source_() : std::string{};
+    }
+    void set_clipboard_text(std::string text) {
+        if (clipboard_sink_) clipboard_sink_(std::move(text));
+    }
 
     // --- tree ---
 
@@ -73,8 +113,11 @@ public:
         hover_since_ = -1;
         inside_press_ = false;
         popups_.clear();  // popup widgets may hold callbacks
+        dialogs_.clear(); // dialog entries (owned dialogs move to closing_)
+        toasts_.clear();
         root_.reset();    // the tree itself
         closing_.clear(); // widgets deferred by close_popups()
+        shortcuts_.clear(); // may hold Python callables
     }
 
     // --- input ---
@@ -97,12 +140,27 @@ public:
     // --- frame ---
 
     void tick(Time t) {
+        now_ = t.now;
         if (!root_) return;
         attach_tree(*root_);
         root_->measure(Constraints::tight({frame_.x, frame_.y}));
         root_->arrange({0, 0, frame_.x, frame_.y});
         root_->tick_tree(t);
-        for (auto& p : popups_) layout_popup(p);
+        for (auto& p : popups_) {
+            layout_popup(p);
+            p.widget->tick_tree(t); // menus animate hover, toasts fade
+        }
+        for (auto& d : dialogs_) {
+            layout_dialog(d);
+            d.widget->tick_tree(t);
+        }
+        // Expired toasts leave the popup stack.
+        for (size_t i = toasts_.size(); i-- > 0;) {
+            if (t.now >= toasts_[i].expires_at) {
+                close_popup_widget(toasts_[i].widget);
+                toasts_.erase(toasts_.begin() + long(i));
+            }
+        }
         update_tooltip(t);
     }
 
@@ -114,31 +172,156 @@ public:
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
+        if (Widget* modal = topmost_modal()) // dim everything under dialogs
+            list.rect({0, 0, frame_.x, frame_.y}, Color::black().faded(.45f));
+        for (auto& d : dialogs_) d.widget->paint_tree(env);
         sink_->render(list, frame_);
     }
 
     // --- popups ---
-
-    // Overlay rendered above everything; auto-dismissed when clicking outside.
+    //
+    // Popups float above the tree and are dismissed by clicking outside,
+    // Escape (topmost only), or FocusLost. They form a stack — a submenu is
+    // pushed above its parent menu — and clicks are resolved against the
+    // topmost popup containing the cursor: everything above it closes, the
+    // popup itself stays (unless the click lands outside every popup, which
+    // closes the whole stack).
+    //
+    // Two ownership flavors: owned popups (tooltips, Dropdown) are destroyed
+    // by Context on close; borrowed popups (Menu) stay owned by the caller and
+    // must outlive their time on the stack.
     Widget& push_popup(std::unique_ptr<Widget> w, Vec2 pos) {
         Widget::WidgetPtr owned(w.release());
         Widget& ref = *owned;
-        popups_.push_back({std::move(owned), pos});
+        popups_.push_back(Popup{std::move(owned), &ref, nullptr, pos, PopupDir::Below});
         attach_tree(ref);
         layout_popup(popups_.back());
         return ref;
     }
+    Widget& push_popup(Widget& w, Vec2 pos) {
+        popups_.push_back(Popup{nullptr, &w, nullptr, pos, PopupDir::Below});
+        attach_tree(w);
+        layout_popup(popups_.back());
+        return w;
+    }
+    // Anchored variants: open beside `anchor` toward `dir` (flipping to the
+    // opposite side and clamping into the frame when needed).
+    Widget& push_popup(std::unique_ptr<Widget> w, Widget& anchor, PopupDir dir) {
+        Widget::WidgetPtr owned(w.release());
+        Widget& ref = *owned;
+        popups_.push_back(Popup{std::move(owned), &ref, &anchor, {}, dir});
+        attach_tree(ref);
+        layout_popup(popups_.back());
+        return ref;
+    }
+    Widget& push_popup(Widget& w, Widget& anchor, PopupDir dir) {
+        popups_.push_back(Popup{nullptr, &w, &anchor, {}, dir});
+        attach_tree(w);
+        layout_popup(popups_.back());
+        return w;
+    }
+    // Open `w` (typically a Menu) as a floating popup at a screen position.
+    // The right-click handler calls this for widgets with a context menu;
+    // apps may call it directly for custom triggers.
+    template <class W>
+    Widget& open_context_menu(W& w, Vec2 pos) {
+        return push_popup(w, pos);
+    }
+
     void close_popups() {
         for (auto& p : popups_) {
-            Widget* root = p.widget.get();
+            Widget* root = p.widget;
             if (focused_ && inside(focused_, root)) set_focus(nullptr);
-            closing_.push_back(std::move(p.widget));
+            if (p.owned) closing_.push_back(std::move(p.owned));
         }
         popups_.clear();
     }
     bool has_popups() const { return !popups_.empty(); }
     size_t popup_count() const { return popups_.size(); }
-    Widget* popup(size_t i) { return popups_[i].widget.get(); }
+    Widget* popup(size_t i) { return popups_[i].widget; }
+    // Index of the popup whose widget is exactly `w`, or -1 (menus use this to
+    // detect "is my submenu already open" and toggle it).
+    long popup_index(const Widget* w) const {
+        for (size_t i = 0; i < popups_.size(); ++i)
+            if (popups_[i].widget == w) return long(i);
+        return -1;
+    }
+    bool popup_open(const Widget* w) const { return popup_index(w) >= 0; }
+    // Close every popup above the one containing `anchor` (menus: opening a
+    // submenu closes its siblings; an anchor outside all popups closes all).
+    // Also used as "close the topmost popup" via close_topmost_popup (Escape).
+    void close_popups_above(Widget& anchor) {
+        long k = -1;
+        for (long i = long(popups_.size()) - 1; i >= 0; --i)
+            if (inside(&anchor, popups_[size_t(i)].widget)) {
+                k = i;
+                break;
+            }
+        close_popups_above_index(k);
+    }
+    void close_topmost_popup() {
+        if (popups_.empty()) return;
+        close_popups_above_index(long(popups_.size()) - 2);
+    }
+
+    // --- dialogs ---
+    //
+    // Floating shell windows ABOVE the popup layer (Dialog, MessageBox,
+    // FileBrowser — widgets/dialogs.hpp). Borrowed entries are app-owned and
+    // must outlive their stay; owned entries are destroyed on close. A modal
+    // dialog dims the app and traps presses outside it.
+    template <class D>
+    Widget& open_dialog(std::unique_ptr<D> d) {
+        D& ref = *d; // D is complete at the call site
+        Widget::WidgetPtr owned(d.release());
+        dialogs_.push_back(DialogEntry{std::move(owned), &ref, ref.modal()});
+        attach_tree(ref);
+        layout_dialog(dialogs_.back());
+        return ref;
+    }
+    // Borrowed flavor: the app keeps the dialog alive (like Menu).
+    template <class D>
+    Widget& open_dialog(D& d) {
+        dialogs_.push_back(DialogEntry{nullptr, &d, d.modal()});
+        attach_tree(d);
+        layout_dialog(dialogs_.back());
+        return d;
+    }
+    void close_dialog(Widget& d) {
+        for (size_t i = dialogs_.size(); i-- > 0;) {
+            if (dialogs_[i].widget == &d) {
+                if (focused_ && inside(focused_, dialogs_[i].widget))
+                    set_focus(nullptr);
+                if (dialogs_[i].owned)
+                    closing_.push_back(std::move(dialogs_[i].owned));
+                dialogs_.erase(dialogs_.begin() + long(i));
+            }
+        }
+    }
+    size_t dialog_count() const { return dialogs_.size(); }
+    Widget* dialog(size_t i) { return dialogs_[i].widget; }
+
+    // --- toasts ---
+    //
+    // Transient corner notices on the popup layer: pushed owned, positioned
+    // in the bottom-right corner, removed automatically after `seconds`
+    // (measured from the last tick's time).
+    void push_toast(std::unique_ptr<Widget> w, double seconds) {
+        Widget* raw = w.get();
+        push_popup(std::move(w), {frame_.x - 12, frame_.y - 12});
+        toasts_.push_back(ToastEntry{raw, now_ + seconds});
+    }
+
+    // --- shortcuts ---
+    //
+    // Global accelerators, checked on KeyPress before widget dispatch. A
+    // shortcut requires at least one modifier so plain typing never fires one;
+    // matching is exact (Ctrl+S ≠ Ctrl+Shift+S).
+    Context& add_shortcut(Key key, unsigned mods, std::function<void()> action) {
+        shortcuts_.push_back(Shortcut{key, mods, std::move(action)});
+        return *this;
+    }
+    void clear_shortcuts() { shortcuts_.clear(); }
 
     // --- textures ---
 
@@ -154,9 +337,29 @@ public:
     }
 
 private:
+    struct Shortcut {
+        Key key;
+        unsigned mods;
+        std::function<void()> action;
+    };
+
+    struct DialogEntry {
+        Widget::WidgetPtr owned; // null for borrowed dialogs
+        Widget* widget = nullptr;
+        bool modal = false;
+        bool placed = false; // false until the first layout centers it
+    };
+    struct ToastEntry {
+        Widget* widget = nullptr;
+        double expires_at = 0;
+    };
+
     struct Popup {
-        Widget::WidgetPtr widget;
+        Widget::WidgetPtr owned;  // null for borrowed popups
+        Widget* widget = nullptr;
+        Widget* anchor = nullptr; // position beside this widget (null = at pos)
         Vec2 pos;
+        PopupDir dir = PopupDir::Below;
     };
 
     static bool inside(Widget* w, Widget* root) {
@@ -165,14 +368,80 @@ private:
         return false;
     }
 
+    // True when `pos` is inside `modal`'s subtree bounds (dialogs are roots).
+    bool inside_hit_any(Widget& modal, Vec2 pos) { return hit_test_in(modal, pos); }
+
+    // Resolve the hover cursor from the hit chain and notify the host on
+    // change (no-ops without a host callback).
+    void update_cursor(Widget* hit) {
+        Cursor cur = Cursor::Arrow;
+        for (Widget* chain = hit; chain; chain = chain->parent)
+            if (chain->cursor() != Cursor::Arrow) {
+                cur = chain->cursor();
+                break;
+            }
+        if (cur != cursor_current_) {
+            cursor_current_ = cur;
+            if (cursor_host_) cursor_host_(cur);
+        }
+    }
+
     void handle_event(const Event& e);
 
     void layout_popup(Popup& p) {
-        Size s = p.widget->measure(Constraints::loose({frame_.x, frame_.y}));
-        // Clamp inside the frame.
-        s.w = std::fmin(s.w, std::fmax(frame_.x - p.pos.x, 40.f));
-        s.h = std::fmin(s.h, std::fmax(frame_.y - p.pos.y, 40.f));
-        p.widget->arrange({p.pos.x, p.pos.y, s.w, s.h});
+        Size s = p.widget->measure(Constraints::loose(frame_));
+        s.w = std::fmin(s.w, std::fmax(frame_.x, 40.f));
+        s.h = std::fmin(s.h, std::fmax(frame_.y, 40.f));
+        Vec2 pos = p.pos;
+        if (p.anchor && p.anchor->ctx == this) {
+            const Rect& a = p.anchor->bounds;
+            switch (p.dir) {
+            case PopupDir::Below: pos = {a.x, a.bottom() + 2}; break;
+            case PopupDir::Above: pos = {a.x, a.y - s.h - 2}; break;
+            case PopupDir::Right: pos = {a.right() + 2, a.y}; break;
+            case PopupDir::Left:  pos = {a.x - s.w - 2, a.y}; break;
+            }
+            // Flip to the opposite side when the preferred one overflows.
+            switch (p.dir) {
+            case PopupDir::Below:
+                if (pos.y + s.h > frame_.y && a.y - s.h - 2 >= 0)
+                    pos.y = a.y - s.h - 2;
+                break;
+            case PopupDir::Above:
+                if (pos.y < 0 && a.bottom() + 2 + s.h <= frame_.y)
+                    pos.y = a.bottom() + 2;
+                break;
+            case PopupDir::Right:
+                if (pos.x + s.w > frame_.x && a.x - s.w - 2 >= 0)
+                    pos.x = a.x - s.w - 2;
+                break;
+            case PopupDir::Left:
+                if (pos.x < 0 && a.right() + 2 + s.w <= frame_.x)
+                    pos.x = a.right() + 2;
+                break;
+            }
+        }
+        // Clamp fully inside the frame (a free popup near an edge slides in
+        // instead of being clipped; a popup taller than the frame keeps its
+        // clamped size and sits at the top-left corner).
+        pos.x = std::clamp(pos.x, 0.f, std::fmax(frame_.x - s.w, 0.f));
+        pos.y = std::clamp(pos.y, 0.f, std::fmax(frame_.y - s.h, 0.f));
+        p.widget->arrange({pos.x, pos.y, s.w, s.h});
+    }
+
+    // Topmost popup whose bounds contain `pos`, or -1.
+    long topmost_popup_containing(Vec2 pos) const {
+        for (long i = long(popups_.size()) - 1; i >= 0; --i)
+            if (popups_[size_t(i)].widget->bounds.contains(pos)) return i;
+        return -1;
+    }
+    void close_popups_above_index(long k) {
+        for (long i = long(popups_.size()) - 1; i > k; --i) {
+            Popup& p = popups_[size_t(i)];
+            if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
+            if (p.owned) closing_.push_back(std::move(p.owned));
+        }
+        if (k + 1 < long(popups_.size())) popups_.resize(size_t(k + 1));
     }
 
     // Dispatch an event up the chain from `w` to the root, until consumed.
@@ -244,10 +513,44 @@ private:
 
     Widget* hit_test(Vec2 pos) {
         if (mouse_capture_) return mouse_capture_;
-        for (auto& p : popups_) { // popups float above the root tree
-            if (Widget* w = hit_test_in(*p.widget, pos)) return w;
+        for (auto it = dialogs_.rbegin(); it != dialogs_.rend(); ++it)
+            if (Widget* w = hit_test_in(*it->widget, pos)) return w;
+        for (auto it = popups_.rbegin(); it != popups_.rend(); ++it) {
+            // Popups float above the root tree; the topmost one wins so a
+            // submenu overlapping its parent menu gets the click.
+            if (Widget* w = hit_test_in(*it->widget, pos)) return w;
         }
         return root_ ? hit_test_in(*root_, pos) : nullptr;
+    }
+
+    void layout_dialog(DialogEntry& d) {
+        Size s = d.widget->measure(Constraints::loose(frame_));
+        s.w = std::fmin(s.w, std::fmax(frame_.x - 16.f, 60.f));
+        s.h = std::fmin(s.h, std::fmax(frame_.y - 16.f, 40.f));
+        // First layout centers; afterwards the widget's bounds carry the
+        // position (dragging moves bounds; Dialog::arrange re-pins + clamps).
+        Vec2 pos = d.placed
+                       ? Vec2{d.widget->bounds.x, d.widget->bounds.y}
+                       : Vec2{(frame_.x - s.w) * .5f, (frame_.y - s.h) * .5f};
+        d.widget->arrange({pos.x, pos.y, s.w, s.h});
+        d.placed = true;
+    }
+
+    Widget* topmost_modal() const {
+        for (auto it = dialogs_.rbegin(); it != dialogs_.rend(); ++it)
+            if (it->modal) return it->widget;
+        return nullptr;
+    }
+    // Remove one popup (used by toast expiry); moves owned storage to closing_.
+    void close_popup_widget(Widget* w) {
+        for (size_t i = 0; i < popups_.size(); ++i) {
+            if (popups_[i].widget == w) {
+                if (focused_ && inside(focused_, w)) set_focus(nullptr);
+                if (popups_[i].owned) closing_.push_back(std::move(popups_[i].owned));
+                popups_.erase(popups_.begin() + long(i));
+                return;
+            }
+        }
     }
 
     Widget* hit_test_in(Widget& w, Vec2 pos) {
@@ -265,7 +568,7 @@ private:
     void cycle_focus(bool backwards) {
         std::vector<Widget*> focusables;
         collect_focusables(root_.get(), focusables);
-        for (auto& p : popups_) collect_focusables(p.widget.get(), focusables);
+        for (auto& p : popups_) collect_focusables(p.widget, focusables);
         if (focusables.empty()) return;
         size_t idx = 0;
         for (size_t i = 0; i < focusables.size(); ++i)
@@ -291,6 +594,24 @@ private:
     std::vector<Widget::WidgetPtr> closing_; // deferred destruction
     bool inside_press_ = false; // mouse button held from a press inside the tree
     Widget* mouse_capture_ = nullptr;
+
+    // clipboard host callbacks (may be empty)
+    std::function<std::string()> clipboard_source_;
+    std::function<void(std::string)> clipboard_sink_;
+
+    // global accelerators (see add_shortcut)
+    std::vector<Shortcut> shortcuts_;
+
+    // floating shell layer above popups + toast expiry tracking
+    std::vector<DialogEntry> dialogs_;
+    std::vector<ToastEntry> toasts_;
+
+    // cursor shape host callback + last-requested shape
+    std::function<void(Cursor)> cursor_host_;
+    Cursor cursor_current_ = Cursor::Arrow;
+
+    // last tick's time (toast expiry reference)
+    double now_ = 0;
 
     // tooltip state
     Widget* hover_ = nullptr;
@@ -385,6 +706,7 @@ inline void Context::handle_event(const Event& e) {
         Widget* hit = hit_test(e.pos);
         if (hit) dispatch(*hit, e);
         set_hover(hit, e.pos);
+        update_cursor(hit);
         return;
     }
     case T::MousePress:
@@ -393,13 +715,29 @@ inline void Context::handle_event(const Event& e) {
             tooltip_open_ = false;
             hover_since_ = -1;
         }
-        if (e.button == MouseLeft) {
+        if (e.button == MouseRight) {
+            // Right-click opens the nearest ancestor's context menu, if any.
             if (Widget* hit = hit_test(e.pos)) {
-                // Click outside an open popup dismisses it and stops here.
-                bool hit_popup = false;
-                for (auto& p : popups_)
-                    if (p.widget->bounds.contains(e.pos)) hit_popup = true;
-                if (has_popups() && !hit_popup) {
+                for (Widget* chain = hit; chain; chain = chain->parent) {
+                    if (chain->context_menu_) {
+                        close_popups();
+                        open_context_menu(*chain->context_menu_, e.pos);
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+        if (e.button == MouseLeft) {
+            // A modal dialog traps presses outside it.
+            if (Widget* modal = topmost_modal()) {
+                if (!inside_hit_any(*modal, e.pos)) return;
+            }
+            if (Widget* hit = hit_test(e.pos)) {
+                // A click outside every popup closes the whole stack; a click
+                // inside one dispatches into it untouched — menu items manage
+                // their own sub-stack (toggle, sibling closing, self-dismiss).
+                if (has_popups() && topmost_popup_containing(e.pos) < 0) {
                     close_popups();
                     return;
                 }
@@ -423,8 +761,12 @@ inline void Context::handle_event(const Event& e) {
         return;
     case T::KeyPress: {
         if (e.key == Key::Escape) {
+            if (!dialogs_.empty()) {
+                close_dialog(*dialogs_.back().widget); // dialogs unwind first
+                return;
+            }
             if (has_popups()) {
-                close_popups();
+                close_topmost_popup(); // submenus unwind one level per Esc
                 return;
             }
             set_focus(nullptr);
@@ -433,6 +775,14 @@ inline void Context::handle_event(const Event& e) {
         if (e.key == Key::Tab) {
             cycle_focus(e.shift());
             return;
+        }
+        if (e.mods != 0 && !shortcuts_.empty()) {
+            for (auto& s : shortcuts_) {
+                if (s.key == e.key && s.mods == e.mods && s.action) {
+                    s.action();
+                    return;
+                }
+            }
         }
         if (focused_) {
             dispatch(*focused_, e);

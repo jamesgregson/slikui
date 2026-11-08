@@ -41,3 +41,42 @@ def test_no_leak_report_at_shutdown():
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr
     assert "nanobind: leaked" not in r.stderr, r.stderr
+
+
+# A Python custom widget that hosts children owns that subtree: its C++
+# children live and die with the Python instance, not with the tree. When the
+# tree releases it (anchor dropped), a callback deep in its own subtree can
+# still pin it: callback -> leaf wrapper -> keep_alive -> ... -> the child
+# returned by `custom.add(...)` -> keep_alive -> custom. Nothing then runs
+# ~PyWidget, so the subtree and every callback in it leak. Shape distilled
+# from examples/showcase.py (a Fill container hosting every page).
+CUSTOM_HOST_SCRIPT = """\
+import slikui
+
+class Fill(slikui.Widget):
+    def measure(self, constraints):
+        return self.children[0].measure(constraints)
+
+    def arrange(self, area):
+        self.bounds = area
+        self.children[0].arrange(area)
+
+def build():
+    app = slikui.App(160, 90)
+    root = app.set_root(slikui.Column)
+    page = root.add(Fill).add(slikui.Column)  # keep_alive: page -> Fill
+    btn = page.add(slikui.Row).add(slikui.Button, "go")
+    btn.on_click(lambda: btn.set_text("went"))  # subtree callback pins btn
+    app.tick(0.0, 1 / 60)
+    app.render()
+    app.close()
+
+build()
+"""
+
+
+def test_custom_container_subtree_released_at_close():
+    r = subprocess.run([sys.executable, "-c", CUSTOM_HOST_SCRIPT],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert "nanobind: leaked" not in r.stderr, r.stderr
