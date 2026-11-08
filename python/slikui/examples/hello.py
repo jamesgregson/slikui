@@ -58,7 +58,7 @@ def smoke(app, state, session, log):
     c.ok(f.dtype == np.uint32 and f.shape == (SIZE[1], SIZE[0]),
          "uint32 framebuffer, (H, W)")
     colors = len(np.unique(f))
-    c.ok(colors > 1, f"{colors} distinct colors — something was painted")
+    c.ok(colors > 1, f"{colors} distinct colors - something was painted")
 
     # A synthetic click routes the real dispatch path into the button.
     b = state.root.children[2].children[1].bounds

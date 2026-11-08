@@ -187,7 +187,7 @@ def run_smoke(name, size, build, smoke, png=None, scale=1.0):
             save_image(frame, png)
     finally:
         app.close()
-    print(f"[{name}] smoke — {len(log)} transcript lines")
+    print(f"[{name}] smoke - {len(log)} transcript lines")
     for line in log:
         print(f"  {line}")
     if png:

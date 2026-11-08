@@ -248,7 +248,7 @@ def smoke(app, state, session, log):
     c.ok(state.field.focused, "Tab focuses the text field first")
     _support.tap(app, K.Tab)
     c.ok(a.focused and state.status.text == "chip A focused",
-         "Tab → chip A (FocusGained updates the status)")
+         "Tab -> chip A (FocusGained updates the status)")
     _support.tap(app, K.Up)
     _support.tap(app, K.Up)
     c.ok(a.count == 2, "arrows act on the focused chip")

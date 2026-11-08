@@ -238,7 +238,7 @@ def smoke(app, state, session, log):
     _support.release(app, outside)
     k = kinds_since(n)
     c.ok(T.MouseRelease in k and not probe.dragging,
-         "the release outside arrives — the drag ends cleanly")
+         "the release outside arrives - the drag ends cleanly")
     c.ok(T.Click not in k, "no Click: the release landed elsewhere")
     _support.move(app, outside)
     c.ok(kinds_since(n)[-1] == T.MouseLeave, "leave once the pointer is really gone")

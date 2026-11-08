@@ -39,7 +39,7 @@ def _resolve(which):
             return REGISTRY[i - 1].name
         raise SystemExit(f"no example #{which} (1-{len(REGISTRY)}; try --list)")
     if which not in {e.name for e in REGISTRY}:
-        raise SystemExit(f"unknown example {which!r} — try --list")
+        raise SystemExit(f"unknown example {which!r} - try --list")
     return which
 
 
@@ -128,7 +128,7 @@ def _smoke(which, out_dir):
     if failed:
         print(f"smoke: {len(failed)} failure(s): {', '.join(failed)}")
         return 1
-    print(f"smoke: {len(names)} example(s) OK — PNGs in {out_dir}/")
+    print(f"smoke: {len(names)} example(s) OK - PNGs in {out_dir}/")
     return 0
 
 

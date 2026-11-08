@@ -105,7 +105,7 @@ def smoke(app, state, session, log):
     bb = state.button.bounds
     _support.click(app, (bb.x + 10, bb.y + bb.h / 2))
     session.advance(2)
-    c.ok(len(state.toasts) == 1 and app.ctx.popup_count == 1, "button → toast")
+    c.ok(len(state.toasts) == 1 and app.ctx.popup_count == 1, "button -> toast")
 
     _support.tap(app, slikui.Key.Q, "ctrl")
     c.ok(getattr(app, "quit", False), "Ctrl+Q requests quit")
