@@ -106,3 +106,16 @@ def test_doc_regions_are_copy_paste_safe():
     assert regions, "no doc regions found"
     for mod, slug, text in regions:
         assert "_support." not in text, f"{mod}:{slug} uses the private harness"
+
+
+def test_launcher_runs_by_name_or_number(tmp_path, monkeypatch, capsys):
+    from slikui.examples import __main__ as launcher
+
+    monkeypatch.chdir(tmp_path)
+    assert launcher.main(["hello"]) == 0
+    assert launcher.main(["1"]) == 0  # number from --list
+    assert (tmp_path / "hello.png").exists()
+    launcher.main(["--list"])
+    out = capsys.readouterr().out
+    for example in REGISTRY:  # the launchable name is shown
+        assert f"  {example.name} " in out

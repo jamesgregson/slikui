@@ -73,11 +73,17 @@ same demo opens in a real GLFW window with mouse and keyboard wired through
 the real event dispatch path — nothing about the headless modes changes.
 
 ```sh
+pip install "slikui-python[demo]"           # glfw + PyOpenGL (quotes matter in zsh)
 python -m slikui.examples.hello --window
 python -m slikui.examples.gallery --window   # scrolls; click around
 python -m slikui.examples.events --window    # the probe logs your input live
 python -m slikui.examples.paint --window     # scrub the meter, toggle, watch it run
+python -m slikui.examples.controls --window  # knob, XY pad, joystick
+python -m slikui.examples.keyboard --window  # focus tour and Snake
+python -m slikui.examples.window --window    # a small live app
 ```
+
+All eight, with screenshots: [Python examples](../guide/examples.md).
 
 The window host is a thin translation layer (GLFW callbacks → `slikui`
 events → premultiplied blit of the core's framebuffer); the demos stay

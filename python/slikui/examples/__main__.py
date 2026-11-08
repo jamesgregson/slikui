@@ -1,14 +1,15 @@
 """``python -m slikui.examples`` — launcher for the shipped demo suite.
 
-    --list                   print the registry table
+    NAME|NUMBER [--window]   run one example (headless → ./NAME.png, or live)
+    --list                   print the examples with their run commands
     --where                  print this package's directory (read the sources)
     --contract               print what a custom widget receives for each
                              input action, measured live on this build
     --smoke [NAME|all]       scripted self-checking passes (PNGs into --out)
-    (no args)                headless chooser: prints the table, renders
-                             ./chooser.png
+    (no args)                same as --list
 
-Run one example live with ``python -m slikui.examples.<name> --window``.
+``python -m slikui.examples controls --window`` and
+``python -m slikui.examples.controls --window`` are the same thing.
 """
 
 from __future__ import annotations
@@ -21,8 +22,25 @@ from . import REGISTRY, load, numbered
 
 
 def _print_list():
+    print(f"{'#':>2}  {'name':<9} {'what':<20} blurb")
     for num, ex in numbered():
-        print(f"{num}  {ex.title:<22} {ex.blurb}")
+        print(f"{num}  {ex.name:<9} {ex.title:<20} {ex.blurb}")
+    print("\nrun one:   python -m slikui.examples NAME --window   (live; needs "
+          'pip install "slikui-python[demo]")')
+    print("           python -m slikui.examples NAME            (headless: writes ./NAME.png)")
+    print("e.g.       python -m slikui.examples controls --window")
+
+
+def _resolve(which):
+    """An example name, or its number in --list ("5" / "05")."""
+    if which.isdigit():
+        i = int(which)
+        if 1 <= i <= len(REGISTRY):
+            return REGISTRY[i - 1].name
+        raise SystemExit(f"no example #{which} (1-{len(REGISTRY)}; try --list)")
+    if which not in {e.name for e in REGISTRY}:
+        raise SystemExit(f"unknown example {which!r} — try --list")
+    return which
 
 
 def _contract():
@@ -114,33 +132,14 @@ def _smoke(which, out_dir):
     return 0
 
 
-def _chooser_png(path):
-    """Headless chooser: the registry as a clickable-looking surface."""
-    import slikui
-    from . import _support
-
-    app = slikui.App(460, 64 + 64 * len(REGISTRY))
-    try:
-        root = app.set_root(slikui.Column, padding=14, gap=8)
-        root.add(slikui.Label, "slikui examples", font_size=22)
-        for num, ex in numbered():
-            row = root.add(slikui.Row, gap=8)
-            row.add(slikui.Button, f"{num} {ex.title}")
-            row.add(slikui.Label, ex.blurb) \
-                .set_color(slikui.Color.from_hex(0x9AA0B5))
-        _support.Session(app).advance(2)
-        frame = app.render()
-        _support.save_image(frame, path)
-    finally:
-        app.close()
-    return path
-
-
 def main(argv=None):
     p = argparse.ArgumentParser(
         prog="python -m slikui.examples",
         description="Launcher for slikui's shipped Python examples.")
-    p.add_argument("--list", action="store_true", help="print the registry")
+    p.add_argument("example", nargs="?", metavar="NAME|NUMBER",
+                   help="run this example (see --list)")
+    p.add_argument("--list", action="store_true",
+                   help="print the examples and how to run them")
     p.add_argument("--where", action="store_true",
                    help="print the examples directory")
     p.add_argument("--contract", action="store_true",
@@ -150,8 +149,12 @@ def main(argv=None):
     p.add_argument("--out", default="slikui-examples-out",
                    help="output directory for --smoke PNGs")
     p.add_argument("--window", action="store_true",
-                   help="interactive chooser (needs the window host)")
+                   help="with NAME: open it in a live window")
     args = p.parse_args(argv)
+
+    if args.example:
+        name = _resolve(args.example)
+        return load(name).main(["--window"] if args.window else [])
 
     if args.list:
         _print_list()
@@ -164,12 +167,10 @@ def main(argv=None):
     if args.smoke is not None:
         return _smoke(args.smoke, args.out)
     if args.window:
-        print("run one example live:  python -m slikui.examples.<name> --window")
+        print("--window needs an example: python -m slikui.examples NAME --window\n")
         _print_list()
-        return 0
-    png = _chooser_png("chooser.png")
+        return 2
     _print_list()
-    print(f"wrote {png} — run one with: python -m slikui.examples.<name>")
     return 0
 
 

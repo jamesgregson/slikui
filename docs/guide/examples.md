@@ -5,12 +5,29 @@ reference that matches the slikui version you installed. Every example is
 standalone (copy one file into your app and it works), self-validating, and
 drives the real event dispatch path.
 
+## Run them
+
+The examples ship in the wheel, so there is nothing to download:
+
+```sh
+pip install slikui-python                       # headless: renders to PNG
+pip install "slikui-python[demo]"               # + glfw and PyOpenGL for live windows
+
+python -m slikui.examples.controls --window     # open one live (any name below)
+python -m slikui.examples.controls              # or headless: writes ./controls.png
+```
+
+The quotes around `"slikui-python[demo]"` matter in zsh, the macOS default
+shell. The suite itself:
+
 ```sh
 python -m slikui.examples --list        # what's shipped
 python -m slikui.examples --where       # the directory: read the sources
 python -m slikui.examples --contract    # what a custom widget receives, measured live
 python -m slikui.examples --smoke all   # scripted self-check of every example
 ```
+
+`slikui-examples` is the same launcher as a command.
 
 `help(slikui.examples)` prints the index and the custom-widget contract in
 one screen.
@@ -63,7 +80,7 @@ readout and a toast](../images/examples-window.png)
 python -m slikui.examples.paint              # headless render -> paint.png
 python -m slikui.examples.paint --png out.png
 python -m slikui.examples.paint --smoke      # scripted interaction pass, self-checking
-python -m slikui.examples.paint --window     # live GLFW window (needs [demo] extra)
+python -m slikui.examples.paint --window     # live GLFW window (needs the demo extra)
 ```
 
 - **Default** — render one frame to `./NAME.png`; no display, no glfw.
@@ -72,7 +89,7 @@ python -m slikui.examples.paint --window     # live GLFW window (needs [demo] ex
   examples double as the wheel's acceptance test.
 - **`--window`** — the same demo live: GLFW callbacks feed real events, the
   core renders into its framebuffer, and a thin premultiplied blit puts it on
-  screen. Needs `pip install slikui-python[demo]`; the host is imported
+  screen. Needs `pip install "slikui-python[demo]"`; the host is imported
   lazily, so the base wheel never pulls in glfw or PyOpenGL.
 
 ## EventProbe in depth

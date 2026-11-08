@@ -222,7 +222,7 @@ def main_entry(*, name, size, build, smoke=None, interactive=None, docs=None,
     p.add_argument("--docs-image", nargs=2, metavar=("NAME", "PNG"),
                    help="render a named DOCS image")
     p.add_argument("--window", action="store_true",
-                   help="open a live window (needs 'pip install slikui-python[demo]')")
+                   help='open a live window (needs: pip install "slikui-python[demo]")')
     args = p.parse_args(argv)
 
     if args.window:
