@@ -56,8 +56,7 @@ Enter commits), `Vec2Edit`/`Vec3Edit`/`Vec4Edit` bind a borrowed numpy
 label + live-value row (`label=`, `format=`, `log_scale=`, `step=`).
 `TextField` has selection and Ctrl/Cmd+A/C/X/V via host clipboard callbacks
 (`ctx.set_clipboard_source/sink`; the GLFW backend wires the system
-clipboard). New widgets land C++-first so both languages get them — see
-`docs/widgets-roadmap.md`.
+clipboard). New widgets land C++-first so both languages get them.
 
 **Menus, toolbars, data display.** `MenuBar`/`Menu` build once and open as
 borrowed popups (checkmarks read through callbacks, `on_open` refresh hook,
@@ -148,5 +147,4 @@ against the C++ `Swatch` in `python/tests/test_custom_widgets.py`.
 
 Milestones: M0 (values, software backend, core widgets), M1 (full widget
 surface + themes), M2 (events, popups, tooltips, simulated-input tests) and
-M3 (wheels/CI/docs) are done; M4 (GLFW+GL backend bindings) is tabled. The
-widget set itself is tracked in `docs/widgets-roadmap.md`.
+M3 (wheels/CI/docs) are done; M4 (GLFW+GL backend bindings) is tabled.

@@ -101,7 +101,7 @@ jobs:
       - name: create release
         run: |
           ls -l packages dist
-          gh release create "$GITHUB_REF_NAME" packages/* dist/slikui.hpp dist/slikui_default_font.hpp \
+          gh release create "$GITHUB_REF_NAME" packages/* dist/slikui.hpp \
             --generate-notes --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}

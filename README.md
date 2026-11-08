@@ -72,12 +72,12 @@ controls grouped in an accordion panel](docs/images/cube_viewer.png)
   - Anything else (Vulkan, Metal, SDL_Renderer) implements one interface:
     see `docs/backend-contract.md`.
 - **True type text** — vendored public-domain stb_truetype/stb_rect_pack,
-  compiled with internal linkage: glyph atlas, kerning, word wrapping.
-  Optional bundled font: `#include <slikui/text/default_font.hpp>` (or
-  `dist/slikui_default_font.hpp`) embeds a ~35 KB DejaVu Sans subset (Latin-1
-  + punctuation) for identical text everywhere, even on machines with no
+  compiled with internal linkage: glyph atlas, kerning, word wrapping. The
+  single-header dist bakes in a ~35 KB DejaVu Sans subset (ASCII, Latin-1 +
+  punctuation) for identical text everywhere, even on machines with no
   system fonts — `ctx.load_font_memory(slikui::text::default_font_data(),
-  slikui::text::default_font_size())`. Licence:
+  slikui::text::default_font_size())`. Building from the include tree, the
+  same font stays opt-in: `#include <slikui/text/default_font.hpp>`. Licence:
   `third_party/fonts/LICENSE-DejaVu.txt`; ship it with your app.
 - **Widget set** — Label, Button (variants), Checkbox, Radio, Switch, Slider
   (label/format/log/step), ProgressBar, Spinner, TextField (selection +
@@ -87,7 +87,7 @@ controls grouped in an accordion panel](docs/images/cube_viewer.png)
   Segmented; MenuBar/Menu (context menus, shortcut table), Toolbar/
   IconButton with a procedural icon set; Plot (lines/bars/fill), TreeView,
   Table, PropertyGrid, Vec2Pad; Panel, Column, Row, Spacer, Divider — see
-  `slikui/widgets/all.hpp` and `docs/widgets-roadmap.md` for what's next.
+  `slikui/widgets/all.hpp` for the full set.
 - **Theme + animation** — palette-driven styling with 8 built-in presets
   (Dark, Light, Nord, Dracula, Gruvbox, Mocha, Solarized, Phosphor),
   hover/press transitions, `Anim` tween helper.
@@ -535,8 +535,8 @@ for f in docs/images/*.ppm; do python3 tools/ppm2png.py "$f" "${f%.ppm}.png"; do
 
 ## Roadmap
 
-Tracked in `docs/widgets-roadmap.md`: dialogs & file browser, tree/table
-views, property grid, plots, toasts. Beyond that: resizable floating
-windows, per-widget style overrides, dirty-region relayout.
+Done: dialogs & file browser, tree/table views, property grid, plots,
+toasts. Beyond that: resizable floating windows, per-widget style
+overrides, dirty-region relayout.
 
 MIT licensed. stb libraries are public domain.
