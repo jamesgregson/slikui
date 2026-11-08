@@ -22,8 +22,8 @@ from collections import Counter
 import numpy as np
 
 import slikui
-from slikui._slikui import Context, Sink, Target, find_system_font
-from . import _support
+from slikui import Context, Sink, Target, find_system_font
+from slikui.examples import _support
 
 NAME = "renderer"
 SIZE = (420, 300)
@@ -53,6 +53,11 @@ def build(app):
 
 
 # doc: tracesink
+from collections import Counter
+
+import slikui
+
+
 class TraceSink(slikui.RenderSink):
     """The skeleton of a third-party renderer.
 

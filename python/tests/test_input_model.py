@@ -167,3 +167,17 @@ def test_reprs_and_arithmetic_enums():
     assert repr(e) == "Event(KeyPress key=A repeat mods=2)"
     assert e.repeat and e.ctrl and e.shortcut_mod
     assert slikui.Event.MULTI_CLICK_TIME > 0
+
+
+def test_shortcut_label_spells_out_missing_symbols():
+    """With a context, the label only uses symbols its font can draw."""
+    K, M = slikui.Key, slikui.Mod
+    mods = int(M.ModCtrl) | int(M.ModShift)
+    app = slikui.App(100, 100)
+    try:
+        fitted = slikui.shortcut_label(K.S, mods, app.ctx)
+        plain = slikui.shortcut_label(K.S, mods)
+        assert fitted.endswith("S")
+        assert fitted in (plain, "Ctrl+Shift+S")
+    finally:
+        app.close()

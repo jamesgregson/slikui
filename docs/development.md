@@ -11,7 +11,8 @@ ctest --test-dir build          # golden-image pixel checks included
 ```
 
 CI matrices C++ across gcc/clang/MSVC on Linux/macOS/Windows, checks that
-every header compiles standalone, and compile-checks the GL/GLFW backends.
+every header compiles standalone, runs the suite under ASan + UBSan, and
+compile-checks the GL/GLFW backends.
 Python CI builds the sdist + wheels (cibuildwheel) and runs pytest inside
 each wheel.
 

@@ -42,6 +42,27 @@ jobs:
       - name: test
         run: ctest --test-dir build --output-on-failure -C Release
 
+  # The whole suite under AddressSanitizer + UBSan: out-of-bounds reads and
+  # use-after-free in widgets or test helpers fail the build.
+  sanitizers:
+    name: ASan + UBSan (linux/clang)
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DSLIKUI_BUILD_EXAMPLES=OFF
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+      - name: build
+        run: cmake --build build --parallel
+      - name: test
+        run: ctest --test-dir build --output-on-failure
+
   # Every public header must compile standalone — apple-libc++ hides missing
   # std includes (cstdint, functional, ...) that libstdc++/MSVC reject.
   headers:

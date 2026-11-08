@@ -15,13 +15,18 @@ from types import SimpleNamespace
 import numpy as np
 
 import slikui
-from . import _support
+from slikui.examples import _support
 
 NAME = "hello"
 SIZE = (340, 150)
 
 
 # doc: hello-build
+from types import SimpleNamespace
+
+import slikui
+
+
 def build(app):
     hits = []
     root = app.set_root(slikui.Column, padding=16, gap=8)
@@ -63,7 +68,7 @@ def smoke(app, state, session, log):
 
 
 def interactive():
-    from . import _window
+    from slikui.examples import _window
     return _window.run(NAME, SIZE, build)
 
 

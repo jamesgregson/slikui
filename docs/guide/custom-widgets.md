@@ -140,12 +140,10 @@ Python state lives in ordinary instance attributes.
   `paint_over` (`LimitSlider` in `slikui.examples.controls`).
 - Custom widgets draw geometry, not text: compose `Label` widgets beside
   them.
-- **Don't keep a reference to one of a custom widget's own descendants on
-  that widget** — an attribute holding the wrapper `add()` returned, or a
-  callback stored on the widget that captures one. Child wrappers keep
-  their parents alive, so that forms a cycle Python's garbage collector
-  cannot see and the tree leaks (nanobind reports it at exit). Reach
-  descendants through `self.children` or `self.find(id)` instead.
+- Keep the wrappers `add()` returns (`self.slider = self.add(slikui.Slider)`)
+  and capture them in callbacks freely. They are views of widgets the tree
+  owns: valid until the tree drops the widget (`App.close()`, or its
+  container being destroyed), so don't use them after that.
 - Callbacks into Python must outlive the tree: `App.close()` (context manager
   exit, `atexit`) releases them; see
   [Python bindings](../reference/python-bindings.md).

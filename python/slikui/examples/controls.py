@@ -23,21 +23,21 @@ Run:
 import math
 
 import slikui
-from . import _support
+from slikui.examples import _support
 
 NAME = "controls"
 SIZE = (540, 360)
 
-T = slikui.EventType
-K = slikui.Key
+
+# doc: knob
+import math
+
+import slikui
+
+T, K = slikui.EventType, slikui.Key
 LEFT = slikui.MouseButton.MouseLeft
 
 
-def clamp(v, lo, hi):
-    return lo if v < lo else hi if v > hi else v
-
-
-# doc: knob
 class Knob(slikui.Widget):
     """Rotary dial over [lo, hi]. ``on_change(value)`` fires on every edit."""
 
@@ -46,13 +46,13 @@ class Knob(slikui.Widget):
     def __init__(self, lo=0.0, hi=1.0, value=0.5, step=0.05):
         super().__init__()
         self.lo, self.hi, self.step = lo, hi, step
-        self.value = self.default = clamp(value, lo, hi)
+        self.value = self.default = min(max(value, lo), hi)
         self.on_change = None
         self._drag = None  # (start y, start value) while dragging
         self.set_cursor(slikui.Cursor.ResizeV)
 
     def set(self, v):
-        v = clamp(v, self.lo, self.hi)
+        v = min(max(v, self.lo), self.hi)
         if v != self.value:
             self.value = v
             if self.on_change:
@@ -125,6 +125,12 @@ class Knob(slikui.Widget):
 # doc: end
 
 # doc: xypad
+import slikui
+
+T, K = slikui.EventType, slikui.Key
+LEFT = slikui.MouseButton.MouseLeft
+
+
 class XYPad(slikui.Widget):
     """2D value in [0, 1]^2 (y up). ``on_change(x, y)``."""
 
@@ -138,7 +144,7 @@ class XYPad(slikui.Widget):
         self.set_cursor(slikui.Cursor.Crosshair)
 
     def set(self, x, y):
-        self.x, self.y = clamp(x, 0.0, 1.0), clamp(y, 0.0, 1.0)
+        self.x, self.y = min(max(x, 0.0), 1.0), min(max(y, 0.0), 1.0)
         if self.on_change:
             self.on_change(self.x, self.y)
 
@@ -201,6 +207,14 @@ class XYPad(slikui.Widget):
 # doc: end
 
 # doc: joystick
+import math
+
+import slikui
+
+T, K = slikui.EventType, slikui.Key
+LEFT = slikui.MouseButton.MouseLeft
+
+
 class Joystick(slikui.Widget):
     """Stick vector in the unit disc (y up), springing back to centre."""
 
@@ -299,7 +313,7 @@ class BallBox(slikui.Widget):
         self.y += self.vy * t.dt
         for p, v in (("x", "vx"), ("y", "vy")):  # bounce off the walls
             if not 0.0 <= getattr(self, p) <= 1.0:
-                setattr(self, p, clamp(getattr(self, p), 0.0, 1.0))
+                setattr(self, p, min(max(getattr(self, p), 0.0), 1.0))
                 setattr(self, v, -getattr(self, v))
 
     def paint(self, env):
@@ -312,6 +326,9 @@ class BallBox(slikui.Widget):
 # doc: end
 
 # doc: limitslider
+import slikui
+
+
 class LimitSlider(slikui.Widget):
     """The built-in Slider with limit marks on its track.
 
@@ -327,14 +344,7 @@ class LimitSlider(slikui.Widget):
     def __init__(self, lo, hi, value, limits):
         super().__init__()
         self.lo, self.hi, self.limits = lo, hi, limits
-        self.add(slikui.Slider, lo, hi, value=value)
-
-    @property
-    def slider(self):
-        # Read children through self.children; don't store the wrapper
-        # `add()` returns on self — that forms a parent<->child reference
-        # cycle the garbage collector can't see, and the tree leaks.
-        return self.children[0]
+        self.slider = self.add(slikui.Slider, lo, hi, value=value)
 
     def measure(self, constraints):
         return self.slider.measure(constraints)
@@ -446,7 +456,7 @@ def smoke(app, state, session, log):
 
 
 def interactive():
-    from . import _window
+    from slikui.examples import _window
     return _window.run(NAME, SIZE, build)
 
 

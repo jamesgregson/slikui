@@ -10,8 +10,14 @@
 //     rv_policy::reference, so Python chains work and identity is stable —
 //     nanobind re-attaches the existing wrapper for an object it wrapped.
 //   * The tree owns children (unique_ptr in C++); Python holds non-owning
-//     views. Factory methods (`add_*`, `set_root_*`) return
-//     reference_internal so the owner keeps the view alive.
+//     views. Widget-returning methods on widgets (`add_*`, `content()`,
+//     `field`, ...) return plain `reference`: a keep_alive edge from child
+//     wrapper to host wrapper is invisible to the GC, so a Python widget
+//     storing its own child (`self.slider = self.add(...)`) would form an
+//     uncollectable cycle. Views are valid while the tree holds the widget
+//     (App.close() destroys it). Context methods (`set_root_*`, popups)
+//     keep reference_internal: the Context outlives none of those cycles
+//     because close() clears its tree first.
 //   * Every call holds the GIL; the software rasterizer is milliseconds-fast.
 
 #include <nanobind/nanobind.h>
@@ -127,163 +133,163 @@ private:
 template <typename Host, typename... Bs>
 void bind_add(nb::class_<Host, Bs...>& cls) {
     cls.def("add_column", [](Host& h) -> Column& { return h.template add<Column>(); },
-            nb::rv_policy::reference_internal)
+            nb::rv_policy::reference)
         .def("add_row", [](Host& h) -> Row& { return h.template add<Row>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_spacer", [](Host& h) -> Spacer& { return h.template add<Spacer>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_divider",
              [](Host& h, bool horizontal) -> Divider& {
                  return h.template add<Divider>(horizontal);
              },
-             nb::arg("horizontal") = true, nb::rv_policy::reference_internal)
+             nb::arg("horizontal") = true, nb::rv_policy::reference)
         .def("add_panel", [](Host& h) -> Panel& { return h.template add<Panel>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_expander",
              [](Host& h, std::string title) -> Expander& {
                  return h.template add<Expander>(std::move(title));
              },
-             nb::arg("title") = "", nb::rv_policy::reference_internal)
+             nb::arg("title") = "", nb::rv_policy::reference)
         .def("add_accordion", [](Host& h) -> Accordion& { return h.template add<Accordion>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_label",
              [](Host& h, std::string text) -> Label& {
                  return h.template add<Label>(std::move(text));
              },
-             nb::arg("text") = "", nb::rv_policy::reference_internal)
+             nb::arg("text") = "", nb::rv_policy::reference)
         .def("add_button",
              [](Host& h, std::string text) -> Button& {
                  return h.template add<Button>(std::move(text));
              },
-             nb::arg("text") = "", nb::rv_policy::reference_internal)
+             nb::arg("text") = "", nb::rv_policy::reference)
         .def("add_checkbox",
              [](Host& h, std::string label, bool checked) -> Checkbox& {
                  return h.template add<Checkbox>(std::move(label), checked);
              },
              nb::arg("label") = "", nb::arg("checked") = false,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_radio",
              [](Host& h, std::string label, bool checked) -> Radio& {
                  return h.template add<Radio>(std::move(label), checked);
              },
              nb::arg("label") = "", nb::arg("checked") = false,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_switch", [](Host& h) -> Switch& { return h.template add<Switch>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_swatch",
              [](Host& h, Color color, nb::callable is_selected, nb::callable on_pick) -> Swatch& {
                  return h.template add<Swatch>(color, std::move(is_selected),
                                                std::move(on_pick));
              },
              nb::arg("color"), nb::arg("is_selected"), nb::arg("on_pick"),
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_slider",
              [](Host& h, float min, float max) -> Slider& {
                  return h.template add<Slider>(min, max);
              },
              nb::arg("min") = 0.f, nb::arg("max") = 1.f,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_dragvalue",
              [](Host& h, float value) -> DragValue& {
                  return h.template add<DragValue>(value);
              },
-             nb::arg("value") = 0.f, nb::rv_policy::reference_internal)
+             nb::arg("value") = 0.f, nb::rv_policy::reference)
         .def("add_vec2edit",
              [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec2Edit& {
                  if (values.shape(0) != 2)
                      throw nb::value_error("Vec2Edit needs a float32 array of length 2");
                  return h.template add<Vec2Edit>(values.data());
              },
-             nb::arg("values"), nb::rv_policy::reference_internal)
+             nb::arg("values"), nb::rv_policy::reference)
         .def("add_vec3edit",
              [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec3Edit& {
                  if (values.shape(0) != 3)
                      throw nb::value_error("Vec3Edit needs a float32 array of length 3");
                  return h.template add<Vec3Edit>(values.data());
              },
-             nb::arg("values"), nb::rv_policy::reference_internal)
+             nb::arg("values"), nb::rv_policy::reference)
         .def("add_vec4edit",
              [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec4Edit& {
                  if (values.shape(0) != 4)
                      throw nb::value_error("Vec4Edit needs a float32 array of length 4");
                  return h.template add<Vec4Edit>(values.data());
              },
-             nb::arg("values"), nb::rv_policy::reference_internal)
+             nb::arg("values"), nb::rv_policy::reference)
         .def("add_plot", [](Host& h) -> Plot& { return h.template add<Plot>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_vec2pad", [](Host& h) -> Vec2Pad& { return h.template add<Vec2Pad>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_treeview", [](Host& h) -> TreeView& { return h.template add<TreeView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_table", [](Host& h) -> Table& { return h.template add<Table>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_propertygrid",
              [](Host& h) -> PropertyGrid& { return h.template add<PropertyGrid>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_iconbutton",
              [](Host& h, Icon icon) -> IconButton& {
                  return h.template add<IconButton>(icon);
              },
-             nb::arg("icon"), nb::rv_policy::reference_internal)
+             nb::arg("icon"), nb::rv_policy::reference)
         .def("add_toolbar", [](Host& h) -> Toolbar& { return h.template add<Toolbar>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_menubar", [](Host& h) -> MenuBar& { return h.template add<MenuBar>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_coloredit",
              [](Host& h, Color color) -> ColorEdit& {
                  return h.template add<ColorEdit>(color);
              },
-             nb::arg("color") = Color::white(), nb::rv_policy::reference_internal)
+             nb::arg("color") = Color::white(), nb::rv_policy::reference)
         .def("add_segmented", [](Host& h) -> Segmented& { return h.template add<Segmented>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_groupbox",
              [](Host& h, std::string title) -> GroupBox& {
                  return h.template add<GroupBox>(std::move(title));
              },
-             nb::arg("title"), nb::rv_policy::reference_internal)
+             nb::arg("title"), nb::rv_policy::reference)
         .def("add_searchbox", [](Host& h) -> SearchBox& { return h.template add<SearchBox>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_statusbar", [](Host& h) -> StatusBar& { return h.template add<StatusBar>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_logview", [](Host& h) -> LogView& { return h.template add<LogView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_imageview", [](Host& h) -> ImageView& { return h.template add<ImageView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_compareview",
              [](Host& h) -> CompareView& { return h.template add<CompareView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_progressbar",
              [](Host& h) -> ProgressBar& { return h.template add<ProgressBar>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_spinner", [](Host& h) -> Spinner& { return h.template add<Spinner>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_textfield",
              [](Host& h) -> TextField& { return h.template add<TextField>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_textarea",
              [](Host& h) -> TextArea& { return h.template add<TextArea>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_scrollarea",
              [](Host& h) -> ScrollArea& { return h.template add<ScrollArea>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_listview",
              [](Host& h) -> ListView& { return h.template add<ListView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_tabs", [](Host& h) -> Tabs& { return h.template add<Tabs>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_dropdown",
              [](Host& h) -> Dropdown& { return h.template add<Dropdown>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_image",
              [](Host& h, std::string name) -> Image& {
                  return h.template add<Image>(std::move(name));
              },
-             nb::arg("name"), nb::rv_policy::reference_internal)
+             nb::arg("name"), nb::rv_policy::reference)
         .def("add_splitter",
              [](Host& h, bool vertical) -> Splitter& {
                  return h.template add<Splitter>(vertical);
              },
-             nb::arg("vertical") = false, nb::rv_policy::reference_internal);
+             nb::arg("vertical") = false, nb::rv_policy::reference);
 }
 
 // PyRenderSink — trampoline so Python classes can implement the
@@ -364,8 +370,7 @@ struct PyWidget : slikui::Widget {
     // The subtree is destroyed eagerly, before the anchor drops. Dropping the
     // anchor alone does not guarantee ~PyWidget runs: Python may still hold
     // the wrapper — and the subtree itself can be what holds it. Callbacks
-    // inside the subtree capture child wrappers, whose reference_internal
-    // keep_alive edges climb back up to this wrapper: a cycle through C++
+    // inside the subtree can capture this wrapper: a cycle through C++
     // ownership the GC cannot see, so the whole subtree would leak (found
     // via examples/showcase.py: a Fill container hosting every page). The
     // tree is tearing this widget down, so its children go now, whatever
@@ -1326,7 +1331,7 @@ NB_MODULE(_slikui, m) {
                                    std::move(hint), enabled);
              },
              nb::arg("label"), nb::arg("action"), nb::arg("hint") = "",
-             nb::arg("enabled") = true, nb::rv_policy::reference_internal)
+             nb::arg("enabled") = true, nb::rv_policy::reference)
         .def("add_checkable",
              [](Menu& m, std::string label, std::function<bool()> is_checked,
                 std::function<void()> toggle, std::string hint, bool enabled) -> Menu& {
@@ -1335,7 +1340,7 @@ NB_MODULE(_slikui, m) {
              },
              nb::arg("label"), nb::arg("is_checked"), nb::arg("toggle"),
              nb::arg("hint") = "", nb::arg("enabled") = true,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_submenu",
              [](Menu& m, std::string label, Menu& sub, std::string hint,
                 bool enabled) -> Menu& {
@@ -1343,10 +1348,10 @@ NB_MODULE(_slikui, m) {
                                       enabled);
              },
              nb::arg("label"), nb::arg("submenu"), nb::arg("hint") = "",
-             nb::arg("enabled") = true, nb::rv_policy::reference_internal,
+             nb::arg("enabled") = true, nb::rv_policy::reference,
              "Borrowed submenu: keep the Menu object alive on the Python side.")
         .def("add_separator", [](Menu& m) -> Menu& { return m.add_separator(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("set_min_width", [](Menu& m, float w) -> Menu& { return m.set_min_width(w); },
              nb::arg("w"), nb::rv_policy::reference)
         .def("on_open", [](Menu& m, std::function<void()> f) -> Menu& { return m.on_open(std::move(f)); },
@@ -1364,7 +1369,7 @@ NB_MODULE(_slikui, m) {
              [](MenuBar& b, std::string title) -> Menu& {
                  return b.add_menu(std::move(title));
              },
-             nb::arg("title"), nb::rv_policy::reference_internal);
+             nb::arg("title"), nb::rv_policy::reference);
 
     auto iconbutton = nb::class_<IconButton, Widget>(m, "IconButton");
     def_setter(iconbutton, "on_click", &IconButton::on_click);
@@ -1497,19 +1502,19 @@ NB_MODULE(_slikui, m) {
                  return g.add_property(std::move(label), label_w);
              },
              nb::arg("label"), nb::arg("label_width") = 110.f,
-             nb::rv_policy::reference_internal,
+             nb::rv_policy::reference,
              "Returns the row — add the editor widget into it.")
         .def("add_section",
              [](PropertyGrid& g, std::string title, bool open) -> PropertyGrid& {
                  return g.add_section(std::move(title), open);
              },
              nb::arg("title"), nb::arg("open") = false,
-             nb::rv_policy::reference_internal);
+             nb::rv_policy::reference);
 
     auto propertyrow = nb::class_<PropertyRow, Widget>(m, "PropertyRow");
     bind_add(propertyrow); // so `row.add(slikui.Slider, ...)` builds editors
     propertyrow.def("label", [](PropertyRow& r) -> Label& { return r.label(); },
-                    nb::rv_policy::reference_internal)
+                    nb::rv_policy::reference)
                  .def("editor", [](PropertyRow& r) -> Widget& { return r.editor(); },
                       nb::rv_policy::reference);
 
@@ -1521,7 +1526,7 @@ NB_MODULE(_slikui, m) {
                  return t.add_button(icon, std::move(on_click), std::move(tip));
              },
              nb::arg("icon"), nb::arg("on_click"), nb::arg("tip") = "",
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_labeled_button",
              [](Toolbar& t, Icon icon, std::string label,
                 std::function<void()> on_click, std::string tip) -> IconButton& {
@@ -1529,7 +1534,7 @@ NB_MODULE(_slikui, m) {
                                      std::move(tip));
              },
              nb::arg("icon"), nb::arg("label"), nb::arg("on_click"),
-             nb::arg("tip") = "", nb::rv_policy::reference_internal)
+             nb::arg("tip") = "", nb::rv_policy::reference)
         .def("add_separator", [](Toolbar& t) { t.add_separator(); })
         .def("set_icon_px",
              [](Toolbar& t, float px) -> Toolbar& { return t.set_icon_px(px); },
@@ -1562,7 +1567,7 @@ NB_MODULE(_slikui, m) {
     bind_add(scroll); // routes into the scrolling content column
     scroll.def_prop_ro("content",
                        [](ScrollArea& s) -> Column& { return s.content(); },
-                       nb::rv_policy::reference_internal);
+                       nb::rv_policy::reference);
 
     auto listview = nb::class_<ListView, Widget>(m, "ListView");
     def_setter(listview, "set_items", &ListView::set_items);
@@ -1596,7 +1601,7 @@ NB_MODULE(_slikui, m) {
                       return a.add_section(std::move(title), open);
                   },
                   nb::arg("title"), nb::arg("open") = false,
-                  nb::rv_policy::reference_internal);
+                  nb::rv_policy::reference);
 
     auto splitter = nb::class_<Splitter, Widget>(m, "Splitter");
     splitter.def(nb::init<bool, std::string>(), nb::arg("vertical") = false,
@@ -1658,7 +1663,7 @@ NB_MODULE(_slikui, m) {
     dialog.def(nb::init<std::string, std::string>(), nb::arg("title"),
                nb::arg("id") = "")
         .def("content", [](Dialog& d) -> Column& { return d.content(); },
-             nb::rv_policy::reference_internal,
+             nb::rv_policy::reference,
              "The body column — add widgets here.")
         .def("set_title",
              [](Dialog& d, std::string t) -> Dialog& {
@@ -1682,7 +1687,7 @@ NB_MODULE(_slikui, m) {
              nb::arg("callback"), nb::rv_policy::reference)
         .def_prop_ro("close_button",
                      [](Dialog& d) -> IconButton& { return d.close_button(); },
-                     nb::rv_policy::reference_internal);
+                     nb::rv_policy::reference);
 
     auto messagebox = nb::class_<MessageBox, Dialog>(m, "MessageBox");
     messagebox.def(nb::init<std::string, std::string, std::string>(),
@@ -1691,7 +1696,7 @@ NB_MODULE(_slikui, m) {
              [](MessageBox& mb, std::string label, std::function<void()> action) -> Button& {
                  return mb.add_button(std::move(label), std::move(action));
              },
-             nb::arg("label"), nb::arg("action"), nb::rv_policy::reference_internal,
+             nb::arg("label"), nb::arg("action"), nb::rv_policy::reference,
              "Right-aligned action button; the callback runs, then the "
              "message box closes.");
 
@@ -1724,10 +1729,10 @@ NB_MODULE(_slikui, m) {
              },
              nb::arg("placeholder"), nb::rv_policy::reference)
         .def("field", [](SearchBox& b) -> TextField& { return b.field(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def_prop_ro("clear_button",
                      [](SearchBox& b) -> IconButton& { return b.clear_button(); },
-                     nb::rv_policy::reference_internal);
+                     nb::rv_policy::reference);
 
     auto statusbar = nb::class_<StatusBar, Row>(m, "StatusBar");
     bind_add(statusbar); // right-side widgets: bar.add(slikui.ProgressBar, ...)
@@ -1790,13 +1795,13 @@ NB_MODULE(_slikui, m) {
              "path()/selection(): current directory and the picked file ('' "
              "when nothing is chosen).")
         .def_prop_ro("list", [](FileBrowser& fb) -> ListView& { return fb.list(); },
-                     nb::rv_policy::reference_internal)
+                     nb::rv_policy::reference)
         .def_prop_ro("name_field",
                      [](FileBrowser& fb) -> TextField& { return fb.name_field(); },
-                     nb::rv_policy::reference_internal)
+                     nb::rv_policy::reference)
         .def_prop_ro("open_button",
                      [](FileBrowser& fb) -> Button& { return fb.open_button(); },
-                     nb::rv_policy::reference_internal);
+                     nb::rv_policy::reference);
 
     auto imageview = nb::class_<ImageView, Widget>(m, "ImageView");
     imageview.def(nb::init<std::string>(), nb::arg("id") = "")
@@ -1894,9 +1899,14 @@ NB_MODULE(_slikui, m) {
     // ------------------------------------------------------------------ //
 
     m.def("shortcut_label",
-          [](Key key, unsigned mods) { return shortcut_label(key, mods); },
-          nb::arg("key"), nb::arg("mods"),
-          "\"Ctrl+Shift+S\" (\"\u2318\u21e7S\" on Apple) — for menu hints.");
+          [](Key key, unsigned mods, Context* context) {
+              return context ? shortcut_label(key, mods, context->font())
+                             : shortcut_label(key, mods);
+          },
+          nb::arg("key"), nb::arg("mods"), nb::arg("context").none() = nb::none(),
+          "\"Ctrl+Shift+S\" (\"\u2318\u21e7S\" on Apple) — for menu hints.\n\n"
+          "Pass ``context`` to spell out any symbol its font cannot draw (menus\n"
+          "do this themselves); without it the label may show missing-glyph boxes.");
     m.def("find_system_font", &find_system_font,
           "First system TTF that opens (best-effort; '' if none).");
 }

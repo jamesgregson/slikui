@@ -2362,8 +2362,13 @@ def apply_preset(theme: Theme, index: int) -> None: ...
 def theme_presets() -> list[ThemePreset]:
     """Built-in presets in display order."""
 
-def shortcut_label(key: Key, mods: int) -> str:
-    """"Ctrl+Shift+S" ("⌘⇧S" on Apple) — for menu hints."""
+def shortcut_label(key: Key, mods: int, context: Context | None = None) -> str:
+    """
+    "Ctrl+Shift+S" ("⌘⇧S" on Apple) — for menu hints.
+
+    Pass ``context`` to spell out any symbol its font cannot draw (menus
+    do this themselves); without it the label may show missing-glyph boxes.
+    """
 
 def find_system_font() -> str:
     """First system TTF that opens (best-effort; '' if none)."""

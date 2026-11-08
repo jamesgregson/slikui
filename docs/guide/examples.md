@@ -1,9 +1,11 @@
 # Python examples
 
 The wheel ships a curated demo suite as `slikui.examples` — the usage
-reference that matches the slikui version you installed. Every example is
-standalone (copy one file into your app and it works), self-validating, and
-drives the real event dispatch path.
+reference that matches the slikui version you installed. Every example
+file runs on its own (copy it anywhere and run `python controls.py`),
+checks itself, and drives the real event dispatch path. Every widget quoted
+on these pages is self-contained: paste the block into your own file and it
+runs, imports included.
 
 ## Run them
 

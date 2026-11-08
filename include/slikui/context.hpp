@@ -197,7 +197,6 @@ public:
 
     void render(bool clear = true) {
         if (!sink_) return;
-        upload_dirty_textures();
         DrawList list;
         const PaintEnv env{list, theme_, font_};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
@@ -206,6 +205,10 @@ public:
         if (Widget* modal = topmost_modal()) // dim everything under dialogs
             list.rect({0, 0, frame_.x, frame_.y}, Color::black().faded(.45f));
         for (auto& d : dialogs_) d.widget->paint_tree(env);
+        // After painting: widgets that lay out text in paint() (Slider's
+        // value) rasterize new glyphs into the atlas there, and the sink
+        // must see them this frame, not the next.
+        upload_dirty_textures();
         sink_->render(list, frame_);
     }
 

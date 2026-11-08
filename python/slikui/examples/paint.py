@@ -19,7 +19,7 @@ import math
 import numpy as np
 
 import slikui
-from . import _support
+from slikui.examples import _support
 
 NAME = "paint"
 SIZE = (460, 380)
@@ -29,6 +29,9 @@ BLUE = 0x4C8DFF
 
 
 # doc: meter
+import slikui
+
+
 class Meter(slikui.Widget):
     """A horizontal bar that fills as ``value`` (0..1) approaches 1."""
 
@@ -58,6 +61,11 @@ class Meter(slikui.Widget):
 # doc: end
 
 # doc: sparkline
+import numpy as np
+
+import slikui
+
+
 class Sparkline(slikui.Widget):
     """A numpy series as a polyline, with a hover crosshair.
 
@@ -113,6 +121,11 @@ class Sparkline(slikui.Widget):
 # doc: end
 
 # doc: gauge
+import math
+
+import slikui
+
+
 class RadialGauge(slikui.Widget):
     """A 270-degree arc gauge built from line segments (no arc primitive —
     draw the circle you need). The gap sits at the bottom; text lives in a
@@ -157,6 +170,11 @@ class RadialGauge(slikui.Widget):
 # doc: end
 
 # doc: clockface
+import math
+
+import slikui
+
+
 class ClockFace(slikui.Widget):
     """An animated analog clock: rim, twelve ticks, three hands. Time comes
     from ``tick(Time)`` — never ``time.time()`` — so scripted runs are
@@ -209,6 +227,9 @@ class ClockFace(slikui.Widget):
 # doc: end
 
 # doc: boundsdebug
+import slikui
+
+
 class BoundsDebug(slikui.Widget):
     """Wrapper that delegates layout to its child, then outlines every
     descendant in ``paint_over`` — which runs after the children have
@@ -339,7 +360,7 @@ DOCS = {
 
 
 def interactive():
-    from . import _window
+    from slikui.examples import _window
     return _window.run(NAME, SIZE, build)
 
 

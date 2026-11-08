@@ -6727,6 +6727,12 @@ public:
         return float(stbtt_GetCodepointKernAdvance(&info_, int(prev), int(cp))) * scale(px);
     }
 
+    // True if the font has an outline for `cp` (false for an invalid font).
+    // Missing codepoints otherwise render as the font's .notdef box.
+    bool has_glyph(std::uint32_t cp) const {
+        return ok_ && stbtt_FindGlyphIndex(&info_, int(cp)) != 0;
+    }
+
     // --- glyph access (rasterizes on miss) ---
 
     const Glyph& glyph(std::uint32_t cp, float px) {
@@ -8953,7 +8959,6 @@ public:
 
     void render(bool clear = true) {
         if (!sink_) return;
-        upload_dirty_textures();
         DrawList list;
         const PaintEnv env{list, theme_, font_};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
@@ -8962,6 +8967,10 @@ public:
         if (Widget* modal = topmost_modal()) // dim everything under dialogs
             list.rect({0, 0, frame_.x, frame_.y}, Color::black().faded(.45f));
         for (auto& d : dialogs_) d.widget->paint_tree(env);
+        // After painting: widgets that lay out text in paint() (Slider's
+        // value) rasterize new glyphs into the atlas there, and the sink
+        // must see them this frame, not the next.
+        upload_dirty_textures();
         sink_->render(list, frame_);
     }
 
@@ -21807,6 +21816,7 @@ private:
 // (already included above: slikui/widgets/widget.hpp)
 
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -21816,6 +21826,8 @@ namespace slikui {
 
 // Human-readable shortcut hint for menus and tooltips: "Ctrl+Shift+S"
 // ("⌘⇧S" on Apple). Complements Context::add_shortcut, which fires actions.
+// The symbols need font support: pass the font (or let MenuItem do it) to
+// get the text form wherever a symbol is missing.
 inline std::string shortcut_label(Key key, unsigned mods) {
     std::string out;
 #if defined(__APPLE__)
@@ -21855,6 +21867,46 @@ inline std::string shortcut_label(Key key, unsigned mods) {
         break;
     }
     return out;
+}
+
+// `label` with the shortcut symbols `font` cannot draw spelled out, so hints
+// never render as missing-glyph boxes. Modifier symbols switch together
+// ("⌃⇧S" → "Ctrl+Shift+S", never "⌃Shift+S"); arrows individually
+// ("←" → "Left").
+inline std::string fit_shortcut_label(const text::Font& font, std::string label) {
+    struct Sub {
+        std::uint32_t cp;
+        const char* utf8;
+        const char* text;
+    };
+    static constexpr Sub mods[] = {{0x2318, "⌘", "Cmd+"},
+                                   {0x2303, "⌃", "Ctrl+"},
+                                   {0x2325, "⌥", "Alt+"},
+                                   {0x21E7, "⇧", "Shift+"}};
+    static constexpr Sub arrows[] = {{0x2190, "←", "Left"},
+                                     {0x2192, "→", "Right"},
+                                     {0x2191, "↑", "Up"},
+                                     {0x2193, "↓", "Down"}};
+    auto replace_all = [&label](const Sub& s) {
+        const std::size_t n = std::strlen(s.utf8);
+        for (std::size_t at = label.find(s.utf8); at != std::string::npos;
+             at = label.find(s.utf8, at))
+            label.replace(at, n, s.text);
+    };
+    bool spell_mods = false;
+    for (const Sub& s : mods)
+        if (label.find(s.utf8) != std::string::npos && !font.has_glyph(s.cp))
+            spell_mods = true;
+    if (spell_mods)
+        for (const Sub& s : mods) replace_all(s);
+    for (const Sub& s : arrows)
+        if (!font.has_glyph(s.cp)) replace_all(s);
+    return label;
+}
+
+// shortcut_label, spelled out where `font` lacks a symbol.
+inline std::string shortcut_label(Key key, unsigned mods, const text::Font& font) {
+    return fit_shortcut_label(font, shortcut_label(key, mods));
 }
 
 // ---------------------------------------------------------------------------
@@ -21970,7 +22022,8 @@ private:
         const Theme& t = ctx->theme();
         lays_.label = ctx->font().layout(label_, t.s(t.base_font_px));
         if (!hint_.empty())
-            lays_.hint = ctx->font().layout(hint_, t.s(t.small_font_px));
+            lays_.hint = ctx->font().layout(fit_shortcut_label(ctx->font(), hint_),
+                                            t.s(t.small_font_px));
         valid_ = true;
     }
 
@@ -23383,9 +23436,13 @@ inline float sd_rounded_box(Vec2 p, Vec2 b, float r) {
 }
 
 inline Color sample_alpha(const std::uint8_t* tex, int tw, int th, float u, float v) {
-    // Bilinear alpha sample, clamped to texture bounds.
-    float fx = std::fmax(0.f, std::fmin(u, float(tw - 1)));
-    float fy = std::fmax(0.f, std::fmin(v, float(th - 1)));
+    // Bilinear alpha sample, clamped to texture bounds. Texel i covers
+    // [i, i+1) with its center at i+0.5 (as GL_LINEAR): an unscaled glyph
+    // samples each texel exactly, and a fractionally placed one reaches at
+    // most one texel past its edge — into the atlas's 1px gutter, never the
+    // neighboring glyph.
+    float fx = std::fmax(0.f, std::fmin(u - .5f, float(tw - 1)));
+    float fy = std::fmax(0.f, std::fmin(v - .5f, float(th - 1)));
     int x0 = int(fx), y0 = int(fy);
     int x1 = std::fmin(x0 + 1, tw - 1), y1 = std::fmin(y0 + 1, th - 1);
     float tx = fx - x0, ty = fy - y0;
@@ -23395,9 +23452,9 @@ inline Color sample_alpha(const std::uint8_t* tex, int tw, int th, float u, floa
     return Color(255, 255, 255, std::uint8_t(a + 0.5f));
 }
 
-inline Color sample_rgba(const std::uint8_t* tex, int tw, int, float u, float v) {
+inline Color sample_rgba(const std::uint8_t* tex, int tw, int th, float u, float v) {
     int x = std::clamp(int(u), 0, tw - 1);
-    int y = std::clamp(int(v), 0, tw - 1);
+    int y = std::clamp(int(v), 0, th - 1);
     const std::uint8_t* p = tex + (std::size_t(y) * tw + x) * 4;
     return Color(p[0], p[1], p[2], p[3]);
 }

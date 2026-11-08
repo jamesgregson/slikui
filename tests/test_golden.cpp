@@ -154,3 +154,30 @@ TEST(golden_glyph_fully_below_clip_paints_nothing) {
             if (slikui::Color::from_abgr(target.at(x, y)) != bg) clean = false;
     CHECK(clean);
 }
+
+TEST(golden_glyph_never_samples_its_atlas_neighbor) {
+    // Atlas row: an empty 2x2 glyph at x 0..1, the 1px gutter at x 2, and a
+    // solid neighbor at x 3..4 (font.hpp packs glyphs exactly like this).
+    // Drawn at a fractional position the empty glyph must paint nothing.
+    // The sampler used to put texel centers at integers, so the last column
+    // reached x 3 and the neighbor bled in as a faint bar (seen at 1x).
+    slikui::software::Target target(16, 16);
+    slikui::software::Sink sink(target);
+    std::uint8_t atlas[5 * 3] = {};
+    for (int y = 0; y < 2; ++y) atlas[y * 5 + 3] = atlas[y * 5 + 4] = 255;
+    sink.upload({7, 5, 3, slikui::TexFormat::Alpha8, atlas});
+
+    slikui::Color bg{0, 0, 0, 255};
+    for (float off : {0.f, 0.3f, 0.5f, 0.7f}) {
+        for (int y = 0; y < 16; ++y)
+            for (int x = 0; x < 16; ++x) target.at(x, y) = bg.to_abgr();
+        slikui::DrawList list;
+        list.glyph({4 + off, 4 + off, 2, 2}, 7, {0, 0, 2, 2}, {255, 255, 255, 255});
+        sink.render(list, {16, 16});
+        bool clean = true;
+        for (int y = 0; y < 16; ++y)
+            for (int x = 0; x < 16; ++x)
+                if (slikui::Color::from_abgr(target.at(x, y)) != bg) clean = false;
+        CHECK(clean);
+    }
+}

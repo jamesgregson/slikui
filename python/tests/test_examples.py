@@ -108,6 +108,55 @@ def test_doc_regions_are_copy_paste_safe():
         assert "_support." not in text, f"{mod}:{slug} uses the private harness"
 
 
+def _undefined_names(src):
+    """Globals a region reads but neither defines nor imports."""
+    import builtins
+    import symtable
+
+    top = symtable.symtable(src, "<region>", "exec")
+    defined = {s.get_name() for s in top.get_symbols()
+               if s.is_assigned() or s.is_imported()}
+    used = set()
+
+    def walk(t):
+        for s in t.get_symbols():
+            if (s.is_global() or (t is top and s.is_referenced())) \
+                    and not s.is_assigned():
+                used.add(s.get_name())
+        for c in t.get_children():
+            walk(c)
+
+    walk(top)
+    return sorted(used - defined - set(dir(builtins)))
+
+
+@pytest.mark.parametrize("region", list(_doc_regions()),
+                         ids=lambda r: f"{r[0]}:{r[1]}")
+def test_doc_region_is_self_contained(region):
+    """A quoted snippet pasted alone into a fresh file must run: every name
+    it uses is imported or defined inside it."""
+    mod, slug, text = region
+    assert _undefined_names(text) == [], f"{mod}:{slug} needs names from outside"
+    exec(compile(text, f"{mod}:{slug}", "exec"), {"__name__": "snippet"})
+
+
+@pytest.mark.parametrize("example", REGISTRY, ids=lambda e: e.name)
+def test_example_file_runs_when_copied(example, tmp_path):
+    """Copy one example file out of the package and run it as a script."""
+    import shutil
+    import subprocess
+    import sys
+
+    src = pathlib.Path(load(example.name).__file__)
+    copy = tmp_path / src.name
+    shutil.copy(src, copy)
+    out = tmp_path / "smoke.png"
+    r = subprocess.run([sys.executable, str(copy), "--smoke", str(out)],
+                       cwd=tmp_path, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert out.stat().st_size > 1000
+
+
 def test_launcher_runs_by_name_or_number(tmp_path, monkeypatch, capsys):
     from slikui.examples import __main__ as launcher
 

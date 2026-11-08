@@ -18,16 +18,17 @@ Run:
 import random
 
 import slikui
-from . import _support
+from slikui.examples import _support
 
 NAME = "keyboard"
 SIZE = (460, 380)
 
-T = slikui.EventType
-K = slikui.Key
-
-
 # doc: chip
+import slikui
+
+T, K = slikui.EventType, slikui.Key
+
+
 class Chip(slikui.Widget):
     """A focusable counter: arrows change it while focused. It reports
     focus changes through ``on_focus(chip, gained)``."""
@@ -73,6 +74,13 @@ class Chip(slikui.Widget):
 # doc: end
 
 # doc: snake
+import random
+
+import slikui
+
+T, K = slikui.EventType, slikui.Key
+
+
 class Snake(slikui.Widget):
     """Grid snake. Steering is buffered per step so a quick Up+Left between
     two steps can't reverse the snake into itself."""
@@ -277,7 +285,7 @@ def smoke(app, state, session, log):
 
 
 def interactive():
-    from . import _window
+    from slikui.examples import _window
     return _window.run(NAME, SIZE, build)
 
 

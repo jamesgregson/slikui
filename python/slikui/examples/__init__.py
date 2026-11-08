@@ -43,10 +43,8 @@ Custom-widget contract (subclass ``slikui.Widget``, call
 * Custom widgets draw no text — compose ``Label`` widgets beside them.
 * Built-in widget classes can't be subclassed in Python; wrap one in a
   custom widget and decorate it with ``paint_over`` (LimitSlider).
-* Don't store a wrapper of one of a custom widget's *descendants* on that
-  widget (an attribute, or a callback stored on it that captures one):
-  that cycle leaks. Reach descendants via ``self.children`` or
-  ``self.find(id)``.
+* Keep the wrappers ``add()`` returns (``self.slider = self.add(...)``):
+  they are views of widgets the tree owns, valid until ``app.close()``.
 * ``int(e.type)`` works; ``e.type.name`` / ``e.key.name`` give names;
   ``repr()`` of events and geometry is readable.
 

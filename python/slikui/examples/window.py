@@ -20,13 +20,16 @@ Run:
 """
 
 import slikui
-from . import _support
+from slikui.examples import _support
 
 NAME = "window"
 SIZE = (420, 300)
 
 
 # doc: pointerroot
+import slikui
+
+
 class PointerRoot(slikui.Widget):
     """Root container that reports the pointer position: events bubble from
     the widget under the pointer up to the root unless a widget consumes
@@ -76,12 +79,7 @@ def build(app):
     col.add(slikui.Spacer)
     status = col.add(slikui.StatusBar)
     status.set_text("move the pointer")
-    status.id = "status"
-    # Look the status bar up by id instead of capturing it: a callback stored
-    # on a custom widget that references one of that widget's own
-    # descendants forms a reference cycle Python's GC cannot collect.
-    root.on_pointer = lambda x, y: root.find("status").set_text(
-        f"pointer {x:.0f}, {y:.0f}")
+    root.on_pointer = lambda x, y: status.set_text(f"pointer {x:.0f}, {y:.0f}")
 
     # The window host polls app.quit (see _window.run).
     app.ctx.add_shortcut(slikui.Key.Q, slikui.mods("ctrl"),
@@ -115,7 +113,7 @@ def smoke(app, state, session, log):
 
 
 def interactive():
-    from . import _window
+    from slikui.examples import _window
     return _window.run(NAME, SIZE, build)
 
 

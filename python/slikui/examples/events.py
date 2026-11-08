@@ -34,10 +34,14 @@ Run:
 """
 
 import slikui
-from . import _support
+from slikui.examples import _support
 
 NAME = "events"
 SIZE = (560, 356)
+
+
+# doc: eventprobe
+import slikui
 
 INFO = slikui.LogView.Level.Info
 WARN = slikui.LogView.Level.Warning
@@ -78,7 +82,6 @@ def describe(e):
     return t.name  # FocusGained / FocusLost
 
 
-# doc: eventprobe
 class EventProbe(slikui.Widget):
     """Narrates every event it receives into a LogView via ``sink``.
 
@@ -298,7 +301,7 @@ def smoke(app, state, session, log):
 
 
 def interactive():
-    from . import _window
+    from slikui.examples import _window
     return _window.run(NAME, SIZE, build)
 
 
