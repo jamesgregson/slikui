@@ -46,8 +46,8 @@ public:
 
     template <class T, class... Args>
     T& add(Args&&... args) {
-        auto child = std::make_unique<T>(std::forward<Args>(args)...);
-        T& ref = *child;
+        WidgetPtr child(new T(std::forward<Args>(args)...));
+        T& ref = *static_cast<T*>(child.get());
         ref.parent = this;
         children.push_back(std::move(child));
         return ref;
@@ -56,7 +56,7 @@ public:
     void add(std::unique_ptr<Widget> child) {
         if (!child) return;
         child->parent = this;
-        children.push_back(std::move(child));
+        children.push_back(WidgetPtr(child.release()));
     }
 
     Widget* find(const std::string& widget_id) {
@@ -112,6 +112,21 @@ protected:
 public:
     virtual const char* widget_type() const { return "Widget"; }
 
+    // --- destruction protocol ---
+    //
+    // The tree destroys widgets through unique_ptr<Widget, Deleter>, which
+    // calls release(). The default destroys a C++-owned widget. Bindings
+    // override release() for widgets whose storage is owned by the Python
+    // runtime (Python-subclass instances live inside a PyObject allocation,
+    // where `delete` is undefined behavior) — see
+    // docs/python-custom-widgets.md.
+    virtual void release() noexcept { delete this; }
+
+    struct Deleter {
+        void operator()(Widget* w) const noexcept { w->release(); }
+    };
+    using WidgetPtr = std::unique_ptr<Widget, Deleter>;
+
     // --- tooltips ---
 
     // Text shown in a popup after hovering this widget (Context manages the
@@ -136,7 +151,7 @@ public:
     std::string id;             // optional, for Context::find()
     Rect bounds;                // absolute frame (assigned by arrange)
     Widget* parent = nullptr;
-    std::vector<std::unique_ptr<Widget>> children;
+    std::vector<WidgetPtr> children;
     bool visible = true;
     bool enabled = true;
     bool focused = false;       // maintained by Context

@@ -36,8 +36,8 @@ Build from source (the C++ side is header-only, nothing to link):
 
 ```
 pip install -e .                # editable, into your venv — from the repo root
-python -m pytest python/tests   # 38 tests: widgets, events, renderer parity
-python python/examples/hello.py # writes hello.ppm
+python -m pytest python/tests   # widgets, events, custom widgets, renderer parity
+python python/examples/hello.py # writes hello.png
 ```
 
 Events are first-class: build slikui events in Python and drive the real
@@ -80,7 +80,40 @@ frame = sink.buffer               # (240, 320) uint32, 0xAABBGGRR
 See it side by side: `python python/examples/pyrenderer_demo.py` renders one
 tree through both renderers and reports the pixel diff (it is 0).
 
-Design and milestones: `docs/python-bindings-plan.md` — M0 (values, software
-backend, core widgets), M1 (full widget surface + themes) and M2 (events,
-popups, tooltips, simulated-input tests) are done; M3 (wheels/CI/docs) and
-M4 (GLFW+GL backend bindings) are tabled.
+**Custom widgets in pure Python.** Subclass `slikui.Widget` and implement
+`measure` / `paint` / `on_event` (plus opt-in `tick`, `stretch_cross`,
+`expands_main`, `focusable`, `widget_type`) — the C++ core lays out, paints,
+hit-tests and dispatches events to your class:
+
+```python
+class Meter(slikui.Widget):
+    def measure(self, constraints):
+        return constraints.clamp(slikui.Size(0, 10))
+
+    def paint(self, env):
+        env.list.rect(self.bounds, self.value_color)
+
+    def on_event(self, event):
+        if event.type == slikui.EventType.MousePress \
+                and self.bounds.contains(event.pos):
+            ...  # return True to consume
+        return False
+```
+
+Python state lives in instance attributes; `paint` emits into `env.list`
+(rect, hollow_rect, line, circle, image, glyph, clip stack) using `env.theme`
+colors. Add instances with `container.add_widget(obj)` or
+`container.add(Meter, ...)`; a custom root is `context.set_root_widget(...)`.
+Note: subclasses must call `super().__init__()`, and subclassing the bound C++
+widget types (Column, Row, ...) is rejected — build layouts from Python code
+instead. See `docs/python-custom-widgets.md`,
+`python/examples/custom_widget.py`, and the pixel-parity test against the C++
+`Swatch` in `python/tests/test_custom_widgets.py`.
+
+![The Meter — a pure-Python custom widget rendered by the C++ core](../docs/images/custom_widget.png)
+
+Design and milestones: `docs/python-custom-widgets.md` — design notes for the
+custom-widget trampoline (ownership model, spike results) plus the retired
+bindings plan: M0 (values, software backend, core widgets), M1 (full widget
+surface + themes), M2 (events, popups, tooltips, simulated-input tests) and
+M3 (wheels/CI/docs) are done; M4 (GLFW+GL backend bindings) is tabled.

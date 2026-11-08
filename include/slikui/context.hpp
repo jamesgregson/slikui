@@ -50,10 +50,10 @@ public:
 
     template <class T, class... Args>
     T& set_root(Args&&... args) {
-        root_ = std::make_unique<T>(std::forward<Args>(args)...);
+        root_.reset(new T(std::forward<Args>(args)...));
         return *static_cast<T*>(root_.get());
     }
-    void set_root(std::unique_ptr<Widget> w) { root_ = std::move(w); }
+    void set_root(std::unique_ptr<Widget> w) { root_.reset(w.release()); }
     Widget* root() { return root_.get(); }
 
     Widget* find(const std::string& id) { return root_ ? root_->find(id) : nullptr; }
@@ -121,8 +121,9 @@ public:
 
     // Overlay rendered above everything; auto-dismissed when clicking outside.
     Widget& push_popup(std::unique_ptr<Widget> w, Vec2 pos) {
-        Widget& ref = *w;
-        popups_.push_back({std::move(w), pos});
+        Widget::WidgetPtr owned(w.release());
+        Widget& ref = *owned;
+        popups_.push_back({std::move(owned), pos});
         attach_tree(ref);
         layout_popup(popups_.back());
         return ref;
@@ -154,7 +155,7 @@ public:
 
 private:
     struct Popup {
-        std::unique_ptr<Widget> widget;
+        Widget::WidgetPtr widget;
         Vec2 pos;
     };
 
@@ -282,12 +283,12 @@ private:
     IRenderSink* sink_;
     Theme theme_;
     text::Font font_;
-    std::unique_ptr<Widget> root_;
+    Widget::WidgetPtr root_;
     Widget* focused_ = nullptr;
     Vec2 frame_{};
     std::uint32_t next_tex_id_ = 1;
     std::vector<Popup> popups_;
-    std::vector<std::unique_ptr<Widget>> closing_; // deferred destruction
+    std::vector<Widget::WidgetPtr> closing_; // deferred destruction
     bool inside_press_ = false; // mouse button held from a press inside the tree
     Widget* mouse_capture_ = nullptr;
 

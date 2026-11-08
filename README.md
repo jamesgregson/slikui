@@ -49,7 +49,8 @@ controls grouped in an accordion panel](docs/images/cube_viewer.png)
     [Image](#image) · [Tooltips](#tooltips) · [Theming](#theming)
 - [Building the demos](#building-the-demos)
 - [Python bindings — `slikui`](python/README.md) — full Python API, events,
-  your-own-renderer seam, parity tests
+  custom widgets (subclass `Widget` in Python), your-own-renderer seam, parity
+  tests
 - [Documentation](#documentation)
 - [Roadmap](#roadmap)
 

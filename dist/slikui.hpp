@@ -6963,8 +6963,8 @@ public:
 
     template <class T, class... Args>
     T& add(Args&&... args) {
-        auto child = std::make_unique<T>(std::forward<Args>(args)...);
-        T& ref = *child;
+        WidgetPtr child(new T(std::forward<Args>(args)...));
+        T& ref = *static_cast<T*>(child.get());
         ref.parent = this;
         children.push_back(std::move(child));
         return ref;
@@ -6973,7 +6973,7 @@ public:
     void add(std::unique_ptr<Widget> child) {
         if (!child) return;
         child->parent = this;
-        children.push_back(std::move(child));
+        children.push_back(WidgetPtr(child.release()));
     }
 
     Widget* find(const std::string& widget_id) {
@@ -7029,6 +7029,21 @@ protected:
 public:
     virtual const char* widget_type() const { return "Widget"; }
 
+    // --- destruction protocol ---
+    //
+    // The tree destroys widgets through unique_ptr<Widget, Deleter>, which
+    // calls release(). The default destroys a C++-owned widget. Bindings
+    // override release() for widgets whose storage is owned by the Python
+    // runtime (Python-subclass instances live inside a PyObject allocation,
+    // where `delete` is undefined behavior) — see
+    // docs/python-custom-widgets.md.
+    virtual void release() noexcept { delete this; }
+
+    struct Deleter {
+        void operator()(Widget* w) const noexcept { w->release(); }
+    };
+    using WidgetPtr = std::unique_ptr<Widget, Deleter>;
+
     // --- tooltips ---
 
     // Text shown in a popup after hovering this widget (Context manages the
@@ -7053,7 +7068,7 @@ public:
     std::string id;             // optional, for Context::find()
     Rect bounds;                // absolute frame (assigned by arrange)
     Widget* parent = nullptr;
-    std::vector<std::unique_ptr<Widget>> children;
+    std::vector<WidgetPtr> children;
     bool visible = true;
     bool enabled = true;
     bool focused = false;       // maintained by Context
@@ -7147,10 +7162,10 @@ public:
 
     template <class T, class... Args>
     T& set_root(Args&&... args) {
-        root_ = std::make_unique<T>(std::forward<Args>(args)...);
+        root_.reset(new T(std::forward<Args>(args)...));
         return *static_cast<T*>(root_.get());
     }
-    void set_root(std::unique_ptr<Widget> w) { root_ = std::move(w); }
+    void set_root(std::unique_ptr<Widget> w) { root_.reset(w.release()); }
     Widget* root() { return root_.get(); }
 
     Widget* find(const std::string& id) { return root_ ? root_->find(id) : nullptr; }
@@ -7218,8 +7233,9 @@ public:
 
     // Overlay rendered above everything; auto-dismissed when clicking outside.
     Widget& push_popup(std::unique_ptr<Widget> w, Vec2 pos) {
-        Widget& ref = *w;
-        popups_.push_back({std::move(w), pos});
+        Widget::WidgetPtr owned(w.release());
+        Widget& ref = *owned;
+        popups_.push_back({std::move(owned), pos});
         attach_tree(ref);
         layout_popup(popups_.back());
         return ref;
@@ -7251,7 +7267,7 @@ public:
 
 private:
     struct Popup {
-        std::unique_ptr<Widget> widget;
+        Widget::WidgetPtr widget;
         Vec2 pos;
     };
 
@@ -7379,12 +7395,12 @@ private:
     IRenderSink* sink_;
     Theme theme_;
     text::Font font_;
-    std::unique_ptr<Widget> root_;
+    Widget::WidgetPtr root_;
     Widget* focused_ = nullptr;
     Vec2 frame_{};
     std::uint32_t next_tex_id_ = 1;
     std::vector<Popup> popups_;
-    std::vector<std::unique_ptr<Widget>> closing_; // deferred destruction
+    std::vector<Widget::WidgetPtr> closing_; // deferred destruction
     bool inside_press_ = false; // mouse button held from a press inside the tree
     Widget* mouse_capture_ = nullptr;
 

@@ -27,18 +27,22 @@ from slikui._slikui import (  # noqa: F401 — re-exported
     ImageFit,
     Label,
     ListView,
+    PaintEnv,
     Panel,
     ProgressBar,
     Radio,
+    Rect,
     RenderSink,
     Row,
     ScrollArea,
     Sink,
+    Size,
     Slider,
     Spacer,
     Spinner,
     Swatch,
     Switch,
+    Constraints,
     Tabs,
     Target,
     TextArea,
@@ -71,7 +75,7 @@ from slikui._py.events import (
     text_input,
     text_input_str,
 )
-from slikui._py.pixels import to_rgba
+from slikui._py.pixels import save_image, to_rgba
 from slikui._slikui import (  # noqa: F401 — input enums
     EventType,
     Key,
@@ -90,13 +94,14 @@ _PATCHED = builder.try_patch()
 
 __all__ = [
     "Accordion", "App", "Button", "ButtonVariant", "Checkbox", "Color",
-    "Column", "Container", "Context", "CrossMode", "Divider", "Dropdown",
-    "Expander", "Image", "ImageFit", "Label", "ListView", "Panel",
-    "ProgressBar", "Radio", "Row", "ScrollArea", "Sink", "Slider",
-    "Spacer", "Spinner", "Swatch", "Switch", "Tabs", "Target", "TextArea",
-    "TextField", "Theme", "ThemePreset", "Time", "Vec2", "Widget",
-    "__version__", "add", "apply_preset", "find_system_font",
-    "set_root", "theme_presets", "to_rgba", "use_theme",
+    "Column", "Constraints", "Container", "Context", "CrossMode", "Divider",
+    "Dropdown", "Expander", "Image", "ImageFit", "Label", "ListView",
+    "PaintEnv", "Panel", "ProgressBar", "Radio", "Rect", "Row",
+    "ScrollArea", "Sink", "Size", "Slider", "Spacer", "Spinner", "Swatch",
+    "Switch", "Tabs", "Target", "TextArea", "TextField", "Theme",
+    "ThemePreset", "Time", "Vec2", "Widget", "__version__", "add",
+    "apply_preset", "find_system_font", "save_image", "set_root", "theme_presets",
+    "to_rgba", "use_theme",
     # events
     "EventType", "Key", "Mod", "MouseButton",
     "focus_lost", "frame_resize", "key_press", "key_release", "mods",

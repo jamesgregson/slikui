@@ -1,7 +1,6 @@
 """Full-surface gallery rendered headless via the Python bindings.
 
-Writes gallery.ppm next to this file (convert: python3 tools/ppm2png.py
-python/examples/gallery.ppm python/examples/gallery.png).
+Writes gallery.png next to this file.
 """
 
 import os
@@ -9,7 +8,7 @@ import os
 import numpy as np
 
 import slikui
-from slikui._py.pixels import to_rgba
+from slikui._py.pixels import save_image
 
 ui = slikui.App(320, 720, scale=2)
 root = ui.set_root(slikui.Column, padding=14, gap=8)
@@ -84,10 +83,6 @@ for i in range(1, 4):
     ui.tick(i / 60, 1 / 60)
 frame = ui.render()  # frame 4: atlas settled — every glyph present
 
-rgba = to_rgba(frame)
-h, w = rgba.shape[:2]
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gallery.ppm")
-with open(out, "wb") as f:
-    f.write(f"P6\n{w} {h}\n255\n".encode())
-    f.write(rgba[..., :3].tobytes())
-print(f"wrote {out} ({w}x{h})")
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gallery.png")
+save_image(frame, out)
+print(f"wrote {out} ({frame.shape[1]}x{frame.shape[0]})")

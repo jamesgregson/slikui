@@ -45,9 +45,11 @@ void def_setter(nb::class_<W, Bs...>& cls, const char* name, W& (W::*f)(V)) {
 }
 
 // Swatch — a small clickable color chip that highlights when its
-// `is_selected` callback says so. Python can't subclass C++ widgets without a
-// trampoline, so the demo's custom widget lives here and drives Python
-// callbacks for both directions (state read + edit).
+// `is_selected` callback says so. Kept as the C++ reference for the Python
+// custom-widget trampoline: python/tests/test_custom_widgets.py renders a
+// pure-Python Swatch (subclassing slikui.Widget) and asserts the frames are
+// pixel-identical. New custom widgets should be written in Python — see
+// docs/python-custom-widgets.md.
 class Swatch : public slikui::Widget {
 public:
     Swatch(slikui::Color c, nb::callable is_selected, nb::callable on_pick)
@@ -193,6 +195,59 @@ struct PyRenderSink : IRenderSink {
     }
 };
 
+// PyWidget — trampoline so Python classes can implement the Widget contract
+// (measure/paint/on_event/...). See docs/python-custom-widgets.md.
+//
+// Lifetime model (spike-verified): Python-created widgets live in
+// nanobind-colocated storage, so the C++ tree must never `delete` them. The
+// tree destroys every widget through Widget::Deleter -> virtual release();
+// PyWidget::release() drops the anchor — a reference to the instance's own
+// wrapper — and nanobind then runs the destructor and frees the storage.
+// While the tree holds the pointer, the anchor keeps the wrapper alive.
+struct PyWidget : slikui::Widget {
+    NB_TRAMPOLINE(slikui::Widget);
+
+    Size measure(const Constraints& c) override { NB_OVERRIDE(measure, c); }
+
+    void paint(const PaintEnv& env) const override { NB_OVERRIDE(paint, env); }
+
+    bool on_event(const Event& e) override { NB_OVERRIDE(on_event, e); }
+
+    void tick(Time t) override { NB_OVERRIDE(tick, t); }
+
+    bool stretch_cross() const override { NB_OVERRIDE(stretch_cross); }
+
+    bool expands_main() const override { NB_OVERRIDE(expands_main); }
+
+    bool focusable() const override { NB_OVERRIDE(focusable); }
+
+    // widget_type() returns const char* — NB_OVERRIDE would hand back a
+    // dangling pointer (nanobind materializes a temporary for the str ->
+    // const char* cast). Dispatch manually; copy into a cache.
+    const char* widget_type() const override {
+        constexpr std::uint64_t nb_hash = nb::detail::str_hash("widget_type");
+        nb::detail::ticket t(nb_trampoline, "widget_type", nb_hash, false);
+        if (t.key.is_valid()) {
+            type_cache_ = nb::borrow<nb::str>(nb_trampoline.base().attr(t.key)()).c_str();
+            return type_cache_.c_str();
+        }
+        return slikui::Widget::widget_type();
+    }
+
+    // NOT dispatched to Python: this is the destruction protocol. Dropping
+    // the anchor may deallocate `this` re-entrantly — touch nothing after.
+    void release() noexcept override {
+        nb::gil_scoped_acquire gil;
+        anchor.reset();
+    }
+
+    // Called by add_widget()/set_root_widget() when the tree takes over.
+    void anchor_self() { anchor = nb::borrow(nb::handle(nb_trampoline.self)); }
+
+    nb::object anchor;          // set once the tree owns the pointer
+    mutable std::string type_cache_;
+};
+
 } // namespace
 
 NB_MODULE(_slikui, m) {
@@ -253,8 +308,29 @@ NB_MODULE(_slikui, m) {
         .def_rw("w", &Rect::w)
         .def_rw("h", &Rect::h)
         .def("contains", &Rect::contains, nb::arg("p"))
+        .def("inflate", &Rect::inflate, nb::arg("dx"), nb::arg("dy"))
         .def("__eq__", [](const Rect& a, const Rect& b) { return a == b; },
              nb::arg("other"), nb::is_operator());
+
+    nb::class_<Size>(m, "Size")
+        .def(nb::init<float, float>(), nb::arg("w") = 0.f, nb::arg("h") = 0.f)
+        .def_rw("w", &Size::w)
+        .def_rw("h", &Size::h)
+        .def("__eq__", [](const Size& a, const Size& b) { return a == b; },
+             nb::arg("other"), nb::is_operator());
+
+    nb::class_<Constraints>(m, "Constraints")
+        .def(nb::init<>())
+        .def_rw("min", &Constraints::min)
+        .def_rw("max", &Constraints::max)
+        .def_static("loose",
+                    [](Vec2 maximum) { return Constraints::loose(maximum); },
+                    nb::arg("maximum") = Vec2(kInfinite, kInfinite))
+        .def_static("tight", [](Size s) { return Constraints::tight(s); },
+                    nb::arg("size"))
+        .def("clamp", &Constraints::clamp, nb::arg("size"))
+        .def_prop_ro("is_bounded_x", &Constraints::is_bounded_x)
+        .def_prop_ro("is_bounded_y", &Constraints::is_bounded_y);
 
     // ------------------------------------------------------------------ //
     // Input events (one vocabulary, translated by the window layer)
@@ -379,6 +455,22 @@ NB_MODULE(_slikui, m) {
         .def_ro("uv", &DrawCmd::uv);
 
     nb::class_<DrawList>(m, "DrawList")
+        // Mutators — what a Python paint() override emits.
+        .def("rect", &DrawList::rect, nb::arg("rect"), nb::arg("color"),
+             nb::arg("radius") = 0.f)
+        .def("hollow_rect", &DrawList::hollow_rect, nb::arg("rect"),
+             nb::arg("color"), nb::arg("width"), nb::arg("radius") = 0.f)
+        .def("line", &DrawList::line, nb::arg("a"), nb::arg("b"),
+             nb::arg("color"), nb::arg("thickness") = 1.f)
+        .def("circle", &DrawList::circle, nb::arg("center"), nb::arg("radius"),
+             nb::arg("color"))
+        .def("image", &DrawList::image, nb::arg("dst"), nb::arg("tex_id"),
+             nb::arg("uv"))
+        .def("glyph", &DrawList::glyph, nb::arg("dst"), nb::arg("tex_id"),
+             nb::arg("uv"), nb::arg("color"))
+        .def("push_clip", &DrawList::push_clip, nb::arg("rect"))
+        .def("pop_clip", &DrawList::pop_clip)
+        .def("clear", &DrawList::clear)
         .def_prop_ro("commands", [](const DrawList& l) { return l.commands(); })
         .def_prop_ro("size", [](const DrawList& l) { return l.size(); })
         .def("__len__", [](const DrawList& l) { return l.size(); })
@@ -386,6 +478,21 @@ NB_MODULE(_slikui, m) {
              [](const DrawList& l, std::size_t i) { return l.commands().at(i); })
         .def("__iter__",
              [](const DrawList& l) { return nb::cast(l.commands()).attr("__iter__")(); });
+
+    // PaintEnv — the environment a paint() override receives: the frame's
+    // draw list and the active theme. A view over context state, valid only
+    // during the call (no font in v1: text needs Font/TextLayout bindings).
+    nb::class_<PaintEnv>(m, "PaintEnv")
+        .def_prop_ro("list",
+                     [](PaintEnv& e) -> DrawList& { return e.list; },
+                     nb::rv_policy::reference_internal)
+        .def_prop_ro("theme",
+                     [](PaintEnv& e) -> Theme& {
+                         // PaintEnv carries the theme as const&, but it is
+                         // context-owned mutable state; expose it as such.
+                         return const_cast<Theme&>(e.theme);
+                     },
+                     nb::rv_policy::reference_internal);
 
     nb::class_<IRenderSink>(m, "IRenderSink"); // abstract base, never constructed directly
 
@@ -458,6 +565,21 @@ NB_MODULE(_slikui, m) {
              nb::rv_policy::reference_internal)
         .def("set_root_row", [](Context& c) -> Row& { return c.set_root<Row>(); },
              nb::rv_policy::reference_internal)
+        .def("set_root_widget",
+             [](Context& c, Widget& w) -> Widget& {
+                 if (auto* pw = dynamic_cast<PyWidget*>(&w)) {
+                     if (pw->anchor)
+                         throw nb::type_error(
+                             "set_root_widget(): widget is already in a widget tree");
+                     pw->anchor_self();
+                 } else {
+                     throw nb::type_error(
+                         "set_root_widget(): custom widgets must subclass slikui.Widget");
+                 }
+                 c.set_root(std::unique_ptr<Widget>(&w));
+                 return w;
+             },
+             nb::arg("widget"), nb::rv_policy::reference)
         .def_prop_rw("theme",
                      [](Context& c) -> Theme& { return c.theme(); },
                      [](Context& c, const Theme& t) { c.theme() = t; },
@@ -482,7 +604,26 @@ NB_MODULE(_slikui, m) {
     // Widgets
     // ------------------------------------------------------------------ //
 
-    auto widget_cls = nb::class_<Widget>(m, "Widget")
+    auto widget_cls = nb::class_<Widget, PyWidget>(m, "Widget")
+        .def(nb::init<>()) // super().__init__() for Python subclasses
+        // The virtual protocol is bound by name so the trampoline can resolve
+        // overrides on Python subclasses (NB_OVERRIDE looks the name up in
+        // the MRO; unbound names would raise "lookup failed" on dispatch).
+        .def("measure",
+             [](Widget& w, const Constraints& c) { return w.measure(c); },
+             nb::arg("constraints"))
+        .def("paint",
+             [](Widget& w, const PaintEnv& e) { w.paint(e); },
+             nb::arg("env"))
+        .def("on_event",
+             [](Widget& w, const Event& e) { return w.on_event(e); },
+             nb::arg("event"))
+        .def("tick", [](Widget& w, Time t) { w.tick(t); }, nb::arg("time"))
+        .def("stretch_cross", [](Widget& w) { return w.stretch_cross(); })
+        .def("expands_main", [](Widget& w) { return w.expands_main(); })
+        .def("focusable", [](Widget& w) { return w.focusable(); })
+        .def("widget_type",
+             [](Widget& w) { return std::string(w.widget_type()); })
         .def_rw("id", &Widget::id)
         .def_rw("visible", &Widget::visible)
         .def_rw("enabled", &Widget::enabled)
@@ -501,7 +642,24 @@ NB_MODULE(_slikui, m) {
              nb::arg("id"), nb::rv_policy::reference)
         .def("set_tooltip",
              [](Widget& w, std::string t) -> Widget& { return w.set_tooltip(std::move(t)); },
-             nb::arg("text"), nb::rv_policy::reference);
+             nb::arg("text"), nb::rv_policy::reference)
+        .def("add_widget",
+             [](Widget& host, Widget& child) -> Widget& {
+                 if (auto* pw = dynamic_cast<PyWidget*>(&child)) {
+                     if (pw->anchor) // nanobind owns the storage once anchored
+                         throw nb::type_error(
+                             "add_widget(): widget is already in a widget tree");
+                     pw->anchor_self();
+                 } else {
+                     throw nb::type_error(
+                         "add_widget(): custom widgets must subclass slikui.Widget — "
+                         "Python subclasses of bound widget types (Column, Row, ...) "
+                         "cannot dispatch overrides");
+                 }
+                 host.add(std::unique_ptr<Widget>(&child));
+                 return child;
+             },
+             nb::arg("widget"), nb::rv_policy::reference);
     bind_add(widget_cls);
 
     nb::class_<Container, Widget>(m, "Container")

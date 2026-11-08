@@ -53,7 +53,7 @@ jobs:
       # gcc 13 on manylinux_2_28 — C++20 needs more than 2014's devtoolset
       CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
       CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
-      CIBW_TEST_REQUIRES: "pytest numpy"
+      CIBW_TEST_REQUIRES: "pytest numpy pillow"
       CIBW_TEST_COMMAND: "python -m pytest {package}/python/tests -q"
       CIBW_BUILD_VERBOSITY: 1
     steps:
