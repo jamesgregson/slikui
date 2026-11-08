@@ -1,0 +1,10 @@
+/* Custom primary palette: a muted indigo that reads well on both schemes.
+   (Material requires explicit CSS when theme.palette.primary = "custom".) */
+:root {
+  --md-primary-fg-color: #2f3a56;
+  --md-primary-fg-color--light: #47506e;
+  --md-primary-fg-color--dark: #1d2436;
+  --md-primary-bg-color: #f5f6fa;
+  --md-primary-bg-color--dark: #f5f6fa;
+  --md-accent-fg-color: #bf5c38;
+}

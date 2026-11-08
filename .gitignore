@@ -12,3 +12,4 @@ compile_commands.json
 shots/
 hello_raw.ppm
 .venv-asan/
+site/

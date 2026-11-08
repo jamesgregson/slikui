@@ -2,8 +2,7 @@
 
 Distribution `slikui`, import package `slikui`, compiled module `slikui._slikui`.
 Layering: `_slikui` binds the C++ API 1:1; `slikui/_py` adds a thin Pythonic
-surface (kwargs → setters, App shell, pixel helpers). See
-docs/python-bindings-plan.md.
+surface (kwargs → setters, App shell, pixel helpers).
 """
 
 from slikui._slikui import (  # noqa: F401 — re-exported
@@ -129,6 +128,7 @@ __all__ = [
     "App",
     "Button",
     "ButtonVariant",
+    "CanvasSink",
     "Checkbox",
     "Color",
     "ColorEdit",
@@ -143,6 +143,7 @@ __all__ = [
     "Divider",
     "DragValue",
     "Dropdown",
+    "Event",
     "EventType",
     "Expander",
     "FileBrowser",
@@ -163,10 +164,13 @@ __all__ = [
     "MouseButton",
     "PaintEnv",
     "Panel",
+    "Plot",
     "PopupDir",
     "ProgressBar",
+    "PropertyGrid",
     "Radio",
     "Rect",
+    "RenderSink",
     "Row",
     "ScrollArea",
     "SearchBox",
@@ -189,6 +193,7 @@ __all__ = [
     "ThemePreset",
     "Time",
     "Toast",
+    "Toolbar",
     "TreeView",
     "Vec2",
     "Vec2Edit",
@@ -211,6 +216,7 @@ __all__ = [
     "mouse_release",
     "save_image",
     "scroll",
+    "set_leak_warnings",
     "set_root",
     "shortcut_label",
     "text_input",

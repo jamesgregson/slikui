@@ -1,4 +1,4 @@
-# The slikui backend contract
+# Render backends
 
 Everything slikui needs from a graphics API is one interface:
 
@@ -11,10 +11,36 @@ public:
 };
 ```
 
-`slikui::software::Sink` (CPU, raw `uint32_t` pixels) and
-`slikui::opengl::OpenglSink` (GL 3.3, system headers) are reference
-implementations. A new backend — Vulkan, Metal, SDL_Renderer, a raylib batch —
-implements the same two methods.
+Two backends ship out of the box and are the reference implementations:
+
+- **`slikui::software::Sink`** — antialiased CPU rasterizer over a raw
+  `uint32_t` framebuffer (owned or borrowed). Works headless, on embedded
+  targets, or blitted into any engine. `sink.set_scale()` renders logical
+  coordinates at any pixel density.
+- **`slikui::opengl::OpenglSink`** — GL 3.3 core renderer using your **system
+  OpenGL headers** (no vendored loader). Optional
+  `slikui::glfw::GlfwWindow` wraps window creation and event translation.
+  Both self-gate on `__has_include`, so they compile to nothing when the
+  headers are absent.
+
+Anything else — Vulkan, Metal, SDL_Renderer, a raylib batch — implements the
+same two methods. A minimal sink is ~100–400 lines; the software sink is the
+smallest complete example, start there when porting. Every screenshot on
+this site is real `IRenderSink` output from the software backend — the two
+methods are the entire contract.
+
+## Frame flow
+
+```
+ctx.render()
+  ├─ upload() for dirty atlases (font atlas, images)
+  ├─ build DrawList (root tree, then popups, then dialogs/toasts)
+  └─ sink.render(list, framebuffer_size)
+```
+
+`render` should clear nothing by default — the list contains a background
+rect (`Context::render(clear=true)` paints `Theme::background` first).
+Presenting (swap buffers, blit) stays with the window layer, not the sink.
 
 ## Texture uploads
 
@@ -30,13 +56,14 @@ struct TexUpload {
 - `Alpha8`: one coverage byte per pixel. Store it as `R8` (GL) or expand to
   RGBA on upload; shaders multiply color by the red/alpha channel.
 - `Rgba8`: straight (non-premultiplied) alpha.
-- `upload` may be called repeatedly for the same id (atlas regrows) — treat it
-  as create-or-replace. Texture ids are never reused for different content.
+- `upload` may be called repeatedly for the same id (atlas regrows) — treat
+  it as create-or-replace. Texture ids are never reused for different
+  content.
 
 ## DrawList semantics
 
 The list is flat commands in paint order. Geometry is in framebuffer pixels,
-y-down, and **already clipped** is *not* guaranteed — apply the clip stack:
+y-down. Clipping is *not* pre-applied — apply the clip stack:
 
 | Cmd | Meaning | Fields |
 |-----|---------|--------|
@@ -47,31 +74,19 @@ y-down, and **already clipped** is *not* guaranteed — apply the clip stack:
 | `ClipPush`/`ClipPop` | push/pop a clip rect; **intersect** with the current clip on push | rect (push only) |
 
 Guarantees you can rely on:
+
 - `ClipPush`/`ClipPop` are balanced (`DrawList::clip_balanced()`).
 - `uv` values for glyphs/images are in **texture pixels** — normalize by the
   texture's size from the last `upload` of that id.
 - Whitespace glyphs are never emitted (widgets skip them).
 
-## Frame flow
-
-```
-ctx.render()
-  ├─ upload() for dirty atlases
-  ├─ build DrawList (root tree, then popups)
-  └─ sink.render(list, framebuffer_size)
-```
-
-`render` should clear nothing by default — the list contains a background rect
-(`Context::render(clear=true)` paints `Theme::background` first). Presenting
-(swap buffers, blit) stays with the window layer, not the sink.
-
-## Event translation
+## Event translation (window layer)
 
 The window layer converts native events into `slikui::Event` and calls
 `Context::handle` — one vocabulary regardless of platform:
 
 | slikui event | GLFW source |
-|------------|-------------|
+|--------------|-------------|
 | `MouseMove` | cursor-pos callback (`pos`, `delta`) |
 | `MousePress`/`MouseRelease` | mouse-button callback (`button`, `pos`) |
 | `Scroll` | scroll callback (`scroll`) |
@@ -82,16 +97,6 @@ The window layer converts native events into `slikui::Event` and calls
 
 Mouse positions are framebuffer pixels (not window coordinates), so divide by
 the content scale on HiDPI before filling `pos`.
-
-## Reference notes from the GL sink
-
-- One interleaved VBO (15 floats/vertex: pos, rgba, uv, tex-kind, center,
-  half-extents, radius/border/dir), one SDF fragment shader: rounded rects and
-  capsule lines get their AA for free from `sd_box` coverage.
-- `ClipPush`/`ClipPop` flush the batch and call `glScissor` (y-flipped:
-  GL's origin is bottom-left, slikui's is top-left).
-- Glyphs sample the R8 atlas and multiply by `v_col`; images multiply the
-  sampled RGBA into the vertex color.
 
 ## A minimal new sink (sketch)
 
@@ -114,5 +119,21 @@ class MySink : public slikui::IRenderSink {
 };
 ```
 
-The software sink (`backends/software/software.hpp`) is the smallest complete
-example — start there when porting.
+## Reference notes from the GL sink
+
+- One interleaved VBO (15 floats/vertex: pos, rgba, uv, tex-kind, center,
+  half-extents, radius/border/dir), one SDF fragment shader: rounded rects
+  and capsule lines get their AA for free from `sd_box` coverage.
+- `ClipPush`/`ClipPop` flush the batch and call `glScissor` (y-flipped: GL's
+  origin is bottom-left, slikui's is top-left).
+- Glyphs sample the R8 atlas and multiply by `v_col`; images multiply the
+  sampled RGBA into the vertex color.
+
+## Python: your own renderer
+
+`slikui.RenderSink` is a trampoline over C++ `IRenderSink`: subclass it,
+implement `upload(tex)` and `render(commands, fb_size)`, and slikui hands you
+every frame as a flat command list — point it at pygame, moderngl, PIL,
+anything. `slikui.CanvasSink` is a worked example: a pure-numpy rasterizer
+producing **pixel-identical** output to the C++ software backend (verified by
+test). Details: [Python bindings](../reference/python-bindings.md).

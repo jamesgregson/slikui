@@ -79,7 +79,7 @@ powers caret hit-testing. Layouts are cached per widget (`Label`, `ListView`,
   assigns `bounds`), `paint`, `on_event`, optionally `tick`, `focusable`,
   `clip_rect`, `expands_main`.
 - **New backend**: implement `IRenderSink` — see
-  `docs/backend-contract.md`. ~100-400 lines.
+  [guide/backends.md](../guide/backends.md). ~100-400 lines.
 - **Theming**: mutate `Context::theme()`; widgets read it every paint. There
   is no cached styled state to invalidate.
 

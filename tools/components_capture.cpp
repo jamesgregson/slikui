@@ -151,6 +151,38 @@ static std::vector<std::uint8_t> gradient_rgba() {
     return px;
 }
 
+// ---------------------------------------------------------------------------
+// Custom widget: Meter — the C++ twin of the Python Meter in
+// python/examples/custom_widget.py. Measures 10 px tall, stretches across the
+// column (stretch_cross defaults to true), paints a rounded track plus an
+// accent fill, and scrubs on click.
+// ---------------------------------------------------------------------------
+class Meter : public Widget {
+public:
+    explicit Meter(float value = 0.f) : value_(value) {}
+
+    Size measure(const Constraints& c) override { return c.clamp({0.f, 10.f}); }
+
+    void paint(const PaintEnv& env) const override {
+        env.list.rect(bounds, env.theme.surface_alt, bounds.h / 2);
+        if (value_ > 0.f)
+            env.list.rect({bounds.x, bounds.y, bounds.w * value_, bounds.h},
+                          env.theme.accent, bounds.h / 2);
+    }
+
+    bool on_event(const Event& e) override {
+        // Click to the left/right of the fill to move it.
+        if (e.type == Event::Type::MousePress && bounds.contains(e.pos)) {
+            value_ = std::clamp((e.pos.x - bounds.x) / bounds.w, 0.f, 1.f);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    float value_ = 0.f;
+};
+
 int main(int argc, char** argv) {
     const char* dir = argc > 1 ? argv[1] : "docs/images";
 
@@ -415,6 +447,150 @@ int main(int argc, char** argv) {
             .set_tooltip("Removes every item — this cannot be undone");
         // cursor rests on "Delete all": 24 + Save(~76) + gap(10) + half(~62)
     }, {.hover = {168.f, 40.f}, .frames = 80});
+
+    // ---- hello: the getting-started tree --------------------------------
+    capture(dir, "hello", 320, 200, [](Context&, Column& root) {
+        root.set_padding(16).set_gap(8);
+        root.add<Label>("Hello, slikui!").set_font_size(26);
+        root.add<Button>("Save").set_variant(Button::Variant::Primary);
+    }, {.frames = 30});
+
+    // ---- accordion --------------------------------------------------------
+    capture(dir, "accordion", 480, 250, [](Context&, Column& root) {
+        auto& acc = root.add<Accordion>();
+        acc.set_gap(6);
+        auto& shape = acc.add_section("Shape", /*open=*/true);
+        shape.set_gap(8);
+        shape.add<Dropdown>().set_items({"Cube", "Sphere", "Torus"})
+            .set_selected(0);
+        auto& material = acc.add_section("Material");
+        material.set_gap(8);
+        material.add<Slider>(0.f, 1.f);           // roughness
+        material.add<Slider>(0.f, 1.f);           // metallic
+    });
+
+    // ---- scroll area -------------------------------------------------------
+    capture(dir, "scroll", 480, 240, [](Context&, Column& root) {
+        auto& scroll = root.add<ScrollArea>();
+        for (int i = 1; i <= 12; ++i)
+            scroll.add<Label>("Item " + std::to_string(i) +
+                              " — laid out, painted and clipped on the CPU");
+    });
+
+    // ---- file browser (a Dialog on the shell layer, over real directories) -
+    capture(dir, "browser", 520, 380, [](Context& ctx, Column& root) {
+        root.add<Label>("Pick a scene file…");
+        auto fb = std::make_unique<FileBrowser>(FileBrowser::Mode::Open);
+        fb->set_path("examples");
+        ctx.open_dialog(std::move(fb));
+    });
+
+    // ---- context menu: set_context_menu + opened as a borrowed popup -------
+    capture(dir, "contextmenu", 520, 300, [](Context& ctx, Column& root) {
+        auto& bar = root.add<MenuBar>();
+        auto& view = bar.add_menu("View");
+        view.add_item("Zoom In", [] {}, "Ctrl+=");
+        view.add_item("Zoom Out", [] {}, "Ctrl+-");
+        view.add_separator();
+        view.add_checkable("Grid", [] { return true; }, [] {});
+        auto& viewport = root.add<Panel>();
+        viewport.set_padding(12);
+        viewport.add<Label>("Right-click the viewport for the View menu");
+        viewport.set_context_menu(&view);
+        ctx.open_context_menu(view, {140.f, 150.f});
+    });
+
+    // ---- shells, one widget per capture -----------------------------------
+    capture(dir, "dialog", 520, 320, [](Context& ctx, Column& root) {
+        root.add<Label>("Scene hierarchy");
+        auto& panel = root.add<Panel>();
+        panel.set_padding(12).set_gap(8);
+        panel.add<Checkbox>("Show grid", true);
+        panel.add<Slider>(0.f, 1.f);
+        auto mb = std::make_unique<MessageBox>("Delete", "Remove 'dragon.obj'?");
+        mb->set_modal(true);
+        mb->add_button("Delete", nullptr);
+        mb->add_button("Cancel", nullptr);
+        ctx.open_dialog(std::move(mb));
+    });
+
+    capture(dir, "toast", 480, 220, [](Context& ctx, Column& root) {
+        root.add<Label>("Rendering finished.");
+        auto toast = std::make_unique<Toast>("Screenshot saved");
+        toast->set_icon(Icon::Camera);
+        ctx.push_toast(std::move(toast), 60.0);
+    });
+
+    capture(dir, "groupbox", 480, 200, [](Context&, Column& root) {
+        auto& gb = root.add<GroupBox>("Light");
+        gb.add<Checkbox>("Enabled", true);
+        gb.add<Slider>(0.f, 1.f);
+    });
+
+    capture(dir, "searchbox", 480, 140, [](Context&, Column& root) {
+        root.add<SearchBox>().set_placeholder("Search assets…");
+    });
+
+    capture(dir, "logview", 560, 260, [](Context&, Column& root) {
+        auto& log = root.add<LogView>();
+        log.log(LogView::Level::Info, "loaded scene.dragon (24 ms)");
+        log.log(LogView::Level::Warning, "missing texture: bark_d");
+        log.log(LogView::Level::Error, "shader compile failed");
+        log.log(LogView::Level::Success, "thumbnail bake complete");
+    });
+
+    capture(dir, "statusbar", 480, 180, [](Context&, Column& root) {
+        root.add<Label>("Workspace");
+        root.add<StatusBar>().set_text("60 fps · 1,440 objects");
+    });
+
+    capture(dir, "imageviews", 560, 220, [](Context&, Column& root) {
+        auto grad = gradient_rgba();
+        std::vector<std::uint8_t> grad2 = grad;
+        for (std::size_t i = 0; i < grad2.size(); i += 4)
+            std::swap(grad2[i], grad2[i + 2]);
+        auto& views = root.add<Row>();
+        views.set_gap(10);
+        views.add<ImageView>().set_pixels(64, 48, grad.data());
+        auto& cv = views.add<CompareView>();
+        cv.set_pixels_a(64, 48, grad.data());
+        cv.set_pixels_b(64, 48, grad2.data());
+        cv.set_fraction(.62f);
+    });
+
+    // ---- custom widget: the C++ twin of python/examples/custom_widget.py ---
+    capture(dir, "custom_cpp", 340, 150, [](Context& ctx, Column& root) {
+        root.set_padding(16).set_gap(8);
+        root.add<Label>("Custom widget").set_font_size(26);
+        root.add<Label>("Meter is a C++ class subclassing slikui::Widget")
+            .set_color(ctx.theme().text_dim);
+        root.add<Meter>(0.4f);
+        root.add<Label>("Click the bar to scrub it")
+            .set_color(ctx.theme().text_dim);
+    });
+
+    // ---- custom theme: the preset card with a two-line override ------------
+    {
+        Theme t = theme_presets().front().make();
+        t.accent = Color::from_hex(0xE060B0);
+        t.radius = 4.f;
+        auto card = render_section(
+            310, 150,
+            [](Context&, Column& root) {
+                root.add<Label>("Your brand").set_font_size(16);
+                auto& r1 = root.add<Row>();
+                r1.set_gap(8);
+                r1.add<Button>("Primary").set_variant(Button::Variant::Primary);
+                r1.add<Button>("Ghost").set_variant(Button::Variant::Ghost);
+                auto& r2 = root.add<Row>();
+                r2.set_gap(12);
+                r2.add<Checkbox>("Snap", true);
+                r2.add<Radio>("Wi-Fi", true);
+                r2.add<Switch>().set_checked(true);
+            },
+            {}, false, &t, 14.f, 10.f);
+        dump_buffer((std::string(dir) + "/themecustom.ppm").c_str(), card);
+    }
 
     // ---- theme presets: one card per built-in palette -------------------
     {

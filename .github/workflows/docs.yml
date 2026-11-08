@@ -1,0 +1,59 @@
+name: docs
+
+# Builds the MkDocs Material site and deploys it to GitHub Pages on every
+# push to main. The C++ side is only parsed (tools/doc_check.py), never
+# compiled — docs CI stays fast and needs no toolchain.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'include/**'
+      - 'python/**'
+      - 'examples/**'
+      - 'tools/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - 'README.md'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install toolchain
+        run: python -m pip install -r requirements-docs.txt
+
+      # Fails the build when docs drift from the headers / python exports.
+      - name: docs consistency check
+        run: python tools/doc_check.py
+
+      - name: build site
+        run: mkdocs build --strict
+        env:
+          NO_MKDOCS_2_WARNING: '1'
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v4
