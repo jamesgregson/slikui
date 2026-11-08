@@ -678,7 +678,10 @@ NB_MODULE(_slikui, m) {
         .def("__repr__", [](const Event& e) {
             using T = Event::Type;
             auto enum_name = [](auto v) {
-                return std::string(nb::str(nb::cast(v).attr("name")).c_str());
+                // nb::cast<std::string> on an explicit nb::object: building
+                // nb::str straight from the attr accessor is ambiguous on MSVC.
+                nb::object name = nb::cast(v).attr("name");
+                return nb::cast<std::string>(name);
             };
             std::string out = "Event(" + enum_name(e.type);
             auto pos = [&] { out += " pos=(" + fmt_float(e.pos.x) + ", " + fmt_float(e.pos.y) + ")"; };
