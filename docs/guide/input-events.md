@@ -56,6 +56,32 @@ exactly these constructors through the real dispatch path](../images/views.png)
    every subsequent move/release (drag interactions) and must
    `release_mouse` when done.
 
+## Watching events: the shipped EventProbe demo
+
+`slikui.examples.events` is a custom widget whose whole job is narrating
+every event it receives into a LogView — hover, click, drag, scroll,
+right-click context menu, focus-routed keys and text, and a manual
+double-click detector (slikui events carry no timestamps; the probe times
+press pairs against the tick clock). Its `--smoke` pass drives the whole
+vocabulary synthetically and asserts each event arrives exactly where the
+routing rules above say it should. The probe itself is plain Python:
+
+--8<-- "includes/examples/eventprobe.md"
+
+Two contract facts the demo teaches the hard way:
+
+- **KeyRelease is not dispatched** today — `Context::handle` drops it
+  (presses, text and shortcuts route; releases don't), so key-up-driven
+  widgets must plan around it.
+- **No mouse capture in the Python bindings yet** (the C++ `capture_mouse`
+  above has no trampoline) — moves and releases outside a widget's bounds
+  are never delivered, so a drag ends when the pointer leaves and a lost
+  release must be handled defensively; the probe logs a warning when a
+  press arrives while it is still "dragging".
+
+Run it: `python -m slikui.examples.events` (headless screenshot) or
+`--smoke` for the scripted pass.
+
 ## Menus, context menus and shortcuts
 
 `MenuBar`/`Menu` are built once and opened as borrowed popups; any widget can

@@ -126,6 +126,8 @@ Python state lives in ordinary instance attributes.
 - Callbacks into Python must outlive the tree: `App.close()` (context manager
   exit, `atexit`) releases them; see
   [Python bindings](../reference/python-bindings.md).
-- The full worked example lives at `python/examples/custom_widget.py`
-  (run it — it writes `docs/images/custom_widget.png`, the image above) and
-  the interactive twin in `python/examples/showcase.py`.
+- The full worked example ships in the wheel: `slikui/examples/paint.py`
+  (run `python -m slikui.examples.paint --docs-image custom_widget
+  docs/images/custom_widget.png` to regenerate the image above; the demo
+  page has Sparkline, RadialGauge, ClockFace and a layout-bounds wrapper
+  beside the Meter). The interactive twin is `python/examples/showcase.py`.

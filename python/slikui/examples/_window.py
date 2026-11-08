@@ -1,0 +1,193 @@
+"""Shared GLFW host for the shipped examples' ``--window`` mode.
+
+Port of the repo-only showcase's live loop. GLFW callbacks are translated
+into ``slikui`` events and fed to the app; the core renders into its numpy
+framebuffer and we blit that premultiplied onto a fullscreen quad each
+frame. Needs the optional ``demo`` extra:
+
+    pip install slikui-python[demo]
+
+Examples stay headless by default — this module is imported lazily, so
+``import slikui.examples.hello`` never pulls in glfw or PyOpenGL.
+"""
+
+import numpy as np
+
+import slikui
+
+_BLIT_VS = """
+#version 330 core
+layout(location=0) in vec2 a_pos;
+layout(location=1) in vec2 a_uv;
+out vec2 v_uv;
+void main(){ v_uv=a_uv; gl_Position=vec4(a_pos,0,1); }
+"""
+
+_BLIT_FS = """
+#version 330 core
+in vec2 v_uv;
+uniform sampler2D u_tex;
+out vec4 frag;
+void main(){ frag = texture(u_tex, v_uv); }
+"""
+
+_KEY_MAP = {
+    256: slikui.Key.Escape, 257: slikui.Key.Enter, 258: slikui.Key.Tab,
+    259: slikui.Key.Backspace, 261: slikui.Key.Delete, 32: slikui.Key.Space,
+    262: slikui.Key.Right, 263: slikui.Key.Left, 264: slikui.Key.Down,
+    265: slikui.Key.Up, 268: slikui.Key.Home, 269: slikui.Key.End,
+    266: slikui.Key.PageUp, 267: slikui.Key.PageDown,
+}
+_BUTTON_MAP = {0: slikui.MouseButton.MouseLeft,
+               1: slikui.MouseButton.MouseMiddle,
+               2: slikui.MouseButton.MouseRight}
+
+# Cap window height so tall trees (gallery) still open on a laptop; the
+# tree scrolls if it is taller than the window.
+_MAX_W, _MAX_H = 900.0, 720.0
+
+
+def run(name, size, build, scale=1.0):
+    """Open a live window for ``build(app)`` at logical ``size``."""
+    import glfw
+    from OpenGL import GL
+
+    def compile_shader(kind, src):
+        sh = GL.glCreateShader(kind)
+        GL.glShaderSource(sh, src)
+        GL.glCompileShader(sh)
+        if not GL.glGetShaderiv(sh, GL.GL_COMPILE_STATUS):
+            raise RuntimeError(GL.glGetShaderInfoLog(sh).decode())
+        return sh
+
+    def build_program(vs_src, fs_src):
+        prog = GL.glCreateProgram()
+        for kind, src in ((GL.GL_VERTEX_SHADER, vs_src),
+                          (GL.GL_FRAGMENT_SHADER, fs_src)):
+            sh = compile_shader(kind, src)
+            GL.glAttachShader(prog, sh)
+            GL.glDeleteShader(sh)
+        GL.glLinkProgram(prog)
+        if not GL.glGetProgramiv(prog, GL.GL_LINK_STATUS):
+            raise RuntimeError(GL.glGetProgramInfoLog(prog).decode())
+        return prog
+
+    lw, lh = size
+    w_px = min(lw * scale, _MAX_W)
+    h_px = min(lh * scale, _MAX_H)
+
+    if not glfw.init():
+        raise SystemExit("glfw.init failed")
+    glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
+    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+    glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+    try:  # macOS needs forward compatibility for 3.3 core
+        glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
+    except Exception:
+        pass
+    win = glfw.create_window(int(w_px), int(h_px), f"slikui example: {name}",
+                             None, None)
+    if not win:
+        glfw.terminate()
+        raise SystemExit("could not create GLFW window")
+    glfw.make_context_current(win)
+    glfw.set_window_size_limits(win, 320, 240, glfw.DONT_CARE, glfw.DONT_CARE)
+
+    # Blit program + fullscreen quad.
+    prog = build_program(_BLIT_VS, _BLIT_FS)
+    u_tex = GL.glGetUniformLocation(prog, "u_tex")
+    vao = GL.glGenVertexArrays(1)
+    GL.glBindVertexArray(vao)
+    quad_pos = np.array([-1, 1, 1, 1, -1, -1, 1, 1, 1, -1, -1, -1], np.float32)
+    quad_uv = np.array([0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1], np.float32)
+    for loc, data in ((0, quad_pos), (1, quad_uv)):
+        buf = GL.glGenBuffers(1)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_STATIC_DRAW)
+        GL.glEnableVertexAttribArray(loc)
+        GL.glVertexAttribPointer(loc, 2, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
+    tex = GL.glGenTextures(1)
+    GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+    tex_size = [0, 0]
+
+    app = slikui.App(int(lw), int(lh))
+    build(app)
+
+    def on_button(_w, button, action, _mods):
+        x, y = glfw.get_cursor_pos(win)
+        if button not in _BUTTON_MAP:
+            return
+        if action == glfw.PRESS:
+            app.handle(slikui.mouse_press((x, y), _BUTTON_MAP[button]))
+        elif action == glfw.RELEASE:
+            app.handle(slikui.mouse_release((x, y), _BUTTON_MAP[button]))
+
+    def on_cursor(_w, x, y):
+        app.handle(slikui.mouse_move((x, y)))
+
+    def on_scroll(_w, _xoff, yoff):
+        x, y = glfw.get_cursor_pos(win)
+        app.handle(slikui.scroll((x, y), (0.0, yoff)))
+
+    def on_key(_w, key, _sc, action, mods):
+        if key not in _KEY_MAP:
+            return
+        if action == glfw.PRESS:
+            app.handle(slikui.key_press(_KEY_MAP[key], mods))
+        elif action == glfw.RELEASE:
+            app.handle(slikui.key_release(_KEY_MAP[key], mods))
+
+    def on_char(_w, cp):
+        app.handle(slikui.text_input(chr(cp)))
+
+    glfw.set_mouse_button_callback(win, on_button)
+    glfw.set_cursor_pos_callback(win, on_cursor)
+    glfw.set_scroll_callback(win, on_scroll)
+    glfw.set_key_callback(win, on_key)
+    glfw.set_char_callback(win, on_char)
+
+    import time as _time
+    last = _time.perf_counter()
+    while not glfw.window_should_close(win):
+        glfw.poll_events()
+        fw, fh = glfw.get_framebuffer_size(win)
+        ww, wh = glfw.get_window_size(win)
+        if (fw, fh) != (app.target.width, app.target.height):
+            app.target.resize(fw, fh)
+        ui_scale = fw / ww if ww > 0 else 1.0
+        app.ctx.theme.scale = ui_scale
+        app.sink.set_scale(ui_scale)
+        app.ctx.set_frame_size(float(ww), float(wh))  # logical points
+
+        now = _time.perf_counter()
+        dt = min(now - last, 0.05)
+        last = now
+        app.tick(now, dt)
+
+        GL.glViewport(0, 0, fw, fh)
+        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        pix = app.render()  # (H, W) uint32 ABGR
+        hh, wwd = pix.shape
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)  # premultiplied
+        GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
+        if tex_size[0] != wwd or tex_size[1] != hh:
+            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, wwd, hh, 0,
+                            GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None)
+            tex_size[:] = [wwd, hh]
+        GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0, wwd, hh, GL.GL_RGBA,
+                           GL.GL_UNSIGNED_BYTE, pix.view(np.uint8))
+        GL.glUseProgram(prog)
+        GL.glUniform1i(u_tex, 0)
+        GL.glBindVertexArray(vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+        GL.glDisable(GL.GL_BLEND)
+        glfw.swap_buffers(win)
+
+    glfw.destroy_window(win)
+    app.close()  # release UI callbacks while the interpreter is alive
+    glfw.terminate()
+    return 0

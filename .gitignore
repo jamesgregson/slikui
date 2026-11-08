@@ -13,3 +13,6 @@ shots/
 hello_raw.ppm
 .venv-asan/
 site/
+
+# default output of `python -m slikui.examples --smoke all`
+slikui-examples-out/

@@ -9,6 +9,8 @@ verifies:
   2. every `slikui::Name` mentioned in the docs is a real C++ name;
   3. every `slikui.name` mentioned in the docs is exported by the python
      package's __all__;
+  3b. every `slikui.examples.<name>` mentioned in the docs names a real
+     shipped example module (python/slikui/examples/<name>.py);
   4. every image referenced from the docs exists (orphans are reported
      as notes, not errors).
 
@@ -49,7 +51,14 @@ CPP_EXTRAS = {
 
 # Python-side modules referenced by name in prose (not part of __all__)
 # plus non-python tokens the dotted regex happens to catch ("slikui.hpp").
-PY_INTERNAL = {"_slikui", "_py", "hpp"}
+PY_INTERNAL = {"_slikui", "_py", "hpp", "examples"}
+
+EXAMPLES_DIR = ROOT / "python" / "slikui" / "examples"
+
+
+def example_modules() -> set[str]:
+    """Shipped example module names: python/slikui/examples/*.py."""
+    return {p.stem for p in sorted(EXAMPLES_DIR.glob("*.py")) if p.stem != "__main__"}
 
 
 def cpp_classes() -> set[str]:
@@ -105,7 +114,43 @@ def main() -> int:
                 f"slikui.{m} is used in the docs but not exported — "
                 f"add it to python/slikui/__init__.py __all__ or fix the name")
 
-    # 4. images.
+    # 3b. shipped example modules: `python -m slikui.examples.<name>`.
+    ex_modules = example_modules()
+    for m in sorted(set(re.findall(r"slikui\.examples\.(\w+)", docs_text))):
+        if m not in ex_modules:
+            errors.append(
+                f"unknown shipped example in docs: slikui.examples.{m} "
+                f"(known: {', '.join(sorted(ex_modules)) or 'none yet'})")
+
+    # 4. snippet includes — docs quote extracted regions of the shipped
+    #    examples (tools/extract_snippets.py); a target must exist and name a
+    #    source whose # doc: markers are still live.
+    include_re = re.compile(r'--8<--\s*"([^"]+)"')
+    src_head = re.compile(r"<!--\s*source:\s*(\S+?)#([\w-]+)")
+    for p in sorted(DOCS.rglob("*.md")):
+        for m in include_re.finditer(p.read_text()):
+            target = DOCS / m.group(1)
+            if not target.exists():
+                errors.append(
+                    f"missing snippet include: {m.group(1)} "
+                    f"(referenced from {p.relative_to(DOCS)}; "
+                    f"run tools/extract_snippets.py)")
+                continue
+            head = src_head.match(target.read_text())
+            if not head:
+                errors.append(
+                    f"snippet include without source header: {m.group(1)}")
+                continue
+            source = ROOT / head.group(1)
+            text = source.read_text() if source.exists() else ""
+            if (f"# doc: {head.group(2)}" not in text
+                    or "# doc: end" not in text):
+                errors.append(
+                    f"snippet source stale: {head.group(1)}#{head.group(2)} "
+                    f"— markers missing (referenced from "
+                    f"{p.relative_to(DOCS)})")
+
+    # 5. images.
     referenced: set[str] = set()
     for p in sorted(DOCS.rglob("*.md")):
         for m in re.finditer(r"!\[[^\]]*\]\(([^)\s]+)\)", p.read_text()):
@@ -129,8 +174,11 @@ def main() -> int:
         for e in errors:
             print("  -", e)
         return 1
+    includes = sum(1 for _ in (DOCS / "includes" / "examples").glob("*.md")) \
+        if (DOCS / "includes" / "examples").exists() else 0
     print(f"doc_check: OK — {len(classes)} classes, {len(exports)} python "
-          f"exports, {len(referenced)} image references")
+          f"exports, {len(referenced)} image references, "
+          f"{includes} snippet includes")
     return 0
 
 

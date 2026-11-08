@@ -248,7 +248,8 @@ the MessageBox dialog and posts a toast, so both appear over the panel:
 === "Python"
 
     ```python
-    grad, grad_rb = ...  # small RGBA gradients — see python/examples/gallery.py
+    grad, grad_rb = ...  # small RGBA gradients — see slikui/examples/gallery.py
+                         # (python -m slikui.examples.gallery)
 
     top = root.add(slikui.Row, gap=10)
     left = top.add(slikui.Column, gap=8)
