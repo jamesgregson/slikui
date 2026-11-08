@@ -7,6 +7,7 @@
 #include "slikui/text/default_font.hpp"
 #include "slikui/widgets/all.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 
@@ -43,12 +44,16 @@ struct Fixture {
         return target.data()[std::size_t(py) * target.width() + std::size_t(px)];
     }
     // Count pixels in a rect that pass a channel predicate (packed R|G<<8).
+    // The target is 1x; the rect is clamped to it.
     int count_ink(const slikui::Rect& r,
                   const std::function<bool(std::uint32_t)>& pred) const {
+        const int W = target.width(), H = target.height();
+        const int x0 = std::max(0, int(r.x)), x1 = std::min(W, int(r.right()));
+        const int y0 = std::max(0, int(r.y)), y1 = std::min(H, int(r.bottom()));
         int n = 0;
-        for (int py = int(r.y * 2); py < int(r.bottom() * 2); ++py)
-            for (int px = int(r.x * 2); px < int(r.right() * 2); ++px)
-                if (pred(target.data()[std::size_t(py) * target.width() +
+        for (int py = y0; py < y1; ++py)
+            for (int px = x0; px < x1; ++px)
+                if (pred(target.data()[std::size_t(py) * std::size_t(W) +
                                      std::size_t(px)]))
                     ++n;
         return n;
@@ -251,4 +256,23 @@ TEST(propertygrid_rows_and_sections) {
     float h_open_all = grid.bounds.h;
     (void)h_open_all;
     CHECK(grid.bounds.h >= 3 * 24.f); // at least the visible rows
+}
+
+// ---------------------------------------------------------------------------
+// Glyphs first rasterized during paint appear in that same frame
+// ---------------------------------------------------------------------------
+TEST(text_laid_out_in_paint_shows_on_first_frame) {
+    // Slider lays out its label/value text in paint(); the atlas used to be
+    // uploaded before painting, so those glyphs were missing for a frame
+    // (and the value text vanished on every frame that showed new digits).
+    Fixture f;
+    REQUIRE(f.has_font);
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& s = root.add<slikui::Slider>(0.f, 100.f);
+    s.set_value(25.f).set_label("volume").set_format("%.0f");
+    f.frame(); // exactly one frame
+    const slikui::Color bg = f.ctx.theme().background;
+    auto ink = [&](std::uint32_t p) { return slikui::Color::from_abgr(p) != bg; };
+    slikui::Rect text_row{s.bounds.x, s.bounds.y, s.bounds.w, 14};
+    CHECK(f.count_ink(text_row, ink) > 30);
 }

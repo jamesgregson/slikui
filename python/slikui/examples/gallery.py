@@ -1,25 +1,31 @@
-"""Full-surface gallery rendered headless via the Python bindings.
+"""02 — Widget gallery: the whole set in one headless surface.
 
-Writes gallery.png next to this file.
+Same tree as the repo's development gallery, now shipped inside the wheel.
+Run:
+
+    python -m slikui.examples.gallery           # writes ./gallery.png (scale 2)
+    python -m slikui.examples.gallery --smoke   # clicks through a few widgets
 """
-
-import os
 
 import numpy as np
 
 import slikui
-from slikui._py.pixels import save_image
+from slikui.examples import _support
+
+NAME = "gallery"
+SIZE = (320, 1340)
+SCALE = 2.0
+
+MUTED = 0x8A94A0
 
 
-def main():
-    ui = slikui.App(320, 1340, scale=2)
-    root = ui.set_root(slikui.Column, padding=14, gap=8)
+def build(app):
+    root = app.set_root(slikui.Column, padding=14, gap=8)
 
-    # header + menu bar + toolbar (Phase B)
+    # header + menu bar + toolbar
     root.add(slikui.Label, "slikui — widget gallery", font_size=22)
-    root.add(slikui.Label, "Python bindings · software backend").set_color(
-        slikui.Color.from_hex(0x8A94A0)
-    )
+    root.add(slikui.Label, "Python bindings · software backend") \
+        .set_color(slikui.Color.from_hex(MUTED))
     bar = root.add(slikui.MenuBar)
     file = bar.add_menu("File")
     file.add_item("Open…", lambda: None, hint="Ctrl+O")
@@ -46,13 +52,13 @@ def main():
     row.add(slikui.Checkbox, "Sync", checked=True)
     row.add(slikui.Radio, "Wi-Fi", checked=True)
     row.add(slikui.Radio, "Ethernet")
-    row.add(slikui.Switch, checked=True)
+    switch = row.add(slikui.Switch, checked=True)
 
     # sliders / progress / spinner
-    root.add(slikui.Slider, 0, 100, value=62)
+    slider = root.add(slikui.Slider, 0, 100, value=62)
     root.add(slikui.ProgressBar, value=0.72)
     sp_row = root.add(slikui.Row, gap=8)
-    sp_row.add(slikui.Label, "Working…").set_color(slikui.Color.from_hex(0x8A94A0))
+    sp_row.add(slikui.Label, "Working…").set_color(slikui.Color.from_hex(MUTED))
     sp_row.add(slikui.Spacer)
     sp_row.add(slikui.Spinner, speed=240)
 
@@ -72,7 +78,7 @@ def main():
     colors.add(slikui.ColorEdit, slikui.Color.from_hex(0x46A758))
     root.add(slikui.Slider, 0, 1, value=0.35, label="Roughness", format="%.2f")
 
-    # views + data display (Phase C)
+    # views + data display
     data_row = root.add(slikui.Row, gap=10)
     pc = data_row.add(slikui.Column, gap=8)
     plot = pc.add(slikui.Plot)
@@ -87,10 +93,10 @@ def main():
     ])
     root.add(slikui.ListView, items=["alpha", "beta", "gamma", "delta"], selected=1)
     root.add(slikui.Tabs, tabs=["Home", "Edits", "View"], selected=1)
-    root.add(slikui.Dropdown, items=["Linear", "Nearest", "Cubic", "Lanczos"],
-             placeholder="Filter…")
+    dropdown = root.add(slikui.Dropdown, items=["Linear", "Nearest", "Cubic", "Lanczos"],
+                        placeholder="Filter…")
 
-    # shells (Phase D): dialog layer, toast, group box, search, log view
+    # shells: dialog layer, toast, group box, search, log view
     shells_row = root.add(slikui.Row, gap=10)
     sleft = shells_row.add(slikui.Column, gap=8)
     gb = sleft.add(slikui.GroupBox, "Light")
@@ -101,11 +107,9 @@ def main():
     shells_log.log(slikui.LogView.Level.Info, "loaded scene.dragon (24 ms)")
     shells_log.log(slikui.LogView.Level.Warning, "missing texture: bark_d")
     shells_log.log(slikui.LogView.Level.Error, "shader compile failed")
-    mb = slikui.MessageBox("Export", "Render 128 frames at 4K?")
-    mb.add_button("Export", lambda: None)
-    mb.add_button("Cancel", lambda: None)
-    ui.ctx.open_dialog(mb)
-    ui.ctx.push_toast("Screenshot saved", 60.0)
+    # Note: no modal dialog / toast here — they sit on the popup stack and
+    # would sit under every smoke click for their lifetime (showcase covers
+    # dialogs and toasts properly).
 
     # accordion (Expander groups)
     acc = root.add(slikui.Accordion, gap=4)
@@ -129,19 +133,52 @@ def main():
     grad[..., 2] = ramp[::-1]
     grad[..., 3] = 255
     panel.add(slikui.Image, "gradient").set_pixels(grad).set_size(180, 28).set_fit(
-        slikui.ImageFit.Stretch
-    )
+        slikui.ImageFit.Stretch)
 
-    ui.tick(0.0, 1 / 60)
-    ui.render()  # frame 1: glyph atlas uploads what measure() cached
-    for i in range(1, 4):
-        ui.tick(i / 60, 1 / 60)
-    frame = ui.render()  # frame 4: atlas settled — every glyph present
+    return _support.State(root=root, switch=switch, slider=slider,
+                          dropdown=dropdown)
 
-    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gallery.png")
-    save_image(frame, out)
-    print(f"wrote {out} ({frame.shape[1]}x{frame.shape[0]})")
+
+def smoke(app, state, session, log):
+    c = _support.Checks(log)
+    session.advance(2)
+
+    # dropdown: click opens the popup, Escape closes it
+    b = state.dropdown.bounds
+    _support.click(app, (b.x + b.w / 2, b.y + b.h / 2))
+    session.advance(2)
+    c.ok(app.ctx.popup_count == 1, "dropdown popup opened")
+    app.handle(slikui.key_press(slikui.Key.Escape))
+    session.advance(2)
+    c.ok(app.ctx.popup_count == 0, "escape closed the popup")
+
+    # switch: a click flips it
+    b = state.switch.bounds
+    _support.click(app, (b.x + b.w / 2, b.y + b.h / 2))
+    session.advance(2)
+    c.ok(state.switch.checked is False, "switch toggled off by click")
+
+    # slider: drag right of center scrubs the value
+    b = state.slider.bounds
+    y = b.y + b.h / 2
+    _support.drag(app, (b.x + b.w * 0.5, y), (b.x + b.w * 0.9, y))
+    session.advance(2)
+    c.ok(state.slider.value > 70.0, f"slider scrubbed to {state.slider.value:.0f}")
+
+    session.advance(4)  # glyph atlas fully settled for the final frame
+    return {"popup": True, "switch": state.switch.checked,
+            "slider": round(state.slider.value, 1)}
+
+
+def interactive():
+    from slikui.examples import _window
+    return _window.run(NAME, SIZE, build, scale=SCALE)
+
+
+def main(argv=None):
+    return _support.main_entry(name=NAME, size=SIZE, build=build, smoke=smoke,
+                               interactive=interactive, scale=SCALE, argv=argv)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -466,3 +466,53 @@ TEST(shortcut_label_format) {
 #endif
     CHECK(slikui::shortcut_label(slikui::Key::F5, 0) == "F5");
 }
+
+TEST(shortcut_label_spells_out_symbols_the_font_lacks) {
+    // An invalid font has no glyphs: every symbol is spelled out, on every
+    // platform, and plain text passes through.
+    slikui::text::Font none;
+    CHECK(slikui::fit_shortcut_label(none, "⌃⇧S") == "Ctrl+Shift+S");
+    CHECK(slikui::fit_shortcut_label(none, "⌘⌥←") == "Cmd+Alt+Left");
+    CHECK(slikui::fit_shortcut_label(none, "Ctrl+S") == "Ctrl+S");
+    CHECK(slikui::shortcut_label(slikui::Key::Up, slikui::ModAlt, none) ==
+          slikui::fit_shortcut_label(none, slikui::shortcut_label(slikui::Key::Up,
+                                                                  slikui::ModAlt)));
+
+    // With the bundled font: whatever survives, the font can draw.
+    slikui::text::Font f;
+    REQUIRE(f.load_memory(slikui::text::default_font_data(),
+                          slikui::text::default_font_size()));
+    CHECK(f.has_glyph('S'));
+    for (const char* in : {"⌘⌃⌥⇧S", "←→↑↓"}) {
+        std::string out = slikui::fit_shortcut_label(f, in);
+        for (std::size_t i = 0; i < out.size();) {
+            unsigned char c = (unsigned char)out[i];
+            std::uint32_t cp = c;
+            int n = 1;
+            if (c >= 0xE0) { cp = c & 0x0F; n = 3; }
+            else if (c >= 0xC0) { cp = c & 0x1F; n = 2; }
+            for (int k = 1; k < n; ++k) cp = (cp << 6) | ((unsigned char)out[i + k] & 0x3F);
+            CHECK(f.has_glyph(cp));
+            i += std::size_t(n);
+        }
+    }
+}
+
+TEST(menu_item_hint_spells_out_missing_symbols) {
+    Fixture f;
+    // Measure the same item with a symbol hint and its spelled-out form:
+    // whatever the font lacks becomes text, so the widths match exactly
+    // when the font has no ⌃ (and the symbol form is narrower when it does).
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& m1 = root.add<slikui::Menu>();
+    m1.add_item("Reset", [] {}, "⌃R");
+    auto& m2 = root.add<slikui::Menu>();
+    m2.add_item("Reset", [] {}, "Ctrl+R");
+    f.frame();
+    const float w1 = m1.measure(slikui::Constraints::loose()).w;
+    const float w2 = m2.measure(slikui::Constraints::loose()).w;
+    if (!f.ctx.font().has_glyph(0x2303))
+        CHECK(w1 == w2);
+    else
+        CHECK(w1 < w2);
+}

@@ -58,7 +58,8 @@ The C++ side is header-only, nothing to link:
 ```sh
 pip install -e .                  # editable, into your venv — from the repo root
 python -m pytest python/tests     # widgets, events, custom widgets, renderer parity
-python python/examples/hello.py   # writes hello.png
+python -m slikui.examples.hello   # shipped demos: writes hello.png in CWD
+python -m slikui.examples --list  # the whole shipped suite
 ```
 
 Interactive demos (optional deps): `pip install glfw PyOpenGL`, then
@@ -67,8 +68,31 @@ a GL scene — and `python python/examples/showcase.py` (every widget live;
 `--smoke out.png` runs it headless and its transcript is byte-identical to
 the C++ twin's).
 
+The shipped suite has a live mode too: add `--window` to any example and the
+same demo opens in a real GLFW window with mouse and keyboard wired through
+the real event dispatch path — nothing about the headless modes changes.
+
+```sh
+pip install "slikui-python[demo]"           # glfw + PyOpenGL (quotes matter in zsh)
+python -m slikui.examples.hello --window
+python -m slikui.examples.gallery --window   # scrolls; click around
+python -m slikui.examples.events --window    # the probe logs your input live
+python -m slikui.examples.paint --window     # scrub the meter, toggle, watch it run
+python -m slikui.examples.controls --window  # knob, XY pad, joystick
+python -m slikui.examples.keyboard --window  # focus tour and Snake
+python -m slikui.examples.window --window    # a small live app
+```
+
+All eight, with screenshots: [Python examples](../guide/examples.md).
+
+The window host is a thin translation layer (GLFW callbacks → `slikui`
+events → premultiplied blit of the core's framebuffer); the demos stay
+importable without glfw or PyOpenGL, since the host is imported lazily.
+
 ## Next
 
+- [Python examples](../guide/examples.md) — the shipped demo suite and its
+  four modes (headless, smoke, docs capture, live window)
 - [Python bindings reference](../reference/python-bindings.md) — App, events,
   your own renderer, custom widgets
 - [Widget index](../reference/index.md) — everything you can put on screen

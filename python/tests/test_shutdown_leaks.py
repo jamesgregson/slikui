@@ -80,3 +80,53 @@ def test_custom_container_subtree_released_at_close():
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr
     assert "nanobind: leaked" not in r.stderr, r.stderr
+
+
+# A custom widget that keeps references to its own descendants — the natural
+# way to write one — must not leak. Widget-returning methods used to add a
+# keep_alive edge (child wrapper -> host wrapper) that the GC cannot see, so
+# `self.slider = self.add(...)` closed an uncollectable cycle through the
+# host's __dict__. Each shape below leaked before; none may now.
+HOLDS_DESCENDANTS_SCRIPT = """\
+import slikui
+
+class Composite(slikui.Widget):
+    def __init__(self):
+        super().__init__()
+        col = self.add(slikui.Column)
+        self.slider = col.add(slikui.Slider)              # stored child
+        self.slider.on_change(self.on_slide)              # ... calling back
+        self.search = col.add(slikui.SearchBox)
+        self.field = self.search.field()                  # owned sub-widget
+        status = col.add(slikui.Label, "idle")
+        self.report = lambda v: status.set_text(f"{v}")   # closure over child
+        self.value = 0.0
+
+    def on_slide(self, v):
+        self.value = v
+        self.report(v)
+
+    def measure(self, constraints):
+        return self.children[0].measure(constraints)
+
+    def arrange(self, area):
+        self.bounds = area
+        self.children[0].arrange(area)
+
+app = slikui.App(240, 160)
+root = app.set_root(slikui.Column)
+c = root.add(Composite)
+app.tick(0.0, 1 / 60)
+app.render()
+c.slider.set_value(0.5)
+c.on_slide(0.5)
+assert c.value == 0.5
+app.close()
+"""
+
+
+def test_custom_widget_holding_its_descendants_is_released():
+    r = subprocess.run([sys.executable, "-c", HOLDS_DESCENDANTS_SCRIPT],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert "nanobind: leaked" not in r.stderr, r.stderr

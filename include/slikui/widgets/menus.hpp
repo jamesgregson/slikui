@@ -17,6 +17,7 @@
 #include "slikui/widgets/widget.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -26,6 +27,8 @@ namespace slikui {
 
 // Human-readable shortcut hint for menus and tooltips: "Ctrl+Shift+S"
 // ("⌘⇧S" on Apple). Complements Context::add_shortcut, which fires actions.
+// The symbols need font support: pass the font (or let MenuItem do it) to
+// get the text form wherever a symbol is missing.
 inline std::string shortcut_label(Key key, unsigned mods) {
     std::string out;
 #if defined(__APPLE__)
@@ -65,6 +68,46 @@ inline std::string shortcut_label(Key key, unsigned mods) {
         break;
     }
     return out;
+}
+
+// `label` with the shortcut symbols `font` cannot draw spelled out, so hints
+// never render as missing-glyph boxes. Modifier symbols switch together
+// ("⌃⇧S" → "Ctrl+Shift+S", never "⌃Shift+S"); arrows individually
+// ("←" → "Left").
+inline std::string fit_shortcut_label(const text::Font& font, std::string label) {
+    struct Sub {
+        std::uint32_t cp;
+        const char* utf8;
+        const char* text;
+    };
+    static constexpr Sub mods[] = {{0x2318, "⌘", "Cmd+"},
+                                   {0x2303, "⌃", "Ctrl+"},
+                                   {0x2325, "⌥", "Alt+"},
+                                   {0x21E7, "⇧", "Shift+"}};
+    static constexpr Sub arrows[] = {{0x2190, "←", "Left"},
+                                     {0x2192, "→", "Right"},
+                                     {0x2191, "↑", "Up"},
+                                     {0x2193, "↓", "Down"}};
+    auto replace_all = [&label](const Sub& s) {
+        const std::size_t n = std::strlen(s.utf8);
+        for (std::size_t at = label.find(s.utf8); at != std::string::npos;
+             at = label.find(s.utf8, at))
+            label.replace(at, n, s.text);
+    };
+    bool spell_mods = false;
+    for (const Sub& s : mods)
+        if (label.find(s.utf8) != std::string::npos && !font.has_glyph(s.cp))
+            spell_mods = true;
+    if (spell_mods)
+        for (const Sub& s : mods) replace_all(s);
+    for (const Sub& s : arrows)
+        if (!font.has_glyph(s.cp)) replace_all(s);
+    return label;
+}
+
+// shortcut_label, spelled out where `font` lacks a symbol.
+inline std::string shortcut_label(Key key, unsigned mods, const text::Font& font) {
+    return fit_shortcut_label(font, shortcut_label(key, mods));
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +186,7 @@ public:
             return false;
         }
         case Event::Type::MousePress:
-            if (!bounds.contains(e.pos)) return false;
+            if (e.button != MouseLeft || !bounds.contains(e.pos)) return false;
             if (!enabled_) return true; // swallow: disabled rows don't dismiss
             if (submenu_) {
                 if (submenu_open()) close_submenu();
@@ -180,7 +223,8 @@ private:
         const Theme& t = ctx->theme();
         lays_.label = ctx->font().layout(label_, t.s(t.base_font_px));
         if (!hint_.empty())
-            lays_.hint = ctx->font().layout(hint_, t.s(t.small_font_px));
+            lays_.hint = ctx->font().layout(fit_shortcut_label(ctx->font(), hint_),
+                                            t.s(t.small_font_px));
         valid_ = true;
     }
 
@@ -276,7 +320,7 @@ public:
             opened_item_->note_opened_from(nullptr);
             opened_item_ = nullptr;
         }
-        if (e.type == Event::Type::MousePress && ctx && opened_item_ &&
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && ctx && opened_item_ &&
             ctx->popup_open(opened_item_->submenu_) &&
             bounds.contains(e.pos)) {
             // Click on this menu's dead area (padding, separator): the open
@@ -417,7 +461,7 @@ public:
                 return false;
             }
             case Event::Type::MousePress:
-                if (bounds.contains(e.pos)) {
+                if (e.button == MouseLeft && bounds.contains(e.pos)) {
                     if (open()) ctx->close_popups();
                     else open_menu();
                     return true;

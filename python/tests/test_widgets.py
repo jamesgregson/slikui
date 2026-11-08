@@ -110,9 +110,9 @@ def test_theme_presets():
     assert t.background != slikui.Theme.dark().background
 
 
-def test_atlas_settles_by_second_frame():
-    # Glyphs cached during paint (TextField metrics) miss the first frame's
-    # atlas upload; the second render must be identical to the third.
+def test_first_frame_is_complete():
+    # Glyphs cached during paint (TextField metrics) are uploaded before the
+    # frame reaches the sink, so the first frame already matches the next.
     ui, root = make_ui()
     root.add(slikui.TextField, text="jane@example.com")
     root.add(slikui.TextArea, rows=2, text="no GPU, no window — U, j, @, x")
@@ -120,8 +120,8 @@ def test_atlas_settles_by_second_frame():
     for i in range(3):
         ui.tick(i / 60, 1 / 60)
         frames.append(ui.render().copy())
-    assert not np.array_equal(frames[0], frames[1])  # atlas regrew
-    assert np.array_equal(frames[1], frames[2])      # then stable
+    assert np.array_equal(frames[0], frames[1])
+    assert np.array_equal(frames[1], frames[2])
 
 
 def test_unknown_kwarg_raises():

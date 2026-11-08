@@ -15,6 +15,7 @@
 #include "slikui/widgets/env.hpp"
 #include "slikui/widgets/widget.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <string>
@@ -40,6 +41,14 @@ public:
     explicit Context(IRenderSink& sink) : sink_(&sink) {
         font_.set_texture_id(next_texture_id());
     }
+    // Expire the liveness token first: borrowed widgets (Menu, Dialog) that
+    // outlive this Context must not call back into it from their destructor.
+    ~Context() {
+        alive_.reset();
+        clear_tree();
+    }
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
 
     // --- configuration ---
 
@@ -106,9 +115,14 @@ public:
     // leak-free (see python/tests/test_shutdown_leaks.py). Not safe to call
     // from inside a widget callback: destruction is immediate, not deferred.
     void clear_tree() {
-        set_focus(nullptr); // widget flags while they are still alive
+        // Teardown is silent: no FocusLost/MouseLeave callbacks into widgets
+        // (or Python) that are about to be destroyed.
+        if (focused_) focused_->focused = false; // flag while still alive
+        focused_ = nullptr;
+        focus_notes_.clear();
         mouse_capture_ = nullptr;
         hover_ = nullptr;
+        reset_press_state();
         tooltip_open_ = false;
         hover_since_ = -1;
         inside_press_ = false;
@@ -125,21 +139,38 @@ public:
     // NOTE: popup destruction is deferred to the end of handle() — callbacks
     // may close the popup they're executing in.
     void handle(const Event& e) {
-        handle_event(e);
+        {
+            Busy busy(*this); // focus notifications flush when this closes
+            handle_event(e);
+        }
         closing_.clear();
     }
 
     Widget* focused() { return focused_; }
+    Widget* hovered() { return hover_; }
+
+    // Moves keyboard focus. The widget losing focus receives FocusLost and
+    // the one gaining it FocusGained (no bubbling). Notifications are queued
+    // and delivered once the Context is between operations, so a handler
+    // may itself change focus or close popups safely.
     void set_focus(Widget* w) {
         if (focused_ == w) return;
-        if (focused_) focused_->focused = false;
+        if (focused_) {
+            focused_->focused = false;
+            focus_notes_.push_back({focused_, Event::Type::FocusLost});
+        }
         focused_ = w;
-        if (focused_) focused_->focused = true;
+        if (focused_) {
+            focused_->focused = true;
+            focus_notes_.push_back({focused_, Event::Type::FocusGained});
+        }
+        if (busy_ == 0) flush_focus_notes();
     }
 
     // --- frame ---
 
     void tick(Time t) {
+        Busy busy(*this);
         now_ = t.now;
         if (!root_) return;
         attach_tree(*root_);
@@ -166,7 +197,6 @@ public:
 
     void render(bool clear = true) {
         if (!sink_) return;
-        upload_dirty_textures();
         DrawList list;
         const PaintEnv env{list, theme_, font_};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
@@ -175,6 +205,10 @@ public:
         if (Widget* modal = topmost_modal()) // dim everything under dialogs
             list.rect({0, 0, frame_.x, frame_.y}, Color::black().faded(.45f));
         for (auto& d : dialogs_) d.widget->paint_tree(env);
+        // After painting: widgets that lay out text in paint() (Slider's
+        // value) rasterize new glyphs into the atlas there, and the sink
+        // must see them this frame, not the next.
+        upload_dirty_textures();
         sink_->render(list, frame_);
     }
 
@@ -229,6 +263,7 @@ public:
     }
 
     void close_popups() {
+        Busy busy(*this);
         for (auto& p : popups_) {
             Widget* root = p.widget;
             if (focused_ && inside(focused_, root)) set_focus(nullptr);
@@ -288,6 +323,7 @@ public:
         return d;
     }
     void close_dialog(Widget& d) {
+        Busy busy(*this);
         for (size_t i = dialogs_.size(); i-- > 0;) {
             if (dialogs_[i].widget == &d) {
                 if (focused_ && inside(focused_, dialogs_[i].widget))
@@ -387,6 +423,68 @@ private:
     }
 
     void handle_event(const Event& e);
+    void handle_press(const Event& e);
+    void handle_release(const Event& e);
+
+    // Marks "inside an operation": focus notifications queue until the
+    // outermost Busy closes, then flush. Keeps widget callbacks from running
+    // while a Context loop (popups, dialogs, tick) is mid-iteration.
+    struct Busy {
+        Context& c;
+        explicit Busy(Context& ctx) : c(ctx) { ++c.busy_; }
+        ~Busy() {
+            if (--c.busy_ == 0) c.flush_focus_notes();
+        }
+        Busy(const Busy&) = delete;
+        Busy& operator=(const Busy&) = delete;
+    };
+
+    void flush_focus_notes() {
+        ++busy_; // focus changes made by handlers queue onto this same pass
+        for (size_t i = 0; i < focus_notes_.size(); ++i) {
+            FocusNote n = focus_notes_[i];
+            if (!n.widget) continue; // forgotten (destroyed) meanwhile
+            Event e{};
+            e.type = n.type;
+            n.widget->on_event(e);
+        }
+        focus_notes_.clear();
+        --busy_;
+    }
+
+    void reset_press_state() {
+        for (int b = 0; b < kButtons; ++b) {
+            press_target_[b] = nullptr;
+            swallow_release_[b] = false;
+        }
+        inside_press_ = false;
+        std::fill(key_down_.begin(), key_down_.end(), false);
+    }
+
+    // A widget is being destroyed: drop every raw pointer to it. Touches only
+    // pointer fields (never containers being cleared) — it can run from
+    // inside popups_.clear(), closing_.clear() or a dialog erase.
+    void forget(const Widget* w) noexcept {
+        if (focused_ == w) focused_ = nullptr;
+        if (mouse_capture_ == w) mouse_capture_ = nullptr;
+        if (hover_ == w) hover_ = nullptr;
+        for (auto& t : press_target_)
+            if (t == w) t = nullptr;
+        for (auto& n : focus_notes_)
+            if (n.widget == w) n.widget = nullptr;
+    }
+    friend void context_forget(Context* ctx, const Widget* w) noexcept;
+
+    static size_t key_index(Key k) { return size_t(k) & 0xFF; }
+
+    // Topmost widget under `pos`, ignoring mouse capture.
+    Widget* hit_test_uncaptured(Vec2 pos) {
+        Widget* saved = mouse_capture_;
+        mouse_capture_ = nullptr;
+        Widget* w = hit_test(pos);
+        mouse_capture_ = saved;
+        return w;
+    }
 
     void layout_popup(Popup& p) {
         Size s = p.widget->measure(Constraints::loose(frame_));
@@ -436,6 +534,7 @@ private:
         return -1;
     }
     void close_popups_above_index(long k) {
+        Busy busy(*this);
         for (long i = long(popups_.size()) - 1; i > k; --i) {
             Popup& p = popups_[size_t(i)];
             if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
@@ -451,8 +550,11 @@ private:
     }
 
     void attach_tree(Widget& w) {
-        if (w.ctx != this) {
+        // expired(): a new Context reusing a destroyed one's address must
+        // still re-attach (and hand out its own liveness token).
+        if (w.ctx != this || w.ctx_alive_.expired()) {
             w.ctx = this;
+            w.ctx_alive_ = alive_;
             w.attached(*this);
         }
         for (auto& c : w.children) attach_tree(*c);
@@ -476,14 +578,33 @@ private:
 
     // --- tooltips ---
 
+    // Hover change: MouseLeave to every widget on the old hover chain that is
+    // not on the new one (deepest first), then MouseEnter down the new chain
+    // (outermost first). Moving from a container onto its own child is not a
+    // leave. Neither event bubbles.
     void set_hover(Widget* w, Vec2 pos) {
         hover_pos_ = pos;
         if (w == hover_) return;
+        Widget* old = hover_;
         hover_ = w;
         hover_since_ = -1;
         if (tooltip_open_) {
             close_popups();
             tooltip_open_ = false;
+        }
+        Event ev{};
+        ev.pos = pos;
+        ev.type = Event::Type::MouseLeave;
+        for (Widget* c = old; c && !inside(w, c); c = c->parent) {
+            c->on_event(ev);
+            if (hover_ != w) return; // a handler moved hover (re-entrant move)
+        }
+        std::vector<Widget*> enter;
+        for (Widget* c = w; c && !inside(old, c); c = c->parent) enter.push_back(c);
+        ev.type = Event::Type::MouseEnter;
+        for (auto it = enter.rbegin(); it != enter.rend(); ++it) {
+            (*it)->on_event(ev);
+            if (hover_ != w) return;
         }
     }
 
@@ -543,6 +664,7 @@ private:
     }
     // Remove one popup (used by toast expiry); moves owned storage to closing_.
     void close_popup_widget(Widget* w) {
+        Busy busy(*this);
         for (size_t i = 0; i < popups_.size(); ++i) {
             if (popups_[i].widget == w) {
                 if (focused_ && inside(focused_, w)) set_focus(nullptr);
@@ -570,11 +692,14 @@ private:
         collect_focusables(root_.get(), focusables);
         for (auto& p : popups_) collect_focusables(p.widget, focusables);
         if (focusables.empty()) return;
-        size_t idx = 0;
-        for (size_t i = 0; i < focusables.size(); ++i)
-            if (focusables[i] == focused_) idx = i + 1;
-        if (backwards) idx = (idx == 0 ? focusables.size() : idx) - 1;
-        set_focus(focusables[idx % focusables.size()]);
+        const size_t n = focusables.size();
+        size_t cur = n; // n = nothing focused (or focus outside the cycle)
+        for (size_t i = 0; i < n; ++i)
+            if (focusables[i] == focused_) cur = i;
+        size_t next;
+        if (backwards) next = cur == n ? n - 1 : (cur + n - 1) % n;
+        else next = cur == n ? 0 : (cur + 1) % n;
+        set_focus(focusables[next]);
     }
 
     void collect_focusables(Widget* w, std::vector<Widget*>& out) {
@@ -594,6 +719,29 @@ private:
     std::vector<Widget::WidgetPtr> closing_; // deferred destruction
     bool inside_press_ = false; // mouse button held from a press inside the tree
     Widget* mouse_capture_ = nullptr;
+
+    // Liveness token handed to attached widgets (see Widget::ctx_alive_).
+    std::shared_ptr<const bool> alive_ = std::make_shared<const bool>(true);
+
+    // Focus notifications waiting for a safe point (see set_focus / Busy).
+    struct FocusNote {
+        Widget* widget;
+        Event::Type type;
+    };
+    std::vector<FocusNote> focus_notes_;
+    int busy_ = 0;
+
+    // Click synthesis, per mouse button (left/middle/right).
+    static constexpr int kButtons = 3;
+    Widget* press_target_[kButtons] = {};   // widget the press dispatched to
+    bool swallow_release_[kButtons] = {};   // press opened a context menu
+    int click_count_ = 0;                   // consecutive presses (Event::clicks)
+    int last_press_button_ = -1;
+    double last_press_time_ = -1e9;
+    Vec2 last_press_pos_{};
+
+    // Keys whose KeyPress reached a widget: only those get a KeyRelease.
+    std::vector<bool> key_down_ = std::vector<bool>(256, false);
 
     // clipboard host callbacks (may be empty)
     std::function<std::string()> clipboard_source_;
@@ -624,6 +772,11 @@ private:
 // Free accessor used by Widget::ui_scale() (Context is complete here).
 inline float theme_scale_of(const Context* ctx) {
     return ctx ? ctx->theme().scale : 1.f;
+}
+
+// Called from ~Widget (Context is complete here).
+inline void context_forget(Context* ctx, const Widget* w) noexcept {
+    if (ctx) ctx->forget(w);
 }
 
 // Minimal text widget for tooltip popups. Lives in this header (not
@@ -698,60 +851,30 @@ inline void Context::handle_event(const Event& e) {
         // e.pos is the framebuffer size in px; the layout frame is logical.
         frame_ = {e.pos.x / theme_.scale, e.pos.y / theme_.scale};
         return;
-    case T::FocusLost:
+    case T::FocusLost: {
+        // The app lost focus: releases may never arrive. Tell the captured
+        // widget (if it is not also the focused one — set_focus covers that)
+        // so drags can cancel, then drop all transient input state.
+        if (mouse_capture_ && mouse_capture_ != focused_)
+            focus_notes_.push_back({mouse_capture_, T::FocusLost});
+        mouse_capture_ = nullptr;
+        reset_press_state();
         set_focus(nullptr);
         close_popups();
         return;
+    }
     case T::MouseMove: {
         Widget* hit = hit_test(e.pos);
+        set_hover(hit, e.pos); // Leave/Enter before the move itself
         if (hit) dispatch(*hit, e);
-        set_hover(hit, e.pos);
         update_cursor(hit);
         return;
     }
     case T::MousePress:
-        if (tooltip_open_) {
-            close_popups();
-            tooltip_open_ = false;
-            hover_since_ = -1;
-        }
-        if (e.button == MouseRight) {
-            // Right-click opens the nearest ancestor's context menu, if any.
-            if (Widget* hit = hit_test(e.pos)) {
-                for (Widget* chain = hit; chain; chain = chain->parent) {
-                    if (chain->context_menu_) {
-                        close_popups();
-                        open_context_menu(*chain->context_menu_, e.pos);
-                        return;
-                    }
-                }
-            }
-            return;
-        }
-        if (e.button == MouseLeft) {
-            // A modal dialog traps presses outside it.
-            if (Widget* modal = topmost_modal()) {
-                if (!inside_hit_any(*modal, e.pos)) return;
-            }
-            if (Widget* hit = hit_test(e.pos)) {
-                // A click outside every popup closes the whole stack; a click
-                // inside one dispatches into it untouched — menu items manage
-                // their own sub-stack (toggle, sibling closing, self-dismiss).
-                if (has_popups() && topmost_popup_containing(e.pos) < 0) {
-                    close_popups();
-                    return;
-                }
-                inside_press_ = true;
-                dispatch(*hit, e);
-                if (Widget* f = nearest_focusable(hit)) set_focus(f);
-                return;
-            }
-            set_focus(nullptr);
-        }
+        handle_press(e);
         return;
     case T::MouseRelease:
-        inside_press_ = false;
-        if (Widget* hit = hit_test(e.pos)) dispatch(*hit, e);
+        handle_release(e);
         return;
     case T::Scroll:
         if (Widget* hit = hit_test(e.pos)) dispatch(*hit, e);
@@ -784,16 +907,130 @@ inline void Context::handle_event(const Event& e) {
                 }
             }
         }
-        if (focused_) {
-            dispatch(*focused_, e);
-            return;
+        // Focused widget first; with nothing focused, the widget under the
+        // pointer (key events carry no position of their own).
+        Widget* target = focused_ ? focused_ : hover_;
+        if (target) {
+            key_down_[key_index(e.key)] = true;
+            dispatch(*target, e);
         }
-        if (Widget* hit = hit_test(e.pos)) dispatch(*hit, e);
         return;
     }
-    case T::KeyRelease:
+    case T::KeyRelease: {
+        // Only for presses a widget received: no orphan releases for Tab,
+        // Escape or shortcut chords.
+        size_t k = key_index(e.key);
+        if (!key_down_[k]) return;
+        key_down_[k] = false;
+        Widget* target = focused_ ? focused_ : hover_;
+        if (target) dispatch(*target, e);
         return;
     }
+    // Synthesized by the Context itself; hosts never send these.
+    case T::Click:
+    case T::DoubleClick:
+    case T::MouseEnter:
+    case T::MouseLeave:
+    case T::FocusGained:
+        return;
+    }
+}
+
+inline void Context::handle_press(const Event& in) {
+    Event e = in;
+    const int b = e.button;
+    const bool tracked = b >= 0 && b < kButtons;
+
+    // Consecutive-click counting (Event::clicks), on the tick clock.
+    Vec2 d{e.pos.x - last_press_pos_.x, e.pos.y - last_press_pos_.y};
+    bool multi = b == last_press_button_ &&
+                 now_ - last_press_time_ < Event::kMultiClickTime &&
+                 d.length() <= Event::kMultiClickSlop;
+    click_count_ = multi ? click_count_ + 1 : 1;
+    last_press_button_ = b;
+    last_press_time_ = now_;
+    last_press_pos_ = e.pos;
+    e.clicks = click_count_;
+    if (tracked) {
+        press_target_[b] = nullptr;
+        swallow_release_[b] = false;
+    }
+
+    if (tooltip_open_) {
+        close_popups();
+        tooltip_open_ = false;
+        hover_since_ = -1;
+    }
+
+    // Right-click opens the nearest ancestor's context menu, if any; the
+    // matching release is swallowed.
+    if (b == MouseRight) {
+        if (Widget* hit = hit_test(e.pos)) {
+            for (Widget* chain = hit; chain; chain = chain->parent) {
+                if (chain->context_menu_) {
+                    close_popups();
+                    open_context_menu(*chain->context_menu_, e.pos);
+                    swallow_release_[b] = true;
+                    return;
+                }
+            }
+        }
+    }
+
+    // A modal dialog traps presses outside it.
+    if (Widget* modal = topmost_modal()) {
+        if (!inside_hit_any(*modal, e.pos)) return;
+    }
+    Widget* hit = hit_test(e.pos);
+    if (!hit) {
+        if (b == MouseLeft) set_focus(nullptr);
+        return;
+    }
+    // A press outside every popup closes the whole stack; a press inside one
+    // dispatches into it untouched — menu items manage their own sub-stack.
+    if (has_popups() && topmost_popup_containing(e.pos) < 0) {
+        close_popups();
+        return;
+    }
+    inside_press_ = true;
+    if (tracked) press_target_[b] = hit;
+    dispatch(*hit, e);
+    if (b == MouseLeft)
+        if (Widget* f = nearest_focusable(hit)) set_focus(f);
+}
+
+inline void Context::handle_release(const Event& in) {
+    Event e = in;
+    const int b = e.button;
+    const bool tracked = b >= 0 && b < kButtons;
+    if (tracked && swallow_release_[b]) {
+        swallow_release_[b] = false;
+        return;
+    }
+    e.clicks = b == last_press_button_ ? click_count_ : 1;
+    inside_press_ = false;
+
+    // Where the pointer really is (capture redirects the release itself).
+    // Decide "landed on the pressed widget" before dispatching: the release
+    // handler may destroy widgets (forget() then nulls press_target_).
+    Widget* under = hit_test_uncaptured(e.pos);
+    bool landed = tracked && press_target_[b] && under && inside(under, press_target_[b]);
+    if (Widget* hit = hit_test(e.pos)) dispatch(*hit, e);
+
+    // Click: the release landed inside the widget that received the press.
+    Widget* target = tracked ? press_target_[b] : nullptr; // null if destroyed
+    if (landed && target) {
+        Event click = e;
+        click.type = Event::Type::Click;
+        dispatch(*target, click);
+        // Still alive after the Click handler? (it may have closed a dialog)
+        if (e.clicks == 2 && press_target_[b] == target) {
+            Event dbl = click;
+            dbl.type = Event::Type::DoubleClick;
+            dispatch(*target, dbl);
+        }
+    }
+    if (tracked) press_target_[b] = nullptr;
 }
 
 } // namespace slikui

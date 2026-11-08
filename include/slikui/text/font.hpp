@@ -99,6 +99,12 @@ public:
         return float(stbtt_GetCodepointKernAdvance(&info_, int(prev), int(cp))) * scale(px);
     }
 
+    // True if the font has an outline for `cp` (false for an invalid font).
+    // Missing codepoints otherwise render as the font's .notdef box.
+    bool has_glyph(std::uint32_t cp) const {
+        return ok_ && stbtt_FindGlyphIndex(&info_, int(cp)) != 0;
+    }
+
     // --- glyph access (rasterizes on miss) ---
 
     const Glyph& glyph(std::uint32_t cp, float px) {

@@ -11,7 +11,8 @@ ctest --test-dir build          # golden-image pixel checks included
 ```
 
 CI matrices C++ across gcc/clang/MSVC on Linux/macOS/Windows, checks that
-every header compiles standalone, and compile-checks the GL/GLFW backends.
+every header compiles standalone, runs the suite under ASan + UBSan, and
+compile-checks the GL/GLFW backends.
 Python CI builds the sdist + wheels (cibuildwheel) and runs pytest inside
 each wheel.
 
@@ -41,10 +42,21 @@ each wheel.
 ```sh
 pip install -e .
 python -m pytest python/tests
-python python/examples/gallery.py           # full-surface gallery -> gallery.png
+python -m slikui.examples --smoke all       # shipped suite: scripted self-checks
+python -m slikui.examples.gallery           # full-surface gallery -> gallery.png
 python python/examples/pyrenderer_demo.py   # C++ vs CanvasSink pixel diff (0)
-python python/examples/custom_widget.py     # custom-widget demo -> docs/images/custom_widget.png
+python -m slikui.examples.paint --docs-image custom_widget docs/images/custom_widget.png
+python tools/extract_snippets.py            # regenerate docs/includes/examples/ after editing demo code
+python tools/gen_stubs.py                   # regenerate the committed type stub after binding changes
+for n in hello gallery events paint controls keyboard renderer window; do
+  python -m slikui.examples.$n --smoke docs/images/examples-$n.png
+done                                        # the examples page's screenshots
+python tools/examples_gif.py                # examples-snake.gif, examples-clock.gif
 ```
+
+`python/tests/test_stubs.py` fails when the committed stub drifts from the
+built extension; `test_examples.py` runs every smoke pass in a fresh
+interpreter and fails on nanobind's shutdown leak report.
 
 ## Regenerating the docs images
 

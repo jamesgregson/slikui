@@ -98,7 +98,7 @@ public:
     bool on_event(const Event& e) override {
         switch (e.type) {
         case Event::Type::MousePress:
-            if (enabled && children[0]->bounds.contains(e.pos) &&
+            if (e.button == MouseLeft && enabled && children[0]->bounds.contains(e.pos) &&
                 !children[0]->children[2]->bounds.contains(e.pos)) {
                 ctx->capture_mouse(this);
                 dragging_ = true;
@@ -118,7 +118,7 @@ public:
             }
             return false;
         case Event::Type::MouseRelease:
-            if (dragging_) {
+            if (e.button == MouseLeft && dragging_) {
                 dragging_ = false;
                 ctx->release_mouse(this);
                 return true;
@@ -672,7 +672,7 @@ public:
             zoom_at(e.pos, std::exp(e.scroll.y * .15f)); // wheel up = zoom in
             return true;
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
                 ctx->capture_mouse(this);
                 panning_ = true;
                 last_ = e.pos;
@@ -687,7 +687,7 @@ public:
             }
             return false;
         case Event::Type::MouseRelease:
-            if (panning_) {
+            if (e.button == MouseLeft && panning_) {
                 panning_ = false;
                 ctx->release_mouse(this);
                 return true;
@@ -780,7 +780,7 @@ public:
     bool on_event(const Event& e) override {
         switch (e.type) {
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos) &&
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos) &&
                 std::fabs(e.pos.x - (bounds.x + fraction_ * bounds.w)) < 8.f) {
                 ctx->capture_mouse(this);
                 dragging_ = true;
@@ -794,7 +794,7 @@ public:
             }
             return false;
         case Event::Type::MouseRelease:
-            if (dragging_) {
+            if (e.button == MouseLeft && dragging_) {
                 dragging_ = false;
                 ctx->release_mouse(this);
                 return true;

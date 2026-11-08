@@ -85,8 +85,19 @@ public:
     bool on_event(const Event& e) override {
         switch (e.type) {
         case Event::Type::MousePress:
-            if (bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && bounds.contains(e.pos)) {
                 caret_ = caret_at(e.pos.x);
+                // Double-click selects the word under the caret, triple-click
+                // (or a double-click in a password field) the whole text.
+                if (e.clicks >= 3 || (e.clicks == 2 && password_)) {
+                    sel_anchor_ = 0;
+                    caret_ = text_.size();
+                    return true;
+                }
+                if (e.clicks == 2) {
+                    select_word_at(caret_);
+                    return true;
+                }
                 sel_anchor_ = long(caret_);
                 selecting_ = true;
                 ctx->capture_mouse(this);
@@ -100,7 +111,7 @@ public:
             }
             return false;
         case Event::Type::MouseRelease:
-            if (selecting_) {
+            if (e.button == MouseLeft && selecting_) {
                 selecting_ = false;
                 ctx->release_mouse(this);
                 if (!has_sel()) clear_sel(); // a click with no drag: no selection
@@ -258,6 +269,32 @@ private:
         return a < b ? std::pair{a, b} : std::pair{b, a};
     }
     void clear_sel() { sel_anchor_ = -1; }
+
+    // Word = run of ASCII alphanumerics/underscore or non-ASCII bytes (so a
+    // UTF-8 sequence never splits); anything else is a one-byte separator.
+    static bool word_byte(unsigned char c) {
+        return c >= 0x80 || c == '_' || (c >= '0' && c <= '9') ||
+               (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+    void select_word_at(size_t at) {
+        size_t n = text_.size();
+        if (n == 0) return;
+        size_t i = at < n ? at : n - 1;
+        // On the boundary just past a word, select that word.
+        if (!word_byte((unsigned char)text_[i]) && i > 0 &&
+            word_byte((unsigned char)text_[i - 1]))
+            --i;
+        if (!word_byte((unsigned char)text_[i])) { // a separator: just it
+            sel_anchor_ = long(i);
+            caret_ = i + 1;
+            return;
+        }
+        size_t a = i, b = i;
+        while (a > 0 && word_byte((unsigned char)text_[a - 1])) --a;
+        while (b < n && word_byte((unsigned char)text_[b])) ++b;
+        sel_anchor_ = long(a);
+        caret_ = b;
+    }
     void erase_selection() {
         if (!has_sel()) return;
         auto [lo, hi] = sel_range();
@@ -407,7 +444,7 @@ public:
     bool on_event(const Event& e) override {
         switch (e.type) {
         case Event::Type::MousePress: {
-            if (!bounds.contains(e.pos)) return false;
+            if (e.button != MouseLeft || !bounds.contains(e.pos)) return false;
             float inv = 1.f / ui_scale();
             float lh_l = line_height_logical() * inv;
             float pad = 8.f;

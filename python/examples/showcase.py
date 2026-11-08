@@ -111,17 +111,22 @@ class LevelMeter(slikui.Widget):
         left = int(slikui.MouseButton.MouseLeft)
         if (event.type == slikui.EventType.MousePress and event.button == left
                 and self.bounds.contains(event.pos)):
-            self.dragging = True  # no mouse capture in the bindings yet: the
-            self._apply(event.pos.x)  # drag ends when the pointer leaves
+            self.dragging = True
+            self.context.capture_mouse(self)  # the drag survives leaving
+            self._apply(event.pos.x)
             return True
         if event.type == slikui.EventType.MouseMove and self.dragging:
             self._apply(event.pos.x)
             return True
         if event.type == slikui.EventType.MouseRelease and self.dragging:
             self.dragging = False
+            self.context.release_mouse(self)
             if self.on_change:
                 self.on_change(self.value)
             return True
+        if event.type == slikui.EventType.FocusLost and self.dragging:
+            self.dragging = False  # the app lost focus mid-drag
+            self.context.release_mouse(self)
         return False
 
     def _apply(self, x):

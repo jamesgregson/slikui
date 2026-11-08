@@ -3,6 +3,10 @@
 `Context.handle()` consumes these directly. Positions are logical points
 (Vec2-compatible pairs); `mods` accepts an int mask or a string like
 "ctrl+shift". A typical click is `mouse_press(p)` then `mouse_release(p)`.
+
+Hosts send only raw input (move/press/release/scroll/key/text/focus_lost/
+frame_resize). Click, DoubleClick, MouseEnter, MouseLeave and FocusGained
+are synthesized by the Context and delivered to widgets.
 """
 
 from slikui._slikui import Event, EventType, Key, Mod, MouseButton, Vec2
@@ -57,7 +61,10 @@ def mouse_release(pos, button=MouseButton.MouseLeft, mods_=0):
 
 
 def mouse_click(pos, button=MouseButton.MouseLeft, mods_=0):
-    """Press + release pair at `pos`."""
+    """Press + release pair at `pos` — handle both; the Context then
+    synthesizes the Click (and DoubleClick, when a second click follows
+    within Event.MULTI_CLICK_TIME seconds of tick-clock time) itself. There is no
+    host-sent Click event."""
     return (mouse_press(pos, button, mods_), mouse_release(pos, button, mods_))
 
 
@@ -68,10 +75,12 @@ def scroll(pos, ticks):
     return e
 
 
-def key_press(key, mods_=0):
+def key_press(key, mods_=0, repeat=False):
+    """KeyPress; ``repeat=True`` marks an auto-repeat (host key held)."""
     e = Event(EventType.KeyPress)
     e.key = key
     e.mods = mods(mods_)
+    e.repeat = bool(repeat)
     return e
 
 

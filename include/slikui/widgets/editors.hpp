@@ -101,7 +101,7 @@ public:
     bool on_event(const Event& e) override {
         switch (e.type) {
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
                 ctx->capture_mouse(this);
                 dragging_ = true;
                 dragged_ = false;
@@ -119,7 +119,7 @@ public:
             hover_.target = bounds.contains(e.pos) ? 1.f : 0.f;
             return false;
         case Event::Type::MouseRelease:
-            if (dragging_) {
+            if (e.button == MouseLeft && dragging_) {
                 dragging_ = false;
                 ctx->release_mouse(this);
                 if (!dragged_) start_editing(); // a click, not a scrub
@@ -411,7 +411,7 @@ public:
     bool on_event(const Event& e) override {
         switch (e.type) {
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
                 auto popup = std::make_unique<ColorPopup>(this, color_);
                 ctx->push_popup(std::move(popup), {bounds.x, bounds.bottom() + 2});
                 return true;
@@ -530,7 +530,7 @@ inline bool ColorPopup::on_event(const Event& e) {
     Rect sv = sv_rect(), hue = hue_rect();
     switch (e.type) {
     case Event::Type::MousePress:
-        if (sv.contains(e.pos) || hue.contains(e.pos)) {
+        if (e.button == MouseLeft && (sv.contains(e.pos) || hue.contains(e.pos))) {
             ctx->capture_mouse(this);
             dragging_sv_ = sv.contains(e.pos);
             dragging_hue_ = hue.contains(e.pos);
@@ -553,7 +553,7 @@ inline bool ColorPopup::on_event(const Event& e) {
         return false;
     }
     case Event::Type::MouseRelease:
-        if (dragging_sv_ || dragging_hue_) {
+        if (e.button == MouseLeft && (dragging_sv_ || dragging_hue_)) {
             dragging_sv_ = dragging_hue_ = false;
             ctx->release_mouse(this);
             return true;

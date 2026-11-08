@@ -100,6 +100,16 @@ inline Key map_key(int glfw_key) {
     case GLFW_KEY_X: return Key::X;
     case GLFW_KEY_Y: return Key::Y;
     case GLFW_KEY_Z: return Key::Z;
+    case GLFW_KEY_0: return Key::Num0;
+    case GLFW_KEY_1: return Key::Num1;
+    case GLFW_KEY_2: return Key::Num2;
+    case GLFW_KEY_3: return Key::Num3;
+    case GLFW_KEY_4: return Key::Num4;
+    case GLFW_KEY_5: return Key::Num5;
+    case GLFW_KEY_6: return Key::Num6;
+    case GLFW_KEY_7: return Key::Num7;
+    case GLFW_KEY_8: return Key::Num8;
+    case GLFW_KEY_9: return Key::Num9;
     default: return Key::Unknown;
     }
 }
@@ -110,6 +120,20 @@ inline std::uint32_t map_mods(int glfw_mods) {
     if (glfw_mods & GLFW_MOD_CONTROL) m |= ModCtrl;
     if (glfw_mods & GLFW_MOD_ALT) m |= ModAlt;
     if (glfw_mods & GLFW_MOD_SUPER) m |= ModSuper;
+    return m;
+}
+
+// Modifier state for events whose GLFW callback carries none (cursor move,
+// scroll): read it from the key state so Shift-drag and Ctrl-wheel work.
+inline std::uint32_t current_mods(GLFWwindow* w) {
+    auto down = [w](int a, int b) {
+        return glfwGetKey(w, a) == GLFW_PRESS || glfwGetKey(w, b) == GLFW_PRESS;
+    };
+    std::uint32_t m = ModNone;
+    if (down(GLFW_KEY_LEFT_SHIFT, GLFW_KEY_RIGHT_SHIFT)) m |= ModShift;
+    if (down(GLFW_KEY_LEFT_CONTROL, GLFW_KEY_RIGHT_CONTROL)) m |= ModCtrl;
+    if (down(GLFW_KEY_LEFT_ALT, GLFW_KEY_RIGHT_ALT)) m |= ModAlt;
+    if (down(GLFW_KEY_LEFT_SUPER, GLFW_KEY_RIGHT_SUPER)) m |= ModSuper;
     return m;
 }
 
@@ -167,6 +191,7 @@ public:
             e.type = Event::Type::MouseMove;
             e.delta = {float(x) - self->last_mouse_.x, float(y) - self->last_mouse_.y};
             e.pos = {float(x), float(y)};
+            e.mods = current_mods(w);
             self->last_mouse_ = e.pos;
             self->push(e);
         });
@@ -178,12 +203,15 @@ public:
             e.type = Event::Type::Scroll;
             e.pos = {float(x), float(y)};
             e.scroll = {float(dx), float(dy)};
+            e.mods = current_mods(w);
             self->push(e);
         });
         glfwSetKeyCallback(window_, [](GLFWwindow* w, int key, int, int action, int mods) {
             auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
             Event e{};
-            e.type = action == GLFW_PRESS ? Event::Type::KeyPress : Event::Type::KeyRelease;
+            // GLFW_REPEAT is a press (auto-repeat), not a release.
+            e.type = action == GLFW_RELEASE ? Event::Type::KeyRelease : Event::Type::KeyPress;
+            e.repeat = action == GLFW_REPEAT;
             e.key = map_key(key);
             e.mods = map_mods(mods);
             self->push(e);

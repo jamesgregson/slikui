@@ -79,9 +79,13 @@ inline float sd_rounded_box(Vec2 p, Vec2 b, float r) {
 }
 
 inline Color sample_alpha(const std::uint8_t* tex, int tw, int th, float u, float v) {
-    // Bilinear alpha sample, clamped to texture bounds.
-    float fx = std::fmax(0.f, std::fmin(u, float(tw - 1)));
-    float fy = std::fmax(0.f, std::fmin(v, float(th - 1)));
+    // Bilinear alpha sample, clamped to texture bounds. Texel i covers
+    // [i, i+1) with its center at i+0.5 (as GL_LINEAR): an unscaled glyph
+    // samples each texel exactly, and a fractionally placed one reaches at
+    // most one texel past its edge — into the atlas's 1px gutter, never the
+    // neighboring glyph.
+    float fx = std::fmax(0.f, std::fmin(u - .5f, float(tw - 1)));
+    float fy = std::fmax(0.f, std::fmin(v - .5f, float(th - 1)));
     int x0 = int(fx), y0 = int(fy);
     int x1 = std::fmin(x0 + 1, tw - 1), y1 = std::fmin(y0 + 1, th - 1);
     float tx = fx - x0, ty = fy - y0;
@@ -91,9 +95,9 @@ inline Color sample_alpha(const std::uint8_t* tex, int tw, int th, float u, floa
     return Color(255, 255, 255, std::uint8_t(a + 0.5f));
 }
 
-inline Color sample_rgba(const std::uint8_t* tex, int tw, int, float u, float v) {
+inline Color sample_rgba(const std::uint8_t* tex, int tw, int th, float u, float v) {
     int x = std::clamp(int(u), 0, tw - 1);
-    int y = std::clamp(int(v), 0, tw - 1);
+    int y = std::clamp(int(v), 0, th - 1);
     const std::uint8_t* p = tex + (std::size_t(y) * tw + x) * 4;
     return Color(p[0], p[1], p[2], p[3]);
 }

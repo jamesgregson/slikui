@@ -3,6 +3,13 @@
 Distribution `slikui`, import package `slikui`, compiled module `slikui._slikui`.
 Layering: `_slikui` binds the C++ API 1:1; `slikui/_py` adds a thin Pythonic
 surface (kwargs → setters, App shell, pixel helpers).
+
+Usage reference for this exact version: the shipped examples in
+`slikui.examples` — `help(slikui.examples)` has the index and the
+custom-widget contract; `python -m slikui.examples --where` prints their
+directory; `--contract` prints what a custom widget receives, measured live.
+For custom widgets read `events.py` first, then `paint.py` and
+`controls.py`. Type stubs: `slikui/_slikui.pyi`.
 """
 
 from slikui._slikui import (  # noqa: F401 — re-exported
@@ -108,6 +115,7 @@ from slikui._py.events import (
 )
 from slikui._py.pixels import save_image, to_rgba
 from slikui._slikui import (  # noqa: F401 — input enums
+    Event,
     EventType,
     Key,
     Mod,

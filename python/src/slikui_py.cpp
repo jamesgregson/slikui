@@ -10,8 +10,14 @@
 //     rv_policy::reference, so Python chains work and identity is stable —
 //     nanobind re-attaches the existing wrapper for an object it wrapped.
 //   * The tree owns children (unique_ptr in C++); Python holds non-owning
-//     views. Factory methods (`add_*`, `set_root_*`) return
-//     reference_internal so the owner keeps the view alive.
+//     views. Widget-returning methods on widgets (`add_*`, `content()`,
+//     `field`, ...) return plain `reference`: a keep_alive edge from child
+//     wrapper to host wrapper is invisible to the GC, so a Python widget
+//     storing its own child (`self.slider = self.add(...)`) would form an
+//     uncollectable cycle. Views are valid while the tree holds the widget
+//     (App.close() destroys it). Context methods (`set_root_*`, popups)
+//     keep reference_internal: the Context outlives none of those cycles
+//     because close() clears its tree first.
 //   * Every call holds the GIL; the software rasterizer is milliseconds-fast.
 
 #include <nanobind/nanobind.h>
@@ -30,13 +36,22 @@
 #include <slikui/version.hpp>
 
 #include <cstdint>
+#include <cstdio>
 #include <functional>
+#include <string>
 #include <utility>
 
 namespace nb = nanobind;
 using namespace slikui;
 
 namespace {
+
+// Shortest round-trippable-enough float text for __repr__ ("12", "0.25").
+std::string fmt_float(float v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%g", double(v));
+    return buf;
+}
 
 // Bind one C++ setter `W& W::f(V)` under `name`, returning the same wrapper.
 template <typename W, typename... Bs, typename V>
@@ -118,163 +133,163 @@ private:
 template <typename Host, typename... Bs>
 void bind_add(nb::class_<Host, Bs...>& cls) {
     cls.def("add_column", [](Host& h) -> Column& { return h.template add<Column>(); },
-            nb::rv_policy::reference_internal)
+            nb::rv_policy::reference)
         .def("add_row", [](Host& h) -> Row& { return h.template add<Row>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_spacer", [](Host& h) -> Spacer& { return h.template add<Spacer>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_divider",
              [](Host& h, bool horizontal) -> Divider& {
                  return h.template add<Divider>(horizontal);
              },
-             nb::arg("horizontal") = true, nb::rv_policy::reference_internal)
+             nb::arg("horizontal") = true, nb::rv_policy::reference)
         .def("add_panel", [](Host& h) -> Panel& { return h.template add<Panel>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_expander",
              [](Host& h, std::string title) -> Expander& {
                  return h.template add<Expander>(std::move(title));
              },
-             nb::arg("title") = "", nb::rv_policy::reference_internal)
+             nb::arg("title") = "", nb::rv_policy::reference)
         .def("add_accordion", [](Host& h) -> Accordion& { return h.template add<Accordion>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_label",
              [](Host& h, std::string text) -> Label& {
                  return h.template add<Label>(std::move(text));
              },
-             nb::arg("text") = "", nb::rv_policy::reference_internal)
+             nb::arg("text") = "", nb::rv_policy::reference)
         .def("add_button",
              [](Host& h, std::string text) -> Button& {
                  return h.template add<Button>(std::move(text));
              },
-             nb::arg("text") = "", nb::rv_policy::reference_internal)
+             nb::arg("text") = "", nb::rv_policy::reference)
         .def("add_checkbox",
              [](Host& h, std::string label, bool checked) -> Checkbox& {
                  return h.template add<Checkbox>(std::move(label), checked);
              },
              nb::arg("label") = "", nb::arg("checked") = false,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_radio",
              [](Host& h, std::string label, bool checked) -> Radio& {
                  return h.template add<Radio>(std::move(label), checked);
              },
              nb::arg("label") = "", nb::arg("checked") = false,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_switch", [](Host& h) -> Switch& { return h.template add<Switch>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_swatch",
              [](Host& h, Color color, nb::callable is_selected, nb::callable on_pick) -> Swatch& {
                  return h.template add<Swatch>(color, std::move(is_selected),
                                                std::move(on_pick));
              },
              nb::arg("color"), nb::arg("is_selected"), nb::arg("on_pick"),
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_slider",
              [](Host& h, float min, float max) -> Slider& {
                  return h.template add<Slider>(min, max);
              },
              nb::arg("min") = 0.f, nb::arg("max") = 1.f,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_dragvalue",
              [](Host& h, float value) -> DragValue& {
                  return h.template add<DragValue>(value);
              },
-             nb::arg("value") = 0.f, nb::rv_policy::reference_internal)
+             nb::arg("value") = 0.f, nb::rv_policy::reference)
         .def("add_vec2edit",
              [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec2Edit& {
                  if (values.shape(0) != 2)
                      throw nb::value_error("Vec2Edit needs a float32 array of length 2");
                  return h.template add<Vec2Edit>(values.data());
              },
-             nb::arg("values"), nb::rv_policy::reference_internal)
+             nb::arg("values"), nb::rv_policy::reference)
         .def("add_vec3edit",
              [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec3Edit& {
                  if (values.shape(0) != 3)
                      throw nb::value_error("Vec3Edit needs a float32 array of length 3");
                  return h.template add<Vec3Edit>(values.data());
              },
-             nb::arg("values"), nb::rv_policy::reference_internal)
+             nb::arg("values"), nb::rv_policy::reference)
         .def("add_vec4edit",
              [](Host& h, nb::ndarray<nb::numpy, float, nb::ndim<1>> values) -> Vec4Edit& {
                  if (values.shape(0) != 4)
                      throw nb::value_error("Vec4Edit needs a float32 array of length 4");
                  return h.template add<Vec4Edit>(values.data());
              },
-             nb::arg("values"), nb::rv_policy::reference_internal)
+             nb::arg("values"), nb::rv_policy::reference)
         .def("add_plot", [](Host& h) -> Plot& { return h.template add<Plot>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_vec2pad", [](Host& h) -> Vec2Pad& { return h.template add<Vec2Pad>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_treeview", [](Host& h) -> TreeView& { return h.template add<TreeView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_table", [](Host& h) -> Table& { return h.template add<Table>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_propertygrid",
              [](Host& h) -> PropertyGrid& { return h.template add<PropertyGrid>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_iconbutton",
              [](Host& h, Icon icon) -> IconButton& {
                  return h.template add<IconButton>(icon);
              },
-             nb::arg("icon"), nb::rv_policy::reference_internal)
+             nb::arg("icon"), nb::rv_policy::reference)
         .def("add_toolbar", [](Host& h) -> Toolbar& { return h.template add<Toolbar>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_menubar", [](Host& h) -> MenuBar& { return h.template add<MenuBar>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_coloredit",
              [](Host& h, Color color) -> ColorEdit& {
                  return h.template add<ColorEdit>(color);
              },
-             nb::arg("color") = Color::white(), nb::rv_policy::reference_internal)
+             nb::arg("color") = Color::white(), nb::rv_policy::reference)
         .def("add_segmented", [](Host& h) -> Segmented& { return h.template add<Segmented>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_groupbox",
              [](Host& h, std::string title) -> GroupBox& {
                  return h.template add<GroupBox>(std::move(title));
              },
-             nb::arg("title"), nb::rv_policy::reference_internal)
+             nb::arg("title"), nb::rv_policy::reference)
         .def("add_searchbox", [](Host& h) -> SearchBox& { return h.template add<SearchBox>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_statusbar", [](Host& h) -> StatusBar& { return h.template add<StatusBar>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_logview", [](Host& h) -> LogView& { return h.template add<LogView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_imageview", [](Host& h) -> ImageView& { return h.template add<ImageView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_compareview",
              [](Host& h) -> CompareView& { return h.template add<CompareView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_progressbar",
              [](Host& h) -> ProgressBar& { return h.template add<ProgressBar>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_spinner", [](Host& h) -> Spinner& { return h.template add<Spinner>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_textfield",
              [](Host& h) -> TextField& { return h.template add<TextField>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_textarea",
              [](Host& h) -> TextArea& { return h.template add<TextArea>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_scrollarea",
              [](Host& h) -> ScrollArea& { return h.template add<ScrollArea>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_listview",
              [](Host& h) -> ListView& { return h.template add<ListView>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_tabs", [](Host& h) -> Tabs& { return h.template add<Tabs>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_dropdown",
              [](Host& h) -> Dropdown& { return h.template add<Dropdown>(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_image",
              [](Host& h, std::string name) -> Image& {
                  return h.template add<Image>(std::move(name));
              },
-             nb::arg("name"), nb::rv_policy::reference_internal)
+             nb::arg("name"), nb::rv_policy::reference)
         .def("add_splitter",
              [](Host& h, bool vertical) -> Splitter& {
                  return h.template add<Splitter>(vertical);
              },
-             nb::arg("vertical") = false, nb::rv_policy::reference_internal);
+             nb::arg("vertical") = false, nb::rv_policy::reference);
 }
 
 // PyRenderSink — trampoline so Python classes can implement the
@@ -308,6 +323,24 @@ struct PyWidget : slikui::Widget {
 
     void paint(const PaintEnv& env) const override { NB_OVERRIDE(paint, env); }
 
+    void paint_over(const PaintEnv& env) const override { NB_OVERRIDE(paint_over, env); }
+
+    // Protected in C++; the bound names below forward to these.
+    std::optional<Rect> clip_rect() const override { NB_OVERRIDE(clip_rect); }
+    // Manual dispatch: NB_OVERRIDE would try to COPY the (non-copyable)
+    // Context into the call; pass it by reference instead.
+    void attached(Context& c) override {
+        constexpr std::uint64_t nb_hash = nb::detail::str_hash("attached");
+        nb::detail::ticket t(nb_trampoline, "attached", nb_hash, false);
+        if (t.key.is_valid()) {
+            nb_trampoline.base().attr(t.key)(nb::cast(&c, nb::rv_policy::reference));
+            return;
+        }
+        slikui::Widget::attached(c);
+    }
+    std::optional<Rect> base_clip_rect() const { return slikui::Widget::clip_rect(); }
+    void base_attached(Context& c) { slikui::Widget::attached(c); }
+
     bool on_event(const Event& e) override { NB_OVERRIDE(on_event, e); }
 
     void tick(Time t) override { NB_OVERRIDE(tick, t); }
@@ -337,8 +370,7 @@ struct PyWidget : slikui::Widget {
     // The subtree is destroyed eagerly, before the anchor drops. Dropping the
     // anchor alone does not guarantee ~PyWidget runs: Python may still hold
     // the wrapper — and the subtree itself can be what holds it. Callbacks
-    // inside the subtree capture child wrappers, whose reference_internal
-    // keep_alive edges climb back up to this wrapper: a cycle through C++
+    // inside the subtree can capture this wrapper: a cycle through C++
     // ownership the GC cannot see, so the whole subtree would leak (found
     // via examples/showcase.py: a Fill container hosting every page). The
     // tree is tearing this widget down, so its children go now, whatever
@@ -380,7 +412,10 @@ NB_MODULE(_slikui, m) {
         .def_rw("x", &Vec2::x)
         .def_rw("y", &Vec2::y)
         .def("__eq__", [](const Vec2& a, const Vec2& b) { return a == b; },
-             nb::arg("other"), nb::is_operator());
+             nb::arg("other"), nb::is_operator())
+        .def("__repr__", [](const Vec2& v) {
+            return "Vec2(" + fmt_float(v.x) + ", " + fmt_float(v.y) + ")";
+        });
 
     nb::class_<Color>(m, "Color")
         .def(nb::init<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t>(),
@@ -481,14 +516,21 @@ NB_MODULE(_slikui, m) {
         .def("bottom", &Rect::bottom)
         .def("center", &Rect::center)
         .def("__eq__", [](const Rect& a, const Rect& b) { return a == b; },
-             nb::arg("other"), nb::is_operator());
+             nb::arg("other"), nb::is_operator())
+        .def("__repr__", [](const Rect& r) {
+            return "Rect(" + fmt_float(r.x) + ", " + fmt_float(r.y) + ", " +
+                   fmt_float(r.w) + ", " + fmt_float(r.h) + ")";
+        });
 
     nb::class_<Size>(m, "Size")
         .def(nb::init<float, float>(), nb::arg("w") = 0.f, nb::arg("h") = 0.f)
         .def_rw("w", &Size::w)
         .def_rw("h", &Size::h)
         .def("__eq__", [](const Size& a, const Size& b) { return a == b; },
-             nb::arg("other"), nb::is_operator());
+             nb::arg("other"), nb::is_operator())
+        .def("__repr__", [](const Size& z) {
+            return "Size(" + fmt_float(z.w) + ", " + fmt_float(z.h) + ")";
+        });
 
     nb::class_<Constraints>(m, "Constraints")
         .def(nb::init<>())
@@ -567,7 +609,17 @@ NB_MODULE(_slikui, m) {
         .value("W", Key::W)
         .value("X", Key::X)
         .value("Y", Key::Y)
-        .value("Z", Key::Z);
+        .value("Z", Key::Z)
+        .value("Num0", Key::Num0)
+        .value("Num1", Key::Num1)
+        .value("Num2", Key::Num2)
+        .value("Num3", Key::Num3)
+        .value("Num4", Key::Num4)
+        .value("Num5", Key::Num5)
+        .value("Num6", Key::Num6)
+        .value("Num7", Key::Num7)
+        .value("Num8", Key::Num8)
+        .value("Num9", Key::Num9);
 
     nb::enum_<Mod>(m, "Mod", nb::is_arithmetic())
         .value("ModNone", ModNone)
@@ -581,7 +633,11 @@ NB_MODULE(_slikui, m) {
         .value("MouseMiddle", MouseMiddle)
         .value("MouseRight", MouseRight);
 
-    nb::enum_<Event::Type>(m, "EventType")
+    nb::enum_<Event::Type>(m, "EventType", nb::is_arithmetic(),
+                           "Event kinds. Context-synthesized (never sent by hosts): "
+                           "Click, DoubleClick, MouseEnter, MouseLeave, FocusGained; "
+                           "FocusLost is both host→Context (app lost focus) and "
+                           "Context→widget (this widget lost focus).")
         .value("MouseMove", Event::Type::MouseMove)
         .value("MousePress", Event::Type::MousePress)
         .value("MouseRelease", Event::Type::MouseRelease)
@@ -590,7 +646,12 @@ NB_MODULE(_slikui, m) {
         .value("KeyRelease", Event::Type::KeyRelease)
         .value("TextInput", Event::Type::TextInput)
         .value("FocusLost", Event::Type::FocusLost)
-        .value("FrameResize", Event::Type::FrameResize);
+        .value("FrameResize", Event::Type::FrameResize)
+        .value("Click", Event::Type::Click)
+        .value("DoubleClick", Event::Type::DoubleClick)
+        .value("MouseEnter", Event::Type::MouseEnter)
+        .value("MouseLeave", Event::Type::MouseLeave)
+        .value("FocusGained", Event::Type::FocusGained);
 
     nb::class_<Event>(m, "Event")
         .def("__init__",
@@ -604,9 +665,58 @@ NB_MODULE(_slikui, m) {
         .def_rw("key", &Event::key)
         .def_rw("codepoint", &Event::codepoint)
         .def_rw("mods", &Event::mods)
+        .def_rw("clicks", &Event::clicks,
+                "Consecutive-click count on MousePress/MouseRelease/Click "
+                "(1, 2, 3...); 0 on other events.")
+        .def_rw("repeat", &Event::repeat, "KeyPress generated by key auto-repeat.")
         .def_prop_ro("shift", &Event::shift)
         .def_prop_ro("ctrl", &Event::ctrl)
-        .def_prop_ro("alt", &Event::alt);
+        .def_prop_ro("alt", &Event::alt)
+        .def_prop_ro("super", &Event::super)
+        .def_prop_ro("shortcut_mod", &Event::shortcut_mod,
+                     "Ctrl, or Cmd on macOS: the copy/paste chord modifier.")
+        .def("__repr__", [](const Event& e) {
+            using T = Event::Type;
+            auto enum_name = [](auto v) {
+                // nb::cast<std::string> on an explicit nb::object: building
+                // nb::str straight from the attr accessor is ambiguous on MSVC.
+                nb::object name = nb::cast(v).attr("name");
+                return nb::cast<std::string>(name);
+            };
+            std::string out = "Event(" + enum_name(e.type);
+            auto pos = [&] { out += " pos=(" + fmt_float(e.pos.x) + ", " + fmt_float(e.pos.y) + ")"; };
+            switch (e.type) {
+            case T::MouseMove:
+                pos();
+                out += " delta=(" + fmt_float(e.delta.x) + ", " + fmt_float(e.delta.y) + ")";
+                break;
+            case T::MousePress: case T::MouseRelease: case T::Click: case T::DoubleClick:
+                pos();
+                out += " button=" + std::to_string(e.button) + " clicks=" + std::to_string(e.clicks);
+                break;
+            case T::Scroll:
+                pos();
+                out += " scroll=(" + fmt_float(e.scroll.x) + ", " + fmt_float(e.scroll.y) + ")";
+                break;
+            case T::KeyPress: case T::KeyRelease:
+                out += " key=" + enum_name(e.key);
+                if (e.repeat) out += " repeat";
+                break;
+            case T::TextInput:
+                out += " codepoint=" + std::to_string(e.codepoint);
+                break;
+            case T::MouseEnter: case T::MouseLeave:
+                pos();
+                break;
+            default:
+                break;
+            }
+            if (e.mods) out += " mods=" + std::to_string(e.mods);
+            return out + ")";
+        });
+    // Multi-click thresholds (Event.clicks): seconds on the tick clock, px.
+    m.attr("Event").attr("MULTI_CLICK_TIME") = Event::kMultiClickTime;
+    m.attr("Event").attr("MULTI_CLICK_SLOP") = Event::kMultiClickSlop;
 
     // ------------------------------------------------------------------ //
     // Render contract: TexUpload, DrawCmd, DrawList, and the RenderSink
@@ -787,6 +897,21 @@ NB_MODULE(_slikui, m) {
              },
              nb::arg("id"), nb::rv_policy::reference)
         .def("handle", &Context::handle, nb::arg("event"))
+        .def("set_focus", [](Context& c, Widget* w) { c.set_focus(w); },
+             nb::arg("widget").none(),
+             "Move keyboard focus (None clears it); notifies both widgets.")
+        .def_prop_ro("focused", [](Context& c) { return c.focused(); },
+                     nb::rv_policy::reference)
+        .def_prop_ro("hovered", [](Context& c) { return c.hovered(); },
+                     nb::rv_policy::reference)
+        .def_prop_ro("root", [](Context& c) { return c.root(); },
+                     nb::rv_policy::reference, "The root widget (None before set_root).")
+        .def("capture_mouse", [](Context& c, Widget& w) { c.capture_mouse(&w); },
+             nb::arg("widget"),
+             "Route every mouse event to `widget` until release_mouse — call "
+             "on MousePress so a drag survives the pointer leaving it.")
+        .def("release_mouse", [](Context& c, Widget& w) { c.release_mouse(&w); },
+             nb::arg("widget"))
         .def("add_shortcut",
              [](Context& c, Key key, unsigned mods, std::function<void()> action) -> Context& {
                  return c.add_shortcut(key, mods, std::move(action));
@@ -887,7 +1012,10 @@ NB_MODULE(_slikui, m) {
         // the MRO; unbound names would raise "lookup failed" on dispatch).
         .def("measure",
              [](Widget& w, const Constraints& c) { return w.measure(c); },
-             nb::arg("constraints"))
+             nb::arg("constraints"),
+             "Override: intrinsic size under `constraints`; return "
+             "constraints.clamp(Size(w, h)). Layout runs in Context.tick(), "
+             "not render() — bounds are zero until the first tick.")
         .def("arrange",
              [](Widget& w, const Rect& area) { w.arrange(area); },
              nb::arg("area"),
@@ -895,11 +1023,46 @@ NB_MODULE(_slikui, m) {
              "child after assigning their own bounds).")
         .def("paint",
              [](Widget& w, const PaintEnv& e) { w.paint(e); },
-             nb::arg("env"))
+             nb::arg("env"),
+             "Override: append draw commands to env.list (rect, hollow_rect, "
+             "line, circle, image, push_clip/pop_clip) using env.theme colors, "
+             "in absolute coordinates (self.bounds). Painted BEFORE children; "
+             "see paint_over for drawing on top of them.")
+        .def("paint_over",
+             [](Widget& w, const PaintEnv& e) { w.paint_over(e); },
+             nb::arg("env"),
+             "Override: drawn AFTER (on top of) the children, outside this "
+             "widget's clip_rect — decorations over wrapped widgets.")
+        .def("clip_rect",
+             [](Widget& w) {
+                 auto* pw = dynamic_cast<PyWidget*>(&w);
+                 return pw ? pw->base_clip_rect() : std::optional<Rect>{};
+             },
+             "Override: Rect to clip the children to while painting, or None.")
+        .def("attached",
+             [](Widget& w, Context& c) {
+                 if (auto* pw = dynamic_cast<PyWidget*>(&w)) pw->base_attached(c);
+             },
+             nb::arg("context"),
+             "Override: called once when the widget joins a Context (on the "
+             "first tick after it was added).")
         .def("on_event",
              [](Widget& w, const Event& e) { return w.on_event(e); },
-             nb::arg("event"))
-        .def("tick", [](Widget& w, Time t) { w.tick(t); }, nb::arg("time"))
+             nb::arg("event"),
+             "Override: return True to consume. Mouse events (MouseMove, "
+             "MousePress, MouseRelease, Click, DoubleClick, Scroll) reach the "
+             "widget under the pointer — or the mouse-capture widget — and "
+             "bubble to ancestors until consumed; every button is delivered "
+             "(check event.button). Key events go to the focused widget "
+             "(falling back to the hovered one) and bubble; KeyRelease only "
+             "follows a KeyPress the widget tree received. TextInput needs "
+             "focus (focusable() -> True). MouseEnter/MouseLeave and "
+             "FocusGained/FocusLost go to the affected widget only. Use "
+             "context.capture_mouse(self) on press so a drag keeps receiving "
+             "moves and the release outside your bounds.")
+        .def("tick", [](Widget& w, Time t) { w.tick(t); }, nb::arg("time"),
+             "Override: per-frame update; time.now / time.dt in seconds. "
+             "Use this clock, not wall time, for animation.")
         .def("stretch_cross", [](Widget& w) { return w.stretch_cross(); })
         .def("expands_main", [](Widget& w) { return w.expands_main(); })
         .def("focusable", [](Widget& w) { return w.focusable(); })
@@ -908,6 +1071,25 @@ NB_MODULE(_slikui, m) {
         .def_rw("id", &Widget::id)
         .def_rw("visible", &Widget::visible)
         .def_rw("enabled", &Widget::enabled)
+        .def_prop_ro("focused", [](Widget& w) { return w.focused; },
+                     "True while this widget holds keyboard focus.")
+        .def_prop_ro("context", [](Widget& w) { return w.context(); },
+                     nb::rv_policy::reference,
+                     "The Context this widget is attached to (None until the "
+                     "first tick after it joined a tree).")
+        .def("request_focus",
+             [](Widget& w) {
+                 if (!w.context())
+                     throw nb::value_error(
+                         "request_focus(): widget is not attached to a Context "
+                         "yet (call after the first tick)");
+                 w.context()->set_focus(&w);
+             },
+             "Give this widget keyboard focus (it receives FocusGained).")
+        .def("set_cursor",
+             [](Widget& w, Cursor c) -> Widget& { return w.set_cursor(c); },
+             nb::arg("cursor"), nb::rv_policy::reference,
+             "Cursor shape requested while hovered (needs a cursor host).")
         .def_prop_ro("type", [](Widget& w) { return std::string(w.widget_type()); })
         .def_prop_ro("tooltip", [](Widget& w) { return w.tooltip(); })
         .def_prop_rw("bounds",
@@ -997,10 +1179,12 @@ NB_MODULE(_slikui, m) {
     def_setter(label, "set_font_size", &Label::set_font_size);
     def_setter(label, "set_color", &Label::set_color);
     def_setter(label, "set_wrap_width", &Label::set_wrap_width);
+    label.def_prop_ro("text", [](Label& l) { return l.text(); });
 
     auto button = nb::class_<Button, Widget>(m, "Button");
     def_setter(button, "set_text", &Button::set_text);
     def_setter(button, "set_variant", &Button::set_variant);
+    button.def_prop_ro("text", [](Button& b) { return b.text(); });
     button.def("set_padding",
                [](Button& b, float h, float v) -> Button& { return b.set_padding(h, v); },
                nb::arg("h"), nb::arg("v"), nb::rv_policy::reference)
@@ -1150,7 +1334,7 @@ NB_MODULE(_slikui, m) {
                                    std::move(hint), enabled);
              },
              nb::arg("label"), nb::arg("action"), nb::arg("hint") = "",
-             nb::arg("enabled") = true, nb::rv_policy::reference_internal)
+             nb::arg("enabled") = true, nb::rv_policy::reference)
         .def("add_checkable",
              [](Menu& m, std::string label, std::function<bool()> is_checked,
                 std::function<void()> toggle, std::string hint, bool enabled) -> Menu& {
@@ -1159,7 +1343,7 @@ NB_MODULE(_slikui, m) {
              },
              nb::arg("label"), nb::arg("is_checked"), nb::arg("toggle"),
              nb::arg("hint") = "", nb::arg("enabled") = true,
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_submenu",
              [](Menu& m, std::string label, Menu& sub, std::string hint,
                 bool enabled) -> Menu& {
@@ -1167,10 +1351,10 @@ NB_MODULE(_slikui, m) {
                                       enabled);
              },
              nb::arg("label"), nb::arg("submenu"), nb::arg("hint") = "",
-             nb::arg("enabled") = true, nb::rv_policy::reference_internal,
+             nb::arg("enabled") = true, nb::rv_policy::reference,
              "Borrowed submenu: keep the Menu object alive on the Python side.")
         .def("add_separator", [](Menu& m) -> Menu& { return m.add_separator(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("set_min_width", [](Menu& m, float w) -> Menu& { return m.set_min_width(w); },
              nb::arg("w"), nb::rv_policy::reference)
         .def("on_open", [](Menu& m, std::function<void()> f) -> Menu& { return m.on_open(std::move(f)); },
@@ -1188,7 +1372,7 @@ NB_MODULE(_slikui, m) {
              [](MenuBar& b, std::string title) -> Menu& {
                  return b.add_menu(std::move(title));
              },
-             nb::arg("title"), nb::rv_policy::reference_internal);
+             nb::arg("title"), nb::rv_policy::reference);
 
     auto iconbutton = nb::class_<IconButton, Widget>(m, "IconButton");
     def_setter(iconbutton, "on_click", &IconButton::on_click);
@@ -1321,19 +1505,19 @@ NB_MODULE(_slikui, m) {
                  return g.add_property(std::move(label), label_w);
              },
              nb::arg("label"), nb::arg("label_width") = 110.f,
-             nb::rv_policy::reference_internal,
+             nb::rv_policy::reference,
              "Returns the row — add the editor widget into it.")
         .def("add_section",
              [](PropertyGrid& g, std::string title, bool open) -> PropertyGrid& {
                  return g.add_section(std::move(title), open);
              },
              nb::arg("title"), nb::arg("open") = false,
-             nb::rv_policy::reference_internal);
+             nb::rv_policy::reference);
 
     auto propertyrow = nb::class_<PropertyRow, Widget>(m, "PropertyRow");
     bind_add(propertyrow); // so `row.add(slikui.Slider, ...)` builds editors
     propertyrow.def("label", [](PropertyRow& r) -> Label& { return r.label(); },
-                    nb::rv_policy::reference_internal)
+                    nb::rv_policy::reference)
                  .def("editor", [](PropertyRow& r) -> Widget& { return r.editor(); },
                       nb::rv_policy::reference);
 
@@ -1345,7 +1529,7 @@ NB_MODULE(_slikui, m) {
                  return t.add_button(icon, std::move(on_click), std::move(tip));
              },
              nb::arg("icon"), nb::arg("on_click"), nb::arg("tip") = "",
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def("add_labeled_button",
              [](Toolbar& t, Icon icon, std::string label,
                 std::function<void()> on_click, std::string tip) -> IconButton& {
@@ -1353,7 +1537,7 @@ NB_MODULE(_slikui, m) {
                                      std::move(tip));
              },
              nb::arg("icon"), nb::arg("label"), nb::arg("on_click"),
-             nb::arg("tip") = "", nb::rv_policy::reference_internal)
+             nb::arg("tip") = "", nb::rv_policy::reference)
         .def("add_separator", [](Toolbar& t) { t.add_separator(); })
         .def("set_icon_px",
              [](Toolbar& t, float px) -> Toolbar& { return t.set_icon_px(px); },
@@ -1386,7 +1570,7 @@ NB_MODULE(_slikui, m) {
     bind_add(scroll); // routes into the scrolling content column
     scroll.def_prop_ro("content",
                        [](ScrollArea& s) -> Column& { return s.content(); },
-                       nb::rv_policy::reference_internal);
+                       nb::rv_policy::reference);
 
     auto listview = nb::class_<ListView, Widget>(m, "ListView");
     def_setter(listview, "set_items", &ListView::set_items);
@@ -1420,7 +1604,7 @@ NB_MODULE(_slikui, m) {
                       return a.add_section(std::move(title), open);
                   },
                   nb::arg("title"), nb::arg("open") = false,
-                  nb::rv_policy::reference_internal);
+                  nb::rv_policy::reference);
 
     auto splitter = nb::class_<Splitter, Widget>(m, "Splitter");
     splitter.def(nb::init<bool, std::string>(), nb::arg("vertical") = false,
@@ -1482,7 +1666,7 @@ NB_MODULE(_slikui, m) {
     dialog.def(nb::init<std::string, std::string>(), nb::arg("title"),
                nb::arg("id") = "")
         .def("content", [](Dialog& d) -> Column& { return d.content(); },
-             nb::rv_policy::reference_internal,
+             nb::rv_policy::reference,
              "The body column — add widgets here.")
         .def("set_title",
              [](Dialog& d, std::string t) -> Dialog& {
@@ -1506,7 +1690,7 @@ NB_MODULE(_slikui, m) {
              nb::arg("callback"), nb::rv_policy::reference)
         .def_prop_ro("close_button",
                      [](Dialog& d) -> IconButton& { return d.close_button(); },
-                     nb::rv_policy::reference_internal);
+                     nb::rv_policy::reference);
 
     auto messagebox = nb::class_<MessageBox, Dialog>(m, "MessageBox");
     messagebox.def(nb::init<std::string, std::string, std::string>(),
@@ -1515,7 +1699,7 @@ NB_MODULE(_slikui, m) {
              [](MessageBox& mb, std::string label, std::function<void()> action) -> Button& {
                  return mb.add_button(std::move(label), std::move(action));
              },
-             nb::arg("label"), nb::arg("action"), nb::rv_policy::reference_internal,
+             nb::arg("label"), nb::arg("action"), nb::rv_policy::reference,
              "Right-aligned action button; the callback runs, then the "
              "message box closes.");
 
@@ -1548,10 +1732,10 @@ NB_MODULE(_slikui, m) {
              },
              nb::arg("placeholder"), nb::rv_policy::reference)
         .def("field", [](SearchBox& b) -> TextField& { return b.field(); },
-             nb::rv_policy::reference_internal)
+             nb::rv_policy::reference)
         .def_prop_ro("clear_button",
                      [](SearchBox& b) -> IconButton& { return b.clear_button(); },
-                     nb::rv_policy::reference_internal);
+                     nb::rv_policy::reference);
 
     auto statusbar = nb::class_<StatusBar, Row>(m, "StatusBar");
     bind_add(statusbar); // right-side widgets: bar.add(slikui.ProgressBar, ...)
@@ -1614,13 +1798,13 @@ NB_MODULE(_slikui, m) {
              "path()/selection(): current directory and the picked file ('' "
              "when nothing is chosen).")
         .def_prop_ro("list", [](FileBrowser& fb) -> ListView& { return fb.list(); },
-                     nb::rv_policy::reference_internal)
+                     nb::rv_policy::reference)
         .def_prop_ro("name_field",
                      [](FileBrowser& fb) -> TextField& { return fb.name_field(); },
-                     nb::rv_policy::reference_internal)
+                     nb::rv_policy::reference)
         .def_prop_ro("open_button",
                      [](FileBrowser& fb) -> Button& { return fb.open_button(); },
-                     nb::rv_policy::reference_internal);
+                     nb::rv_policy::reference);
 
     auto imageview = nb::class_<ImageView, Widget>(m, "ImageView");
     imageview.def(nb::init<std::string>(), nb::arg("id") = "")
@@ -1718,9 +1902,14 @@ NB_MODULE(_slikui, m) {
     // ------------------------------------------------------------------ //
 
     m.def("shortcut_label",
-          [](Key key, unsigned mods) { return shortcut_label(key, mods); },
-          nb::arg("key"), nb::arg("mods"),
-          "\"Ctrl+Shift+S\" (\"\u2318\u21e7S\" on Apple) — for menu hints.");
+          [](Key key, unsigned mods, Context* context) {
+              return context ? shortcut_label(key, mods, context->font())
+                             : shortcut_label(key, mods);
+          },
+          nb::arg("key"), nb::arg("mods"), nb::arg("context").none() = nb::none(),
+          "\"Ctrl+Shift+S\" (\"\u2318\u21e7S\" on Apple) — for menu hints.\n\n"
+          "Pass ``context`` to spell out any symbol its font cannot draw (menus\n"
+          "do this themselves); without it the label may show missing-glyph boxes.");
     m.def("find_system_font", &find_system_font,
           "First system TTF that opens (best-effort; '' if none).");
 }

@@ -114,4 +114,5 @@ instead. Add instances with `container.add_widget(obj)` or
   header-only, nothing to link.
 - Source layout: `python/slikui/_slikui` (compiled bindings),
   `slikui/_py` (App, builder, events, pixels, CanvasSink),
-  `python/tests`, `python/examples`.
+  `slikui/examples` (shipped demos), `python/tests`,
+  `python/examples` (repo-only interactive twins).

@@ -55,6 +55,7 @@ The C++ side is header-only, nothing to link:
 ```sh
 pip install -e .                # editable, into your venv — from the repo root
 python -m pytest python/tests   # widgets, events, custom widgets, renderer parity
-python python/examples/hello.py # writes hello.png
+python -m slikui.examples.hello # shipped demos: writes hello.png in CWD
+python -m slikui.examples --list      # the whole shipped suite
 python python/examples/glfw_demo.py   # interactive GLFW + OpenGL demo
 ```

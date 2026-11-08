@@ -1,0 +1,20 @@
+# nanobind stubgen pattern file for slikui._slikui (see tools/gen_stubs.py).
+# Adds the Python-side sugar that slikui/_py/builder.py patches onto the
+# bound classes at import time, so type checkers and agents see it.
+
+slikui._slikui.__prefix__:
+    from typing import TypeVar
+    _W = TypeVar("_W", bound="Widget")
+
+slikui._slikui.Widget.__suffix__:
+    def add(self, cls: type[_W], *args: object, **props: object) -> _W:
+        """
+        Construct a child of type `cls` with `args` and apply each keyword
+        as a setter: `add(slikui.Label, "hi", font_size=26)` calls
+        set_font_size(26). Python subclasses of slikui.Widget are added via
+        add_widget(). Returns the new child.
+        """
+
+slikui._slikui.Context.__suffix__:
+    def set_root(self, cls: type[_W], *args: object, **props: object) -> _W:
+        """Replace the root widget: `set_root(slikui.Column, padding=16)`."""

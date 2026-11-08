@@ -29,15 +29,24 @@ namespace slikui {
 struct Theme;   // style/theme.hpp
 struct PaintEnv; // widgets/env.hpp — draw list + theme + font for paint()
 class Context;   // context.hpp — back-reference set during arrange
+class Widget;
 
 // Defined in context.hpp: logical px per framebuffer px for a widget's context.
 float theme_scale_of(const Context* ctx);
+// Defined in context.hpp: drop every Context reference (focus, hover, mouse
+// capture, press targets) to a widget that is being destroyed.
+void context_forget(Context* ctx, const Widget* w) noexcept;
 
 class Widget {
 public:
     Widget() = default;
     explicit Widget(std::string id) : id(std::move(id)) {}
-    virtual ~Widget() = default;
+    // A destroyed widget must not stay focused/hovered/captured: the Context
+    // would later dispatch into freed memory. ctx_alive_ guards the reverse
+    // case — a borrowed widget (Menu, Dialog) outliving its Context.
+    virtual ~Widget() {
+        if (ctx && !ctx_alive_.expired()) context_forget(ctx, this);
+    }
 
     Widget(const Widget&) = delete;
     Widget& operator=(const Widget&) = delete;
@@ -74,7 +83,13 @@ public:
 
     virtual void paint(const PaintEnv&) const {}
 
-    // Paints this widget and its visible subtree.
+    // Paints after (on top of) the subtree, outside this widget's own
+    // clip_rect: decorations over children — marks on a wrapped Slider's
+    // track, selection outlines, focus rings around content.
+    virtual void paint_over(const PaintEnv&) const {}
+
+    // Paints this widget and its visible subtree: paint, children (inside
+    // clip_rect), then paint_over.
     void paint_tree(const PaintEnv& env) const {
         if (!visible) return;
         paint(env);
@@ -82,6 +97,7 @@ public:
         if (clip) env.list.push_clip(*clip);
         for (const auto& c : children) c->paint_tree(env);
         if (clip) env.list.pop_clip();
+        paint_over(env);
     }
 
     // Children get the event first (topmost child first). Return true to
@@ -176,6 +192,7 @@ public:
 
 protected:
     Context* ctx = nullptr;     // set by Context::arrange_tree (theme/font access)
+    std::weak_ptr<const bool> ctx_alive_; // expires when ctx is destroyed
     std::string tooltip_;       // hover-delay tooltip text
     Widget* context_menu_ = nullptr;  // right-click target (borrowed, see above)
     Cursor hover_cursor_ = Cursor::Arrow; // requested while hovered

@@ -285,10 +285,11 @@ class CanvasSink(RenderSink):
                     _U32(c.color.b), sa)
 
     def _sample_alpha(self, tex, u, v):
-        """detail::sample_alpha — bilinear alpha, clamped, rounded (+0.5)."""
+        """detail::sample_alpha — bilinear alpha at texel centers (i + 0.5),
+        clamped, rounded (+0.5)."""
         th, tw = tex.shape
-        fx = np.maximum(np.minimum(u, _F32(tw - 1)), _F32(0))
-        fy = np.maximum(np.minimum(v, _F32(th - 1)), _F32(0))
+        fx = np.maximum(np.minimum(u - _F32(0.5), _F32(tw - 1)), _F32(0))
+        fy = np.maximum(np.minimum(v - _F32(0.5), _F32(th - 1)), _F32(0))
         x0 = fx.astype(np.int64)
         y0 = fy.astype(np.int64)
         x1 = np.minimum(x0 + 1, tw - 1)

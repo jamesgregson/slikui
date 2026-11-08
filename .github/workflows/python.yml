@@ -54,7 +54,9 @@ jobs:
       CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
       CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
       CIBW_TEST_REQUIRES: "pytest numpy pillow"
-      CIBW_TEST_COMMAND: "python -m pytest {package}/python/tests -q"
+      # The shipped examples double as the wheel's acceptance test: every
+      # scripted smoke pass runs against the built binary.
+      CIBW_TEST_COMMAND: "python -m pytest {package}/python/tests -q && python -m slikui.examples --smoke all"
       CIBW_BUILD_VERBOSITY: 1
     steps:
       - uses: actions/checkout@v4

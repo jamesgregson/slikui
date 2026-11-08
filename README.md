@@ -57,6 +57,14 @@ ui.tick(0.0, 1 / 60)                               # layout + animation
 frame = ui.render()                                # zero-copy (H, W) uint32 ndarray
 ```
 
+Eight examples ship in the wheel ([gallery](https://jamesgregson.github.io/slikui/guide/examples/)):
+
+```sh
+pip install "slikui-python[demo]"                  # + glfw/PyOpenGL for live windows
+python -m slikui.examples --list
+python -m slikui.examples.controls --window        # open one live
+```
+
 ## Highlights
 
 - **Header-only** — `slikui.hpp` (multi-header) or `dist/slikui.hpp`

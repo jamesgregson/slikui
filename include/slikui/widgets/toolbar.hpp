@@ -67,19 +67,29 @@ public:
             hover_.target = bounds.contains(e.pos) ? 1.f : 0.f;
             return false;
         case Event::Type::MousePress:
-            if (enabled && bounds.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
                 armed_ = true;
                 pressed_.target = 1;
                 return true;
             }
             return false;
         case Event::Type::MouseRelease:
-            if (armed_) {
+            if (e.button == MouseLeft && armed_) {
                 armed_ = false;
                 pressed_.target = 0;
-                if (enabled && bounds.contains(e.pos) && on_click_) on_click_();
                 return true;
             }
+            return false;
+        case Event::Type::Click: // Context: press + release on this widget
+            if (e.button == MouseLeft && enabled) {
+                if (on_click_) on_click_();
+                return true;
+            }
+            return false;
+        case Event::Type::MouseLeave: // un-hover; a drag-off also disarms
+            hover_.target = 0;
+            armed_ = false;
+            pressed_.target = 0;
             return false;
         case Event::Type::KeyPress:
             if (focused && (e.key == Key::Enter || e.key == Key::Space)) {

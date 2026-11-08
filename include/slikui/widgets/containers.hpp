@@ -317,7 +317,7 @@ public:
     }
 
     bool on_event(const Event& e) override {
-        if (e.type == Event::Type::MousePress && enabled && header_rect_.contains(e.pos)) {
+        if (e.type == Event::Type::MousePress && e.button == MouseLeft && enabled && header_rect_.contains(e.pos)) {
             set_open_state(!open_);
             return true;
         }
@@ -471,7 +471,7 @@ public:
             }
             return false;
         case Event::Type::MousePress:
-            if (enabled && divider_.contains(e.pos)) {
+            if (e.button == MouseLeft && enabled && divider_.contains(e.pos)) {
                 dragging_ = true;
                 ctx->capture_mouse(this);
                 update_fraction(e.pos);
@@ -479,7 +479,7 @@ public:
             }
             return false;
         case Event::Type::MouseRelease:
-            if (dragging_) {
+            if (e.button == MouseLeft && dragging_) {
                 dragging_ = false;
                 ctx->release_mouse(this);
                 return true;

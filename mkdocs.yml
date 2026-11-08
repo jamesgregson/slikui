@@ -61,7 +61,10 @@ markdown_extensions:
       anchor_linenums: true
       line_spans: __span
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      # Demo-code includes: docs quote extracted regions of the shipped
+      # examples (tools/extract_snippets.py -> docs/includes/examples/).
+      base_path: docs
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
@@ -100,6 +103,7 @@ nav:
       - Text & fonts: guide/text-fonts.md
       - Theming: guide/theming.md
       - Custom widgets: guide/custom-widgets.md
+      - Python examples: guide/examples.md
       - Render backends: guide/backends.md
   - Reference:
       - Widget index: reference/index.md
@@ -118,3 +122,4 @@ nav:
 # files served from docs/ but excluded from the nav warning check
 not_in_nav: |
     stylesheets/*
+    includes/**
