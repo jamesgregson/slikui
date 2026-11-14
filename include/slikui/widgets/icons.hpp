@@ -1,4 +1,4 @@
-// slikui/widgets/icons.hpp — procedural icon set painted from DrawList
+// slikui/widgets/icons.hpp - procedural icon set painted from DrawList
 // primitives. No icon font, no assets: theme-tinted, resolution-independent,
 // zero bytes shipped. Designed on a 24x24 grid and scaled to the target box.
 #pragma once

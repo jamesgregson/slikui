@@ -56,7 +56,7 @@ def test_views_and_scrollarea_routing():
     scroll.add(slikui.Button, "also content")
     root.add(slikui.ListView, items=["alpha", "beta", "gamma"], selected=1)
     root.add(slikui.Tabs, tabs=["Home", "Edits", "View"], selected=1)
-    root.add(slikui.Dropdown, items=["Linear", "Nearest", "Cubic"], placeholder="Filter…")
+    root.add(slikui.Dropdown, items=["Linear", "Nearest", "Cubic"], placeholder="Filter...")
     ui.tick(0.0, 1 / 60)
     assert len(np.unique(ui.render())) > 1
     assert scroll.content.find("nope") is None
@@ -115,7 +115,7 @@ def test_first_frame_is_complete():
     # frame reaches the sink, so the first frame already matches the next.
     ui, root = make_ui()
     root.add(slikui.TextField, text="jane@example.com")
-    root.add(slikui.TextArea, rows=2, text="no GPU, no window — U, j, @, x")
+    root.add(slikui.TextArea, rows=2, text="no GPU, no window - U, j, @, x")
     frames = []
     for i in range(3):
         ui.tick(i / 60, 1 / 60)

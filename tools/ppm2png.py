@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/ppm2png.py — convert P6 PPM to PNG (stdlib only)."""
+"""tools/ppm2png.py - convert P6 PPM to PNG (stdlib only)."""
 import struct
 import sys
 import zlib

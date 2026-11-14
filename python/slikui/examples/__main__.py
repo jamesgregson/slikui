@@ -1,6 +1,6 @@
-"""``python -m slikui.examples`` — launcher for the shipped demo suite.
+"""``python -m slikui.examples`` - launcher for the shipped demo suite.
 
-    NAME|NUMBER [--window]   run one example (headless → ./NAME.png, or live)
+    NAME|NUMBER [--window]   run one example (headless -> ./NAME.png, or live)
     --list                   print the examples with their run commands
     --where                  print this package's directory (read the sources)
     --contract               print what a custom widget receives for each
@@ -122,7 +122,7 @@ def _smoke(which, out_dir):
         png = os.path.join(out_dir, f"{name}_smoke.png")
         try:
             mod.main(["--smoke", png])
-        except Exception as exc:  # noqa: BLE001 — report all, exit nonzero
+        except Exception as exc:  # noqa: BLE001 - report all, exit nonzero
             failed.append(name)
             print(f"[{name}] FAILED: {exc}")
     if failed:

@@ -1,11 +1,11 @@
-"""Shipped example suite — the usage reference that matches this exact
+"""Shipped example suite - the usage reference that matches this exact
 version of slikui. ``python -m slikui.examples`` lists and runs them;
 ``--where`` prints this directory, ``--contract`` prints the custom-widget
 event contract measured live.
 
 Where to look:
 
-    hello.py      App, set_root, add(cls, **props), tick, render → numpy
+    hello.py      App, set_root, add(cls, **props), tick, render -> numpy
     gallery.py    every built-in widget in one tree
     events.py     custom widget event anatomy: what arrives, in what order
     paint.py      custom drawing: Meter, Sparkline, RadialGauge, ClockFace,
@@ -29,8 +29,8 @@ Custom-widget contract (subclass ``slikui.Widget``, call
   first tick, and ``self.context`` is None until then.
 * Paint order: ``paint``, then the children, then ``paint_over``.
 * Mouse events (MouseMove/Press/Release, Click, DoubleClick, Scroll) go to
-  the widget under the pointer — or the one that called
-  ``self.context.capture_mouse(self)`` — and bubble to ancestors until one
+  the widget under the pointer - or the one that called
+  ``self.context.capture_mouse(self)`` - and bubble to ancestors until one
   returns True. Every button is delivered; check ``e.button``. Capture on
   press and ``release_mouse`` on release for drags.
 * Click fires after a press + release on the same widget; ``e.clicks``
@@ -40,7 +40,7 @@ Custom-widget contract (subclass ``slikui.Widget``, call
   only. FocusLost also arrives when the app loses focus mid-drag.
 * KeyPress/KeyRelease go to the focused widget (else the hovered one); Tab,
   Escape and shortcut chords are consumed first. TextInput needs focus.
-* Custom widgets draw no text — compose ``Label`` widgets beside them.
+* Custom widgets draw no text - compose ``Label`` widgets beside them.
 * Built-in widget classes can't be subclassed in Python; wrap one in a
   custom widget and decorate it with ``paint_over`` (LimitSlider).
 * Keep the wrappers ``add()`` returns (``self.slider = self.add(...)``):
@@ -107,5 +107,5 @@ def load(name: str):
 
 
 def numbered():
-    """``(num, example)`` pairs with stable ``01``… titles for humans."""
+    """``(num, example)`` pairs with stable ``01``... titles for humans."""
     return [(f"{i:02d}", e) for i, e in enumerate(REGISTRY, 1)]

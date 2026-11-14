@@ -1,18 +1,18 @@
-"""slikui — Python bindings for the slikui C++ UI library.
+"""slikui - Python bindings for the slikui C++ UI library.
 
 Distribution `slikui`, import package `slikui`, compiled module `slikui._slikui`.
 Layering: `_slikui` binds the C++ API 1:1; `slikui/_py` adds a thin Pythonic
-surface (kwargs → setters, App shell, pixel helpers).
+surface (kwargs -> setters, App shell, pixel helpers).
 
 Usage reference for this exact version: the shipped examples in
-`slikui.examples` — `help(slikui.examples)` has the index and the
+`slikui.examples` - `help(slikui.examples)` has the index and the
 custom-widget contract; `python -m slikui.examples --where` prints their
 directory; `--contract` prints what a custom widget receives, measured live.
 For custom widgets read `events.py` first, then `paint.py` and
 `controls.py`. Type stubs: `slikui/_slikui.pyi`.
 """
 
-from slikui._slikui import (  # noqa: F401 — re-exported
+from slikui._slikui import (  # noqa: F401 - re-exported
 
     Accordion,
     Button,
@@ -102,9 +102,9 @@ from slikui._py.renderer import CanvasSink
 from slikui._py.drawcmd import DRAWCMD_DTYPE
 from slikui._py.gl import GLSink, read_framebuffer
 from slikui._py.moderngl_sink import ModernGLSink
-from slikui import glfw_input  # noqa: F401 — imports glfw lazily
+from slikui import glfw_input  # noqa: F401 - imports glfw lazily
 from slikui.glfw_input import GlfwInput
-from slikui import sdl_input  # noqa: F401 — imports sdl3 lazily
+from slikui import sdl_input  # noqa: F401 - imports sdl3 lazily
 from slikui.sdl_input import SdlInput
 from slikui._py.events import (
     focus_lost,
@@ -121,13 +121,13 @@ from slikui._py.events import (
     text_input_str,
 )
 from slikui._py.pixels import save_image, to_rgba
-from slikui._slikui import (  # noqa: F401 — GPU batching for your own sink
+from slikui._slikui import (  # noqa: F401 - GPU batching for your own sink
     GPU_FRAGMENT_SHADER,
     GPU_VERTEX_SHADER,
     GpuBatcher,
     GpuKind,
 )
-from slikui._slikui import (  # noqa: F401 — input enums
+from slikui._slikui import (  # noqa: F401 - input enums
     Event,
     EventType,
     Key,

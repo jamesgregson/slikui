@@ -1,4 +1,4 @@
-// tests/test_layout.cpp — constraints and flex distribution.
+// tests/test_layout.cpp - constraints and flex distribution.
 #include "test.hpp"
 
 #include "slikui/layout/layout.hpp"

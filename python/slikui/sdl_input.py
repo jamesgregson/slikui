@@ -1,10 +1,10 @@
-"""SDL3 → slikui event translation for YOUR window (PySDL3, ``import sdl3``).
+"""SDL3 -> slikui event translation for YOUR window (PySDL3, ``import sdl3``).
 
 Nothing here creates a window or touches GL, and ``import slikui`` never
 imports sdl3 (it is loaded on first use). SDL hands events to the app through
 its queue (``SDL_PollEvent``) rather than callbacks, so the levels are:
 
-1. ``translate(ev)`` — one SDL_Event -> list of slikui events (empty when
+1. ``translate(ev)`` - one SDL_Event -> list of slikui events (empty when
    slikui has no use for it). You own the loop and forward what you want::
 
        ev = sdl3.SDL_Event()
@@ -15,9 +15,9 @@ its queue (``SDL_PollEvent``) rather than callbacks, so the levels are:
                else:
                    my_scene(e)
 
-2. ``SdlInput(window, target)`` — bound to one window: filters by window id,
+2. ``SdlInput(window, target)`` - bound to one window: filters by window id,
    enables SDL text input on it, delivers to ``target`` (App, GlApp, Context
-   — anything with ``handle(event)``) or queues (``take()``)::
+   - anything with ``handle(event)``) or queues (``take()``)::
 
        inp = slikui.SdlInput(window, app)
        while sdl3.SDL_PollEvent(ctypes.byref(ev)):

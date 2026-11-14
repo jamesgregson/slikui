@@ -1,7 +1,7 @@
-// tests/test_font.cpp — an invalid font must degrade to zero metrics, never
+// tests/test_font.cpp - an invalid font must degrade to zero metrics, never
 // crash. Before the ok_ guards, every Font entry point dereferenced the
 // (null) stbtt font data: this test segfaulted instead of failing a CHECK.
-// Reproduces the manylinux-wheel CI failure — containers ship no fonts.
+// Reproduces the manylinux-wheel CI failure - containers ship no fonts.
 #include "test.hpp"
 
 #include "slikui/backends/software/software.hpp"
@@ -106,7 +106,7 @@ TEST(bundled_default_font_loads_and_covers_ui_text) {
 
     // Subset coverage: Latin-1 and General Punctuation have real ink;
     // a codepoint outside the subset falls back to .notdef, not a crash.
-    CHECK(!font.glyph(0x00E9, 16.f).uv.empty()); // é
+    CHECK(!font.glyph(0x00E9, 16.f).uv.empty()); // e
     CHECK(!font.glyph(0x2014, 16.f).uv.empty()); // em dash
     CHECK(!font.glyph(0x2713, 16.f).uv.empty()); // check mark
     font.glyph(0x4E2D, 16.f);                    // CJK: not in the subset

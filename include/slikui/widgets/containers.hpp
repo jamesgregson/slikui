@@ -1,4 +1,4 @@
-// slikui/widgets/containers.hpp — Column, Row, Panel, Spacer, Divider.
+// slikui/widgets/containers.hpp - Column, Row, Panel, Spacer, Divider.
 #pragma once
 
 #include "slikui/context.hpp"
@@ -52,7 +52,7 @@ protected:
     }
 };
 
-// NOTE: containers do NOT paint their children in paint() — Widget::paint_tree
+// NOTE: containers do NOT paint their children in paint() - Widget::paint_tree
 // already recurses. Painting them here too would emit every command twice
 // (doubling alpha coverage on text and antialiased edges).
 
@@ -246,7 +246,7 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Expander — collapsible section: a chevron + title header above a Column of
+// Expander - collapsible section: a chevron + title header above a Column of
 // content. Closed: header only; children get zero-size frames so they stop
 // painting and intercepting clicks.
 // ---------------------------------------------------------------------------
@@ -359,7 +359,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Accordion — a stack of Expander sections. Exclusive mode (the default)
+// Accordion - a stack of Expander sections. Exclusive mode (the default)
 // closes the other sections when one opens, so at most one is expanded at a
 // time; set_exclusive(false) turns it into a plain stack of collapsible
 // groups. Sections are added with add_section() and filled via the returned
@@ -390,9 +390,9 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Splitter — two panes with a draggable divider. add() the two panes in
-// order; extra children are ignored. vertical=false → left|right,
-// vertical=true → top|bottom. The fraction is the first pane's share of the
+// Splitter - two panes with a draggable divider. add() the two panes in
+// order; extra children are ignored. vertical=false -> left|right,
+// vertical=true -> top|bottom. The fraction is the first pane's share of the
 // space minus the grab area.
 // ---------------------------------------------------------------------------
 class Splitter : public Widget {

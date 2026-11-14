@@ -1,12 +1,12 @@
 # Editors
 
-Widgets for tuning numbers and colors in demo panels — all C++ core, so the
+Widgets for tuning numbers and colors in demo panels - all C++ core, so the
 Python bindings get the same surface (see `python/tests/test_editors.py`).
 
 `DragValue` scrubs a value like a Blender number field: drag horizontally to
 change it, click to type, Enter commits, Escape cancels, arrows nudge when
 focused. `Vec2Edit`/`Vec3Edit`/`Vec4Edit` give one labeled field per axis and
-**borrow** the caller's `float[N]` — edits write into it and external writes
+**borrow** the caller's `float[N]` - edits write into it and external writes
 mirror back on the next tick (numpy arrays work as-is). `ColorEdit` is a
 swatch that opens an SV square + hue popup with hex and RGBA fields.
 `Segmented` is a compact radio-style row.
@@ -74,7 +74,7 @@ middle color chip so the picker popup is open, and dumps the framebuffer.
 
 `set_speed` scales drag sensitivity (value change per pixel), `set_step`
 quantizes, `set_int_mode` makes it an integer field, and
-`set_prefix`/`set_suffix`/`set_format` dress the readout — the example above
+`set_prefix`/`set_suffix`/`set_format` dress the readout - the example above
 reads `exp 1.50 EV`.
 
 | API | Signature |
@@ -109,8 +109,8 @@ and external writes mirror back on the next tick.
 
 | API | Signature |
 |-----|-----------|
-| `set_labels` | `(std::string)` — one char per axis |
-| `set_range` | `(float min, float max)` — all axes |
+| `set_labels` | `(std::string)` - one char per axis |
+| `set_range` | `(float min, float max)` - all axes |
 | `set_axis_range` | `(int axis, float min, float max)` |
 | `set_int_mode` / `set_step` | like DragValue |
 | `on_change` | `(std::function<void()>)` |

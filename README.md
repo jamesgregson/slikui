@@ -1,4 +1,4 @@
-# slikui — a sleek, header-only C++ UI library for graphics applications
+# slikui - a sleek, header-only C++ UI library for graphics applications
 
 [![cpp CI](https://github.com/jamesgregson/slikui/actions/workflows/cpp.yml/badge.svg)](https://github.com/jamesgregson/slikui/actions/workflows/cpp.yml)
 [![python CI](https://github.com/jamesgregson/slikui/actions/workflows/python.yml/badge.svg)](https://github.com/jamesgregson/slikui/actions/workflows/python.yml)
@@ -6,21 +6,21 @@
 
 Retained-mode widget tree, declarative builder API, one narrow rendering
 contract that runs on **raw pixels or any graphics API**. C++20, header-only,
-no dependencies — with [Python bindings](https://jamesgregson.github.io/slikui/getting-started/python/)
+no dependencies - with [Python bindings](https://jamesgregson.github.io/slikui/getting-started/python/)
 as first-class citizens.
 
-**Docs: <https://jamesgregson.github.io/slikui/>** — guides, per-widget
+**Docs: <https://jamesgregson.github.io/slikui/>** - guides, per-widget
 reference with real rendered examples, and the whole site as plain markdown
 for agents and offline use
 ([llms.txt](https://jamesgregson.github.io/slikui/llms.txt),
 [llms-full.txt](https://jamesgregson.github.io/slikui/llms-full.txt)).
 
-![slikui cube viewer — the GLFW + OpenGL demo: torus over a procedural sky,
+![slikui cube viewer - the GLFW + OpenGL demo: torus over a procedural sky,
 controls grouped in an accordion panel](docs/images/cube_viewer.png)
 
 ## Quickstart
 
-**C++** — drop in the header, build a tree, drive the frame loop
+**C++** - drop in the header, build a tree, drive the frame loop
 ([more](https://jamesgregson.github.io/slikui/getting-started/cpp/)):
 
 ```cpp
@@ -42,7 +42,7 @@ root.add<slikui::Button>("Save").set_variant(slikui::Button::Variant::Primary);
 // frame loop: ctx.handle(event); ctx.tick(time); ctx.render();
 ```
 
-**Python** — `pip install slikui-python`, headless by default
+**Python** - `pip install slikui-python`, headless by default
 ([more](https://jamesgregson.github.io/slikui/getting-started/python/)):
 
 ```python
@@ -67,23 +67,23 @@ python -m slikui.examples.controls --window        # open one live
 
 ## Highlights
 
-- **Header-only** — `slikui.hpp` (multi-header) or `dist/slikui.hpp`
+- **Header-only** - `slikui.hpp` (multi-header) or `dist/slikui.hpp`
   (amalgamated). No linking, no code generation.
-- **Backends** — CPU rasterizer over raw pixels (headless, embedded, blit
+- **Backends** - CPU rasterizer over raw pixels (headless, embedded, blit
   into any engine) and GL 3.3 core on system headers. Anything else
   implements one interface: [Render backends](https://jamesgregson.github.io/slikui/guide/backends/).
-- **Widget set** — 50+ widgets, from buttons and sliders to plots, trees,
+- **Widget set** - 50+ widgets, from buttons and sliders to plots, trees,
   tables, menus, dialogs and image views:
   [widget index](https://jamesgregson.github.io/slikui/reference/).
-- **Theming** — palette-driven styling, 8 built-in presets, HiDPI scale:
+- **Theming** - palette-driven styling, 8 built-in presets, HiDPI scale:
   [Theming](https://jamesgregson.github.io/slikui/guide/theming/).
-- **Testable** — one event vocabulary, synthetic events drive the real
+- **Testable** - one event vocabulary, synthetic events drive the real
   dispatch path, golden-image pixel checks in CI:
   [Input & events](https://jamesgregson.github.io/slikui/guide/input-events/).
 
 Every screenshot in the docs is real output:
 `tools/components_capture.cpp` builds each tree with the software backend,
-simulates a second of interaction, and dumps the framebuffer — the snippets
+simulates a second of interaction, and dumps the framebuffer - the snippets
 are the capture code.
 
 | | | |
@@ -99,7 +99,7 @@ cmake --build build -j
 ctest --test-dir build          # golden-image pixel checks included
 ```
 
-Six examples (`01_hello` … `05_showcase`) and the Python twins —
+Six examples (`01_hello` ... `05_showcase`) and the Python twins -
 [Development](docs/development.md) has the full tour, plus how to regenerate
 the docs images, amalgamate the header, and cut a release.
 

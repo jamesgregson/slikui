@@ -1,4 +1,4 @@
-// slikui/render/draw_list.hpp — retained, API-agnostic display list.
+// slikui/render/draw_list.hpp - retained, API-agnostic display list.
 //
 // Widgets paint into a DrawList; backends (software rasterizer, OpenGL,
 // anything) consume it. This is the entire rendering contract between the

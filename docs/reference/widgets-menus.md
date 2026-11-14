@@ -7,7 +7,7 @@ and with a menu open, hovering another title switches to it. `Menu` holds
 items (`add_item`, `add_checkable`, `add_submenu`, `add_separator`) with
 right-aligned shortcut hints; disabled items swallow clicks.
 
-Menus are **borrowed** popups — build once, open many times. Checkmark state
+Menus are **borrowed** popups - build once, open many times. Checkmark state
 is read through a callback at paint time and `on_open` fires before each show
 so you can refresh enabled flags. Escape unwinds submenus one level per
 press.
@@ -19,7 +19,7 @@ The capture below opens the **File** menu by simulating a click on it:
     ```cpp
     auto& bar = root.add<slikui::MenuBar>();
     auto& file = bar.add_menu("File");
-    file.add_item("Open…", open_fn, "Ctrl+O");
+    file.add_item("Open...", open_fn, "Ctrl+O");
     file.add_item("Save", save_fn, "Ctrl+S");
     file.add_separator();
     file.add_item("Quit", quit_fn, "Ctrl+Q");
@@ -33,7 +33,7 @@ The capture below opens the **File** menu by simulating a click on it:
     ```python
     bar = root.add(slikui.MenuBar)
     file = bar.add_menu("File")
-    file.add_item("Open…", open_fn, hint="Ctrl+O")
+    file.add_item("Open...", open_fn, hint="Ctrl+O")
     file.add_item("Save", save_fn, hint="Ctrl+S")
     file.add_separator()
     file.add_item("Quit", quit_fn, hint="Ctrl+Q")
@@ -54,7 +54,7 @@ The capture below opens the **File** menu by simulating a click on it:
 
 ## Context menus and global shortcuts
 
-Any widget can carry a right-click menu: `widget.set_context_menu(&menu)` —
+Any widget can carry a right-click menu: `widget.set_context_menu(&menu)` -
 the nearest ancestor with one wins. Global accelerators live on the Context:
 `ctx.add_shortcut(Key, mods, fn)` fires before widget dispatch (a modifier is
 required, so typing never triggers one).
@@ -73,12 +73,12 @@ required, so typing never triggers one).
     ui.ctx.add_shortcut(slikui.Key.R, slikui.mods("ctrl"), render_fn)
     ```
 
-![The View menu opened as a borrowed popup over a viewport — the capture calls
+![The View menu opened as a borrowed popup over a viewport - the capture calls
 `open_context_menu`, which is exactly what a right-click does](../images/contextmenu.png)
 
 ## Toolbar, IconButton
 
-`Toolbar` is a strip of `IconButton`s — Button interaction (hover/press
+`Toolbar` is a strip of `IconButton`s - Button interaction (hover/press
 animation, keyboard activation, variants) with a procedural icon instead of
 text. `Toolbar::add_button(icon, fn, tip?)` renders an icon button;
 `add_button(icon, label, fn)` renders a small caption under the icon.
@@ -115,15 +115,15 @@ text. `Toolbar::add_button(icon, fn, tip?)` renders an icon button;
 
 | API | Signature |
 |-----|-----------|
-| `Toolbar::add_button` | `(Icon, fn, tip)` — returns `IconButton&` |
-| `Toolbar::add_button` (labeled) | `(Icon, label, fn)` · Python: `add_labeled_button` |
+| `Toolbar::add_button` | `(Icon, fn, tip)` - returns `IconButton&` |
+| `Toolbar::add_button` (labeled) | `(Icon, label, fn)` | Python: `add_labeled_button` |
 | `Toolbar::set_icon_px` / `set_background` | strip styling |
-| `IconButton::set_icon` | `(Icon)` · `set_icon_px` · `set_variant` · `on_click` |
+| `IconButton::set_icon` | `(Icon)` | `set_icon_px` | `set_variant` | `on_click` |
 
 ## The icon set
 
 The icon set in `slikui/widgets/icons.hpp` (~26 icons: play, pause, step,
 grid, camera, save, refresh, search, ...) is painted from DrawList
-primitives — no icon font, no assets, resolution-independent and
+primitives - no icon font, no assets, resolution-independent and
 theme-tinted. The full list is the `slikui::Icon` enum (`slikui.Icon.*` in
 Python).

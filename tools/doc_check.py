@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/doc_check.py — keep the docs honest.
+"""tools/doc_check.py - keep the docs honest.
 
 Parses headers and the python package as text (nothing is compiled) and
 verifies:
@@ -96,7 +96,7 @@ def main() -> int:
             continue
         if not re.search(rf"\b{c}\b", coverage):
             errors.append(
-                f"undocumented class: {c} — add to docs/reference/index.md "
+                f"undocumented class: {c} - add to docs/reference/index.md "
                 f"or the allowlist in tools/doc_check.py")
 
     docs_text = "\n".join(p.read_text() for p in sorted(DOCS.rglob("*.md")))
@@ -111,7 +111,7 @@ def main() -> int:
     for m in sorted(set(re.findall(r"slikui\.(\w+)", docs_text))):
         if m not in exports and m not in PY_INTERNAL:
             errors.append(
-                f"slikui.{m} is used in the docs but not exported — "
+                f"slikui.{m} is used in the docs but not exported - "
                 f"add it to python/slikui/__init__.py __all__ or fix the name")
 
     # 3b. shipped example modules: `python -m slikui.examples.<name>`.
@@ -122,7 +122,7 @@ def main() -> int:
                 f"unknown shipped example in docs: slikui.examples.{m} "
                 f"(known: {', '.join(sorted(ex_modules)) or 'none yet'})")
 
-    # 4. snippet includes — docs quote extracted regions of the shipped
+    # 4. snippet includes - docs quote extracted regions of the shipped
     #    examples (tools/extract_snippets.py); a target must exist and name a
     #    source whose # doc: markers are still live.
     include_re = re.compile(r'--8<--\s*"([^"]+)"')
@@ -147,7 +147,7 @@ def main() -> int:
                     or "# doc: end" not in text):
                 errors.append(
                     f"snippet source stale: {head.group(1)}#{head.group(2)} "
-                    f"— markers missing (referenced from "
+                    f"- markers missing (referenced from "
                     f"{p.relative_to(DOCS)})")
 
     # 5. images.
@@ -166,7 +166,7 @@ def main() -> int:
         twin = ROOT / "python" / "examples" / img.name
         if twin.exists():
             print(f"note: {img.name} exists in both docs/images and "
-                  f"python/examples — make sure the docs copy is the one the "
+                  f"python/examples - make sure the docs copy is the one the "
                   f"snippet renders (or write docs/images directly)")
 
     if errors:
@@ -176,7 +176,7 @@ def main() -> int:
         return 1
     includes = sum(1 for _ in (DOCS / "includes" / "examples").glob("*.md")) \
         if (DOCS / "includes" / "examples").exists() else 0
-    print(f"doc_check: OK — {len(classes)} classes, {len(exports)} python "
+    print(f"doc_check: OK - {len(classes)} classes, {len(exports)} python "
           f"exports, {len(referenced)} image references, "
           f"{includes} snippet includes")
     return 0

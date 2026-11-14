@@ -1,4 +1,4 @@
-"""01 — Hello, slikui: the smallest complete example.
+"""01 - Hello, slikui: the smallest complete example.
 
 One App, a two-widget column, one headless frame written to a numpy
 buffer. This is the flow the getting-started page teaches.
@@ -31,7 +31,7 @@ def build(app):
     hits = []
     root = app.set_root(slikui.Column, padding=16, gap=8)
     root.add(slikui.Label, "Hello, slikui!", font_size=26)
-    root.add(slikui.Label, "Python bindings — rendered headless to numpy") \
+    root.add(slikui.Label, "Python bindings - rendered headless to numpy") \
         .set_color(slikui.Color.from_hex(0x9AA0B5))
     row = root.add(slikui.Row, gap=10)
     row.add(slikui.Button, "Default")

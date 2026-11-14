@@ -11,8 +11,8 @@ tree has settled. Sinks:
                  into Python, with no drawing
     py-array     Python RenderSink reading `list.as_array()` (zero-copy view)
     gl           slikui.GLSink (PyOpenGL) into an offscreen FBO, glFinish()
-                 included — needs glfw + PyOpenGL + a display
-    mgl          slikui.ModernGLSink, same setup — needs moderngl
+                 included - needs glfw + PyOpenGL + a display
+    mgl          slikui.ModernGLSink, same setup - needs moderngl
 
 Run:  python python/benchmarks/bench_render.py [--frames N] [--scale S]
 """

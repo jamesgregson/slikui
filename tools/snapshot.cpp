@@ -1,4 +1,4 @@
-// tools/snapshot.cpp — headless render of the full widget set to a PPM.
+// tools/snapshot.cpp - headless render of the full widget set to a PPM.
 //
 //   clang++ -std=c++20 -Iinclude tools/snapshot.cpp -o /tmp/snapshot
 //   /tmp/snapshot /tmp/snapshot.ppm

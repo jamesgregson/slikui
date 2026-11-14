@@ -11,9 +11,9 @@ their main axis, distribute extra main-axis space to children whose
 
 | API | Signature |
 |-----|-----------|
-| `set_padding` | `(float all)` · `(float h, float v)` · `(Padding)` |
+| `set_padding` | `(float all)` | `(float h, float v)` | `(Padding)` |
 | `set_gap` | `(float px)` |
-| `set_cross` | `(CrossMode m)` — `Stretch`, `Start`, `Center` |
+| `set_cross` | `(CrossMode m)` - `Stretch`, `Start`, `Center` |
 | `add<T>(args...)` | construct + own a child, returns `T&` |
 
 ## Column / Row
@@ -24,7 +24,7 @@ fixed-size controls like buttons and switches opt out and hug.
 
 ## Panel
 
-A bordered, rounded container — a `Container` that paints a surface.
+A bordered, rounded container - a `Container` that paints a surface.
 
 | API | Signature |
 |-----|-----------|
@@ -45,9 +45,9 @@ A bordered, rounded container — a `Container` that paints a surface.
 | `Expander::set_open` | `(bool, bool fire_callback = false)` |
 | `Expander::on_toggle` | `(std::function<void(bool)>)` |
 | `Accordion::add_section` | `(title, open = false) -> Expander&` |
-| `Accordion::set_exclusive` | `(bool)` — default `true` |
+| `Accordion::set_exclusive` | `(bool)` - default `true` |
 
-Closed `Expander` children get zero frames and skip hit-testing — collapsing
+Closed `Expander` children get zero frames and skip hit-testing - collapsing
 is free.
 
 ## Splitter
@@ -55,5 +55,5 @@ is free.
 | API | Signature |
 |-----|-----------|
 | `Splitter(vertical)` | construct with `true` for stacked panes |
-| `set_fraction` | `(float 0–1)` |
+| `set_fraction` | `(float 0-1)` |
 | `on_change` | `(std::function<void(float)>)` |

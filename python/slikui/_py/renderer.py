@@ -1,11 +1,11 @@
-"""CanvasSink — a pure-Python (numpy) renderer implementing the slikui contract.
+"""CanvasSink - a pure-Python (numpy) renderer implementing the slikui contract.
 
 This is the "your renderer" seam: subclass `slikui.RenderSink`, and slikui hands
 you every frame as a flat command list (Rect/Line/Glyph/Image/ClipPush/ClipPop)
 plus texture uploads. CanvasSink rasterizes that list into a numpy uint32
 buffer with the exact same math as the C++ software backend in
-`include/slikui/backends/software/software.hpp` — same blend formula, same SDF
-coverage, same sampling — so frames come out pixel-identical.
+`include/slikui/backends/software/software.hpp` - same blend formula, same SDF
+coverage, same sampling - so frames come out pixel-identical.
 
 Pixel format: 0xAABBGGRR uint32, straight alpha, row-major (H, W).
 
@@ -198,7 +198,7 @@ class CanvasSink(RenderSink):
         if w <= 0 or h <= 0:
             return
         if radius <= 0:
-            # NOTE: matches C++ exactly — the fast path loops from int(r.x)
+            # NOTE: matches C++ exactly - the fast path loops from int(r.x)
             # with no per-pixel clip check, so a fractional origin paints the
             # pixel below clip.x too. Quirk kept on purpose.
             Y, X = self._grid(y, np.ceil(y + h) - 1, x, np.ceil(x + w) - 1)
@@ -261,7 +261,7 @@ class CanvasSink(RenderSink):
         self._blend(X, Y, mask, _U32(color.r), _U32(color.g), _U32(color.b), sa)
 
     def _quad_pixels(self, x, y, w, h):
-        """software::Sink::quad_pixels — pixels a textured quad covers: center
+        """software::Sink::quad_pixels - pixels a textured quad covers: center
         inside the quad, index inside the clip. [x0, x1) x [y0, y1) or None."""
         cx, cy, cw, ch = self._clips[-1]
         half = _F32(0.5)
@@ -300,7 +300,7 @@ class CanvasSink(RenderSink):
                     _U32(c.color.b), sa)
 
     def _sample_alpha(self, tex, u, v):
-        """detail::sample_alpha — bilinear alpha at texel centers (i + 0.5),
+        """detail::sample_alpha - bilinear alpha at texel centers (i + 0.5),
         clamped, rounded (+0.5)."""
         th, tw = tex.shape
         fx = np.maximum(np.minimum(u - _F32(0.5), _F32(tw - 1)), _F32(0))

@@ -1,18 +1,18 @@
-"""GLFW → slikui event translation for YOUR window (pyGLFW, ``import glfw``).
+"""GLFW -> slikui event translation for YOUR window (pyGLFW, ``import glfw``).
 
 Nothing here creates a window or touches GL, and ``import slikui`` never
 imports glfw (it is loaded on first use). Three levels, pick one:
 
-1. Event builders — you own every GLFW callback and forward what you want::
+1. Event builders - you own every GLFW callback and forward what you want::
 
        def on_button(win, button, action, mods):
            if not my_scene_wants_it():
                app.handle(slikui.glfw_input.mouse_button_event(win, button, action, mods))
        glfw.set_mouse_button_callback(win, on_button)
 
-2. GlfwInput — installs the callbacks on an existing window, CHAINING to any
+2. GlfwInput - installs the callbacks on an existing window, CHAINING to any
    you installed before (yours still run, first), and delivers events to a
-   target (App, GlApp, Context — anything with ``handle(event)``) or queues
+   target (App, GlApp, Context - anything with ``handle(event)``) or queues
    them::
 
        input = slikui.GlfwInput(win, app)      # after your own callbacks
@@ -32,7 +32,7 @@ imports glfw (it is loaded on first use). Three levels, pick one:
 Coordinates: positions are GLFW cursor coordinates (window points, the
 logical space Context lays out in); ``framebuffer_size_event`` carries pixels.
 GLFW numbers mouse buttons LEFT=0, RIGHT=1, MIDDLE=2; slikui uses
-MouseLeft=0, MouseMiddle=1, MouseRight=2 — always go through map_button.
+MouseLeft=0, MouseMiddle=1, MouseRight=2 - always go through map_button.
 """
 
 from __future__ import annotations

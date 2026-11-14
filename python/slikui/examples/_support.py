@@ -1,7 +1,7 @@
 """Shared harness for the shipped examples: synthetic input, a deterministic
 clock, and the CLI contract every example's ``main()`` delegates to.
 
-This module is plumbing, not a widget library — the examples stay standalone
+This module is plumbing, not a widget library - the examples stay standalone
 (widgets a file teaches live in that file).
 """
 
@@ -19,7 +19,7 @@ State = SimpleNamespace  # build() returns whatever the example needs later
 
 
 # ---------------------------------------------------------------------------
-# Synthetic input — thin wrappers over the real event constructors so smoke
+# Synthetic input - thin wrappers over the real event constructors so smoke
 # scripts read like actions, not event-field assignments.
 # ---------------------------------------------------------------------------
 def _button(button):
@@ -44,7 +44,7 @@ def click(app, xy, button=None, mods_=""):
 
 
 def double_click(app, session, xy, gap_frames=10, button=None):
-    """Two clicks ``gap_frames`` apart — widgets detect this by counting in
+    """Two clicks ``gap_frames`` apart - widgets detect this by counting in
     ``tick()``, since slikui events carry no timestamps."""
     click(app, xy, button)
     session.advance(gap_frames)
@@ -75,7 +75,7 @@ def type_text(app, text):
 
 
 # ---------------------------------------------------------------------------
-# Deterministic clock — smoke passes never read wall time, so scripted PNGs
+# Deterministic clock - smoke passes never read wall time, so scripted PNGs
 # and asserts are reproducible.
 # ---------------------------------------------------------------------------
 class Session:
@@ -131,11 +131,11 @@ def find(root, widget_id):
 
 
 def crop(frame, bounds, scale=1.0):
-    """A copy of the framebuffer region of a widget's bounds (logical → px).
+    """A copy of the framebuffer region of a widget's bounds (logical -> px).
 
     The copy matters: `App.render()` returns a zero-copy view of the live
     target, so an un-copied "before" frame changes underneath you when the
-    next render repaints the same memory — diff checks would always read 0.
+    next render repaints the same memory - diff checks would always read 0.
     """
     y, x = int(bounds.y * scale), int(bounds.x * scale)
     h, w = int(bounds.h * scale), int(bounds.w * scale)
@@ -148,7 +148,7 @@ def diff(a, b):
 
 
 # ---------------------------------------------------------------------------
-# Driver — the fixed CLI contract: default | --png | --smoke | --docs-image
+# Driver - the fixed CLI contract: default | --png | --smoke | --docs-image
 # | --window. Examples implement build()/smoke() and delegate main() here.
 # ---------------------------------------------------------------------------
 def _render(build, size, scale, path):
@@ -166,7 +166,7 @@ def _render(build, size, scale, path):
 
 
 def run_smoke(name, size, build, smoke, png=None, scale=1.0):
-    """Programmatic smoke pass — used by ``--smoke`` and the test suite.
+    """Programmatic smoke pass - used by ``--smoke`` and the test suite.
 
     Runs ``smoke(app, state, session, log)`` (which asserts via
     ``Checks``), renders the settled frame, optionally saves it, prints the

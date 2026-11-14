@@ -1,4 +1,4 @@
-// slikui/widgets/env.hpp — the environment handed to paint().
+// slikui/widgets/env.hpp - the environment handed to paint().
 #pragma once
 
 #include "slikui/style/theme.hpp"

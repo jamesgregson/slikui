@@ -1,4 +1,4 @@
-"""Headless checks for python/examples/glfw_demo.py — mesh math + UI build.
+"""Headless checks for python/examples/glfw_demo.py - mesh math + UI build.
 
 GLFW/GL are imported (they must resolve) but never initialized: every call
 here runs without a window or GL context.
@@ -28,7 +28,7 @@ def test_meshes_are_wellformed():
         assert idx.dtype == np.uint16
         assert idx.size % 3 == 0 and idx.max() < vcount
         # every triangle's geometric normal agrees with its vertex normals
-        # (the sphere's pole triangles are degenerate — zero area — so allow
+        # (the sphere's pole triangles are degenerate - zero area - so allow
         # a tiny negative tolerance there)
         t = idx.reshape(-1, 3).astype(np.int64)
         e1 = structured[t[:, 1], :3] - structured[t[:, 0], :3]

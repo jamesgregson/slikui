@@ -1,4 +1,4 @@
-"""slikui Python bindings — thin layer over the C++20 UI library."""
+"""slikui Python bindings - thin layer over the C++20 UI library."""
 
 from collections.abc import Callable, Sequence
 import enum
@@ -439,7 +439,7 @@ class MouseButton(enum.IntEnum):
 
 class EventType(enum.IntEnum):
     """
-    Event kinds. Context-synthesized (never sent by hosts): Click, DoubleClick, MouseEnter, MouseLeave, FocusGained; FocusLost is both host→Context (app lost focus) and Context→widget (this widget lost focus).
+    Event kinds. Context-synthesized (never sent by hosts): Click, DoubleClick, MouseEnter, MouseLeave, FocusGained; FocusLost is both host->Context (app lost focus) and Context->widget (this widget lost focus).
     """
 
     MouseMove = 0
@@ -792,7 +792,7 @@ class Context:
 
     def capture_mouse(self, widget: Widget) -> None:
         """
-        Route every mouse event to `widget` until release_mouse — call on MousePress so a drag survives the pointer leaving it.
+        Route every mouse event to `widget` until release_mouse - call on MousePress so a drag survives the pointer leaving it.
         """
 
     def release_mouse(self, widget: Widget) -> None: ...
@@ -874,7 +874,7 @@ class Widget:
 
     def measure(self, constraints: Constraints) -> Size:
         """
-        Override: intrinsic size under `constraints`; return constraints.clamp(Size(w, h)). Layout runs in Context.tick(), not render() — bounds are zero until the first tick.
+        Override: intrinsic size under `constraints`; return constraints.clamp(Size(w, h)). Layout runs in Context.tick(), not render() - bounds are zero until the first tick.
         """
 
     def arrange(self, area: Rect) -> None:
@@ -889,7 +889,7 @@ class Widget:
 
     def paint_over(self, env: PaintEnv) -> None:
         """
-        Override: drawn AFTER (on top of) the children, outside this widget's clip_rect — decorations over wrapped widgets.
+        Override: drawn AFTER (on top of) the children, outside this widget's clip_rect - decorations over wrapped widgets.
         """
 
     def clip_rect(self) -> Rect | None:
@@ -902,7 +902,7 @@ class Widget:
 
     def on_event(self, event: Event) -> bool:
         """
-        Override: return True to consume. Mouse events (MouseMove, MousePress, MouseRelease, Click, DoubleClick, Scroll) reach the widget under the pointer — or the mouse-capture widget — and bubble to ancestors until consumed; every button is delivered (check event.button). Key events go to the focused widget (falling back to the hovered one) and bubble; KeyRelease only follows a KeyPress the widget tree received. TextInput needs focus (focusable() -> True). MouseEnter/MouseLeave and FocusGained/FocusLost go to the affected widget only. Use context.capture_mouse(self) on press so a drag keeps receiving moves and the release outside your bounds.
+        Override: return True to consume. Mouse events (MouseMove, MousePress, MouseRelease, Click, DoubleClick, Scroll) reach the widget under the pointer - or the mouse-capture widget - and bubble to ancestors until consumed; every button is delivered (check event.button). Key events go to the focused widget (falling back to the hovered one) and bubble; KeyRelease only follows a KeyPress the widget tree received. TextInput needs focus (focusable() -> True). MouseEnter/MouseLeave and FocusGained/FocusLost go to the affected widget only. Use context.capture_mouse(self) on press so a drag keeps receiving moves and the release outside your bounds.
         """
 
     def tick(self, time: Time) -> None:
@@ -1523,7 +1523,7 @@ class PropertyGrid(Column):
     def add_splitter(self, vertical: bool = False) -> Splitter: ...
 
     def add_property(self, label: str, label_width: float = 110.0) -> PropertyRow:
-        """Returns the row — add the editor widget into it."""
+        """Returns the row - add the editor widget into it."""
 
     def add_section(self, title: str, open: bool = False) -> PropertyGrid: ...
 
@@ -1939,7 +1939,7 @@ class Dialog(Panel):
     def __init__(self, title: str, id: str = '') -> None: ...
 
     def content(self) -> Column:
-        """The body column — add widgets here."""
+        """The body column - add widgets here."""
 
     def set_title(self, title: str) -> Dialog: ...
 
@@ -2424,10 +2424,8 @@ def theme_presets() -> list[ThemePreset]:
 
 def shortcut_label(key: Key, mods: int, context: Context | None = None) -> str:
     """
-    "Ctrl+Shift+S" ("⌘⇧S" on Apple) — for menu hints.
-
-    Pass ``context`` to spell out any symbol its font cannot draw (menus
-    do this themselves); without it the label may show missing-glyph boxes.
+    Menu hint text: "Ctrl+Shift+S", "Cmd+S", "Alt+Left" -- plain ASCII
+    on every platform. ``context`` is accepted for compatibility and unused.
     """
 
 def find_system_font() -> str:

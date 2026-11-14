@@ -1,4 +1,4 @@
-"""GLSink — a slikui.RenderSink that draws straight into an OpenGL 3.3 context.
+"""GLSink - a slikui.RenderSink that draws straight into an OpenGL 3.3 context.
 
 The fast path for PyOpenGL hosts (glfw, pygame, Qt, ...): slikui's C++
 GpuBatcher turns each frame into one instance per command plus a handful of
@@ -27,7 +27,7 @@ the next render() or in shutdown(), when a context is current.
 
 GL state: render() sets viewport, program, VAO, texture unit 0, blending
 (straight-alpha over), scissor test, and disables depth/cull/stencil. With
-preserve_state=False (default) it leaves them that way — set what your next
+preserve_state=False (default) it leaves them that way - set what your next
 pass needs. preserve_state=True saves and restores them with glGet* (slower).
 It draws into whatever framebuffer is bound.
 
@@ -254,7 +254,7 @@ class GLSink(RenderSink):
         GL = self._GL
         sh = GL.glCreateShader(kind)
         if not sh:
-            raise RuntimeError("slikui.GLSink: glCreateShader failed — "
+            raise RuntimeError("slikui.GLSink: glCreateShader failed - "
                                "is a GL 3.3 context current on this thread?")
         GL.glShaderSource(sh, src)
         GL.glCompileShader(sh)
@@ -312,7 +312,7 @@ class GLSink(RenderSink):
 
 
 def read_framebuffer(width, height):
-    """Read the bound framebuffer as (H, W) uint32 0xAABBGGRR, top row first —
+    """Read the bound framebuffer as (H, W) uint32 0xAABBGGRR, top row first -
     the same layout as slikui.Target.pixels() / CanvasSink.buffer."""
     GL = _gl()
     GL.glPixelStorei(GL.GL_PACK_ALIGNMENT, 1)

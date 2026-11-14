@@ -1,6 +1,6 @@
 # Python examples
 
-The wheel ships a curated demo suite as `slikui.examples` — the usage
+The wheel ships a curated demo suite as `slikui.examples` - the usage
 reference that matches the slikui version you installed. Every example
 file runs on its own (copy it anywhere and run `python controls.py`),
 checks itself, and drives the real event dispatch path. Every widget quoted
@@ -39,7 +39,7 @@ one screen.
 | # | Example | Shows |
 |---|---|---|
 | 01 | `hello` | first frame, minimal tree, headless render |
-| 02 | `gallery` | widget survey — most built-in widgets in one tall page |
+| 02 | `gallery` | widget survey - most built-in widgets in one tall page |
 | 03 | `events` | event anatomy: `EventProbe` narrates every event it receives |
 | 04 | `paint` | drawing cookbook: Meter, Sparkline, RadialGauge, ClockFace, BoundsDebug |
 | 05 | `controls` | Knob, XYPad, Joystick with full mouse + keyboard; LimitSlider decorates a built-in |
@@ -49,14 +49,14 @@ one screen.
 
 ## See them
 
-The frames below are the examples' own `--smoke` output — post-interaction
+The frames below are the examples' own `--smoke` output - post-interaction
 frames captured by the same scripted pass CI runs:
 
 ![The hello smoke pass: the minimal first-frame tree, its Primary button
 clicked by the synthetic press](../images/examples-hello.png)
 
 ![The gallery smoke pass: a dropdown popup open, a switch mid-toggle and the
-slider scrubbed to 92 — one tall page of nearly every built-in widget](../images/examples-gallery.png)
+slider scrubbed to 92 - one tall page of nearly every built-in widget](../images/examples-gallery.png)
 
 ![The events smoke pass: the EventProbe's log narrating clicks, a
 double-click, key down/up, focus changes and a drag cancelled by the app
@@ -85,11 +85,11 @@ python -m slikui.examples.paint --smoke      # scripted interaction pass, self-c
 python -m slikui.examples.paint --window     # live GLFW window (needs the demo extra)
 ```
 
-- **Default** — render one frame to `./NAME.png`; no display, no glfw.
-- **`--smoke`** — synthetic input (click, drag, scroll, keys) against a fixed
+- **Default** - render one frame to `./NAME.png`; no display, no glfw.
+- **`--smoke`** - synthetic input (click, drag, scroll, keys) against a fixed
   clock; asserts and prints a transcript. This is what CI runs, so the
   examples double as the wheel's acceptance test.
-- **`--window`** — the same demo live: GLFW callbacks feed real events, the
+- **`--window`** - the same demo live: GLFW callbacks feed real events, the
   core renders into its framebuffer, and a thin premultiplied blit puts it on
   screen. Needs `pip install "slikui-python[demo]"`; the host is imported
   lazily, so the base wheel never pulls in glfw or PyOpenGL.
@@ -97,14 +97,14 @@ python -m slikui.examples.paint --window     # live GLFW window (needs the demo 
 ## EventProbe in depth
 
 `events` is the place to start if you're writing a custom widget: it shows
-what arrives and in what order — enter/leave, press/release/click,
+what arrives and in what order - enter/leave, press/release/click,
 double-click, a captured drag, focus gained/lost, key down/up. It has its
 own section in
 [Input & events](input-events.md#watching-events-the-shipped-eventprobe-demo).
 
 ## Custom widgets in depth
 
-`paint` is the worked drawing example — measure/arrange/paint, direct
+`paint` is the worked drawing example - measure/arrange/paint, direct
 DrawList drawing, tick animation, hover via `MouseLeave`, and a debug
 overlay drawn with `paint_over`. See [Custom widgets](custom-widgets.md) for
 the guide and the screenshot-capture contract (`--docs-image`).
@@ -115,8 +115,8 @@ clock](../images/examples-clock.gif)
 ## Extended controls
 
 `controls` builds three controls the built-in set doesn't have. Every drag
-uses one idiom — capture the mouse on press, release on release, cancel on
-`FocusLost` — so drags survive the pointer leaving the widget:
+uses one idiom - capture the mouse on press, release on release, cancel on
+`FocusLost` - so drags survive the pointer leaving the widget:
 
 --8<-- "includes/examples/knob.md"
 

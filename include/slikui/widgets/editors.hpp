@@ -1,8 +1,8 @@
-// slikui/widgets/editors.hpp — numeric and color editors for demo panels.
+// slikui/widgets/editors.hpp - numeric and color editors for demo panels.
 //
 //   DragValue   click-drag to scrub a number; click to type it (Enter
 //               commits, Esc or focus loss cancels); Up/Down/Left/Right step.
-//   VecNEdit    N DragValues bound to a borrowed float[N] (zero-copy — the
+//   VecNEdit    N DragValues bound to a borrowed float[N] (zero-copy - the
 //               widget mirrors the array every tick).
 //   ColorEdit   color chip that opens a popup: SV square, hue bar, hex field,
 //               RGBA fields.
@@ -253,7 +253,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// VecNEdit — DragValue row bound to a borrowed float[N]
+// VecNEdit - DragValue row bound to a borrowed float[N]
 // ---------------------------------------------------------------------------
 // `values` is borrowed, not copied: the widget writes edits straight into it
 // and re-reads it every tick, so external code can move the values (camera
@@ -337,7 +337,7 @@ using Vec3Edit = VecNEdit<3>;
 using Vec4Edit = VecNEdit<4>;
 
 // ---------------------------------------------------------------------------
-// ColorEdit — chip + popup editor
+// ColorEdit - chip + popup editor
 // ---------------------------------------------------------------------------
 class ColorEdit;
 
@@ -501,7 +501,7 @@ inline void ColorPopup::paint(const PaintEnv& env) const {
     env.list.rect(bounds, t.surface, t.radius);
     env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
 
-    // SV square: saturation across, value down. Grid of quads — cheap in the
+    // SV square: saturation across, value down. Grid of quads - cheap in the
     // software rasterizer and exact enough to look like a gradient.
     Rect sv = sv_rect();
     constexpr int kCols = 32, kRows = 24;

@@ -1,7 +1,7 @@
-"""Python renderer demo — the same widget tree through two renderers.
+"""Python renderer demo - the same widget tree through two renderers.
 
 Left: slikui's C++ software rasterizer (software.Sink).
-Right: CanvasSink — a pure-Python numpy renderer implementing the same
+Right: CanvasSink - a pure-Python numpy renderer implementing the same
 IRenderSink contract (slikui.RenderSink trampoline).
 
 The two halves should be pixel-identical; the script reports any diff and

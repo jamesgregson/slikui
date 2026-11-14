@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""slikui showcase (Python) — the twin of examples/05_showcase/main.cpp.
+"""slikui showcase (Python) - the twin of examples/05_showcase/main.cpp.
 
 Every widget, live, in one window: each component prints its state changes
 into the on-screen LogView as you use it. Same layout, same pages, same log
-strings as the C++ build — the --smoke transcripts should match one-for-one.
+strings as the C++ build - the --smoke transcripts should match one-for-one.
 
-    MenuBar ─ Toolbar ─ [ log panel | tabbed pages ] ─ StatusBar
+    MenuBar - Toolbar - [ log panel | tabbed pages ] - StatusBar
 
-Pages: Controls, Inputs, Data, Containers, Media, Custom — Tabs carry only
+Pages: Controls, Inputs, Data, Containers, Media, Custom - Tabs carry only
 labels, so each page is a Panel whose visibility the Tabs callback toggles.
 
 Two custom widgets exercise the measure/paint/on_event/tick contract:
-  Fill       — expands on the main axis and delegates to its one child (the
+  Fill       - expands on the main axis and delegates to its one child (the
                trick that lets the splitter fill the window).
-  LevelMeter — LED bar meter: click/drag to scrub, peak-hold marker,
-               green→amber→red gradient, warns above 90%.
+  LevelMeter - LED bar meter: click/drag to scrub, peak-hold marker,
+               green->amber->red gradient, warns above 90%.
 
 Modes:
   python examples/showcase.py             interactive (GLFW window; the CPU-
                                           rasterized UI is blitted as one
-                                          texture — deps: glfw, PyOpenGL)
+                                          texture - deps: glfw, PyOpenGL)
   python examples/showcase.py --smoke [out.png]
                                           headless scripted pass over every
                                           component; prints the log
@@ -43,7 +43,7 @@ ERR = slikui.LogView.Level.Error
 
 
 # ---------------------------------------------------------------------------
-# Custom widget 1: Fill — expands on the main axis, delegates to its child.
+# Custom widget 1: Fill - expands on the main axis, delegates to its child.
 # paint/hit-testing/tick recurse through children, so the wrapped subtree
 # stays fully live without extra code.
 # ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ class Fill(slikui.Widget):
 
 
 # ---------------------------------------------------------------------------
-# Custom widget 2: LevelMeter — LED bar with click/drag scrubbing, a peak
+# Custom widget 2: LevelMeter - LED bar with click/drag scrubbing, a peak
 # marker, and a gradient from success through warning to danger.
 # ---------------------------------------------------------------------------
 class LevelMeter(slikui.Widget):
@@ -137,7 +137,7 @@ class LevelMeter(slikui.Widget):
 
 
 # ---------------------------------------------------------------------------
-# Demo plumbing: every state change flows through say() — into the LogView
+# Demo plumbing: every state change flows through say() - into the LogView
 # and into a transcript the smoke mode prints.
 # ---------------------------------------------------------------------------
 class Demo:
@@ -203,36 +203,36 @@ def build_ui(app, ui):
     # ----- menu bar -------------------------------------------------------
     bar = root.add(slikui.MenuBar)
     mfile = bar.add_menu("File")
-    mfile.add_item("New", lambda: demo.say("menu File → New"), hint="Ctrl+N")
-    mfile.add_item("Open…", lambda: ui.open_file_dialog and ui.open_file_dialog(),
+    mfile.add_item("New", lambda: demo.say("menu File -> New"), hint="Ctrl+N")
+    mfile.add_item("Open...", lambda: ui.open_file_dialog and ui.open_file_dialog(),
                    hint="Ctrl+O")
     mfile.add_item("Save", lambda: ui.save and ui.save(), hint="Ctrl+S")
     mfile.add_separator()
-    mfile.add_item("Exit", lambda: demo.say("menu File → Exit (close the window)"))
+    mfile.add_item("Exit", lambda: demo.say("menu File -> Exit (close the window)"))
     mview = bar.add_menu("View")
     appearance = mview.add_submenu("Appearance", slikui.Menu("Appearance"))
     for i, preset in enumerate(slikui.theme_presets()):
         name = preset.name
         appearance.add_item(name, lambda i=i, name=name: (
-            slikui.apply_preset(ctx.theme, i), demo.say(f"theme → '{name}'")))
+            slikui.apply_preset(ctx.theme, i), demo.say(f"theme -> '{name}'")))
     mview.add_separator()
     mview.add_checkable("Play samples", lambda: ui.playing, lambda: (
         setattr(ui, "playing", not ui.playing),
-        demo.say("menu View → play samples " + ("on" if ui.playing else "off"))))
+        demo.say("menu View -> play samples " + ("on" if ui.playing else "off"))))
     mhelp = bar.add_menu("Help")
     mhelp.add_item("About", lambda: ui.open_about and ui.open_about())
 
     # ----- toolbar --------------------------------------------------------
     tb = root.add(slikui.Toolbar)
     tb.add_button(slikui.Icon.Play, lambda: (
-        setattr(ui, "playing", True), demo.say("toolbar → play")),
+        setattr(ui, "playing", True), demo.say("toolbar -> play")),
         tip="Play the live plot + progress")
     tb.add_button(slikui.Icon.Pause, lambda: (
-        setattr(ui, "playing", False), demo.say("toolbar → pause")),
+        setattr(ui, "playing", False), demo.say("toolbar -> pause")),
         tip="Pause the live plot + progress")
     tb.add_button(slikui.Icon.Stop, lambda: (
         setattr(ui, "playing", False),
-        ui.samples.fill(0.35), demo.say("toolbar → stop (plot reset)")),
+        ui.samples.fill(0.35), demo.say("toolbar -> stop (plot reset)")),
         tip="Stop and reset the plot")
     tb.add_separator()
     tb.add_button(slikui.Icon.Folder,
@@ -242,7 +242,7 @@ def build_ui(app, ui):
                   tip="Save (toast + status)")
     tb.add_button(slikui.Icon.Camera, lambda: (
         ctx.push_toast("Screenshot saved to /tmp", 3.0, icon=slikui.Icon.Camera),
-        demo.say("toast → 'Screenshot saved to /tmp'")), tip="Push a toast")
+        demo.say("toast -> 'Screenshot saved to /tmp'")), tip="Push a toast")
     tb.add_button(slikui.Icon.Eye, lambda: ui.open_about and ui.open_about(),
                   tip="About")
     tb.add_button(slikui.Icon.Trash, lambda: (
@@ -260,7 +260,7 @@ def build_ui(app, ui):
     log_head = log_panel.add(slikui.Row).set_gap(8)
     log_head.add(slikui.Label, "event log").set_font_size(15)
     log_head.add(slikui.Spacer)
-    log_head.add(slikui.Label, "live — every component reports here") \
+    log_head.add(slikui.Label, "live - every component reports here") \
         .set_color(slikui.Color.from_hex(0x8A94A0)).set_font_size(12)
     demo.log = log_panel.add(slikui.LogView)
 
@@ -282,13 +282,13 @@ def build_ui(app, ui):
     btn_row.add(slikui.Button, "Primary").set_variant(slikui.ButtonVariant.Primary) \
         .on_click(lambda: demo.say("button 'Primary' clicked"))
     ui.btn_danger = btn_row.add(slikui.Button, "Cause error").on_click(
-        lambda: demo.say("button 'Cause error' clicked — boom", ERR))
+        lambda: demo.say("button 'Cause error' clicked - boom", ERR))
     btn_row.add(slikui.Button, "Ghost").set_variant(slikui.ButtonVariant.Ghost) \
         .on_click(lambda: demo.say("button 'Ghost' clicked"))
     g_sel = p1.add(slikui.GroupBox, "toggles")
     sel_row = g_sel.add(slikui.Row).set_gap(16)
     ui.checkbox = sel_row.add(slikui.Checkbox, "autosave", True).on_change(
-        lambda v: demo.say("checkbox autosave → " + ("on" if v else "off")))
+        lambda v: demo.say("checkbox autosave -> " + ("on" if v else "off")))
     for i in range(3):
         r = sel_row.add(slikui.Radio, f"pick {i + 1}", i == 0)
         ui.radios.append(r)
@@ -299,22 +299,22 @@ def build_ui(app, ui):
                     return
                 for k, r2 in enumerate(ui.radios):
                     r2.set_checked(k == i)
-                demo.say(f"radio → pick {i + 1}")
+                demo.say(f"radio -> pick {i + 1}")
             return on_change
         r.on_change(make_radio_change())
     ui.sw = sel_row.add(slikui.Switch).on_change(
-        lambda v: demo.say("switch → " + ("on" if v else "off")))
+        lambda v: demo.say("switch -> " + ("on" if v else "off")))
     g_rng = p1.add(slikui.GroupBox, "ranges")
     rng_row = g_rng.add(slikui.Row).set_gap(16)
     ui.slider = rng_row.add(slikui.Slider, 0.0, 1.0) \
         .set_label("gain").set_format("%.2f").set_value(0.35)
-    ui.slider.on_change(lambda v: demo.say("slider gain → %.2f" % v))
+    ui.slider.on_change(lambda v: demo.say("slider gain -> %.2f" % v))
     ui.progress = rng_row.add(slikui.ProgressBar)
     rng_row2 = g_rng.add(slikui.Row).set_gap(16)
     rng_row2.add(slikui.Spinner).set_speed(2.5)
     ui.segmented = rng_row2.add(slikui.Segmented)
     ui.segmented.set_items(["line", "tree", "grid"]).set_selected(0)
-    ui.segmented.on_select(lambda i: demo.say("segmented → "
+    ui.segmented.on_select(lambda i: demo.say("segmented -> "
                                               + ["line", "tree", "grid"][i]))
     ui.pages.append(p1)
 
@@ -323,31 +323,31 @@ def build_ui(app, ui):
     p2.set_padding(12).set_gap(10)
     g_text = p2.add(slikui.GroupBox, "text")
     ui.field = g_text.add(slikui.TextField).set_placeholder("type here, Enter submits")
-    ui.field.on_change(lambda s: demo.say(f"text → '{s}'"))
-    ui.field.on_submit(lambda s: demo.say(f"text submit → '{s}'", OK))
-    g_text.add(slikui.TextArea).set_placeholder("multiline…").set_rows(3).on_change(
-        lambda s: demo.say(f"area → {len(s)} chars"))
-    ui.search = g_text.add(slikui.SearchBox).set_placeholder("search…")
-    ui.search.on_change(lambda s: demo.say(f"search → '{s}'"))
-    ui.search.on_submit(lambda s: demo.say(f"search submit → '{s}'"))
+    ui.field.on_change(lambda s: demo.say(f"text -> '{s}'"))
+    ui.field.on_submit(lambda s: demo.say(f"text submit -> '{s}'", OK))
+    g_text.add(slikui.TextArea).set_placeholder("multiline...").set_rows(3).on_change(
+        lambda s: demo.say(f"area -> {len(s)} chars"))
+    ui.search = g_text.add(slikui.SearchBox).set_placeholder("search...")
+    ui.search.on_change(lambda s: demo.say(f"search -> '{s}'"))
+    ui.search.on_submit(lambda s: demo.say(f"search submit -> '{s}'"))
     g_val = p2.add(slikui.GroupBox, "values")
     val_row = g_val.add(slikui.Row).set_gap(14)
     ui.dropdown = val_row.add(slikui.Dropdown)
-    ui.dropdown.set_items(["Nearest", "Linear", "Cubic"]).set_placeholder("filter…")
+    ui.dropdown.set_items(["Nearest", "Linear", "Cubic"]).set_placeholder("filter...")
     ui.dropdown.on_select(lambda i: demo.say(
-        "dropdown → " + ["Nearest", "Linear", "Cubic"][i]))
+        "dropdown -> " + ["Nearest", "Linear", "Cubic"][i]))
     ui.dv = val_row.add(slikui.DragValue, 1.0) \
         .set_range(0.0, 100.0).set_speed(0.6).set_suffix(" fps")
-    ui.dv.on_change(lambda v: demo.say("dragvalue → %.1f" % v))
+    ui.dv.on_change(lambda v: demo.say("dragvalue -> %.1f" % v))
     vec2 = val_row.add_vec2edit(ui.vec_vals)
     vec2.set_range(-10.0, 10.0)
     vec2.on_change(lambda: demo.say(
-        "vec2 → (%.1f, %.1f)" % (ui.vec_vals[0], ui.vec_vals[1])))
+        "vec2 -> (%.1f, %.1f)" % (ui.vec_vals[0], ui.vec_vals[1])))
     g_col = p2.add(slikui.GroupBox, "color")
     col_row = g_col.add(slikui.Row).set_gap(14)
     ui.color = col_row.add(slikui.ColorEdit)
     ui.color.set_color(slikui.Color.from_hex(0x4C8DFF))
-    ui.color.on_change(lambda c: demo.say("color → #%02X%02X%02X" % (c.r, c.g, c.b)))
+    ui.color.on_change(lambda c: demo.say("color -> #%02X%02X%02X" % (c.r, c.g, c.b)))
     col_row.add(slikui.Label, "click the swatch for the picker popup") \
         .set_color(slikui.Color.from_hex(0x8A94A0)).set_font_size(12)
     ui.pages.append(p2)
@@ -358,7 +358,7 @@ def build_ui(app, ui):
     plot = p3.add(slikui.Plot)
     plot.set_fill(True)
     plot.set_series(ui.samples, slikui.Color.from_hex(0x4C8DFF))
-    plot.set_tooltip("live series — press play in the toolbar")
+    plot.set_tooltip("live series - press play in the toolbar")
     data_row = p3.add(slikui.Row).set_gap(10)
     ui.tree = data_row.add(slikui.TreeView)
     ui.tree.set_rows([
@@ -374,7 +374,7 @@ def build_ui(app, ui):
     ui.tree.set_expanded(0, True).set_expanded(1, True).set_expanded(3, True)
     tree_names = ["slikui/", "src/", "main.cpp", "widgets/", "controls.hpp",
                   "shells.hpp", "docs/", "widgets-roadmap.md"]
-    ui.tree.on_select(lambda i: demo.say("tree → " + tree_names[i]))
+    ui.tree.on_select(lambda i: demo.say("tree -> " + tree_names[i]))
     ui.table = data_row.add(slikui.Table)
     ui.table.set_columns([
         slikui.Table.ColumnSpec("file", 130.0),
@@ -388,27 +388,27 @@ def build_ui(app, ui):
         ["menus.hpp", "18", "warn"],
     ])
     ui.table.on_select(lambda i: demo.say(
-        "table → row %d (%s)" % (i, ["controls.hpp", "shells.hpp", "views.hpp",
+        "table -> row %d (%s)" % (i, ["controls.hpp", "shells.hpp", "views.hpp",
                                      "menus.hpp"][i])))
     data_row2 = p3.add(slikui.Row).set_gap(10)
     ui.list = data_row2.add(slikui.ListView)
     ui.list.set_items(["alpha", "beta", "gamma", "delta"])
     ui.list.on_select(lambda i: demo.say(
-        "list → " + ["alpha", "beta", "gamma", "delta"][i]))
+        "list -> " + ["alpha", "beta", "gamma", "delta"][i]))
     grid = data_row2.add(slikui.PropertyGrid)
     ui.prop_opacity = grid.add_property("opacity").add(slikui.Slider, 0.0, 1.0)
     ui.prop_opacity.set_value(0.75)
-    ui.prop_opacity.on_change(lambda v: demo.say("property opacity → %.2f" % v))
+    ui.prop_opacity.on_change(lambda v: demo.say("property opacity -> %.2f" % v))
     adv = grid.add_section("advanced", True)
     dv2 = adv.add_property("threads").add(slikui.DragValue, 4.0)
     dv2.set_range(1.0, 64.0).set_int_mode(True)
-    dv2.on_change(lambda v: demo.say("property threads → %d" % int(v)))
+    dv2.on_change(lambda v: demo.say("property threads -> %d" % int(v)))
     pad_row = p3.add(slikui.Row).set_gap(14)
     ui.pad = pad_row.add(slikui.Vec2Pad)
     ui.pad.set_range(slikui.Vec2(0, 0), slikui.Vec2(1, 1))
     ui.pad.set_value(slikui.Vec2(0.3, 0.6))
-    ui.pad.on_change(lambda v: demo.say("pad → (%.2f, %.2f)" % (v.x, v.y)))
-    pad_row.add(slikui.Label, "Vec2Pad — drag the dot") \
+    ui.pad.on_change(lambda v: demo.say("pad -> (%.2f, %.2f)" % (v.x, v.y)))
+    pad_row.add(slikui.Label, "Vec2Pad - drag the dot") \
         .set_color(slikui.Color.from_hex(0x8A94A0)).set_font_size(12)
     ui.pages.append(p3)
 
@@ -419,19 +419,19 @@ def build_ui(app, ui):
     c_left = c_row.add(slikui.Column).set_gap(8)
     accordion = c_left.add(slikui.Accordion).set_exclusive(True)
     sec_geo = accordion.add_section("geometry", True)
-    sec_geo.add(slikui.Label, "vertex buffer contents…")
+    sec_geo.add(slikui.Label, "vertex buffer contents...")
     sec_sh = accordion.add_section("shaders")
-    sec_sh.add(slikui.Label, "glsl sources…")
+    sec_sh.add(slikui.Label, "glsl sources...")
     ui.acc_geo = sec_geo
     ui.acc_sh = sec_sh
     sec_geo.on_toggle(lambda opening: demo.say(
-        "accordion → 'geometry' " + ("opened" if opening else "closed")))
+        "accordion -> 'geometry' " + ("opened" if opening else "closed")))
     sec_sh.on_toggle(lambda opening: demo.say(
-        "accordion → 'shaders' " + ("opened" if opening else "closed")))
+        "accordion -> 'shaders' " + ("opened" if opening else "closed")))
     ui.expander = c_left.add(slikui.Expander, "more options")
     ui.expander.add(slikui.Checkbox, "nested checkbox", False)
     ui.expander.on_toggle(lambda opening: demo.say(
-        "expander → " + ("opened" if opening else "closed")))
+        "expander -> " + ("opened" if opening else "closed")))
     demo_panel = c_left.add(slikui.Panel)
     demo_panel.set_background(slikui.Color.from_hex(0x223344)).set_radius(8)
     demo_panel.add(slikui.Label, "a Panel inside the flow")
@@ -440,12 +440,12 @@ def build_ui(app, ui):
     upper = ui.vsplit.add(slikui.Column).set_gap(2)
     upper.add(slikui.Label, "upper pane").set_color(slikui.Color.from_hex(0x77C7FF))
     upper.add(slikui.Label, "drag the divider").set_color(slikui.Color.from_hex(0x44515F))
-    upper.add(slikui.Label, "…it logs here").set_color(slikui.Color.from_hex(0x44515F))
+    upper.add(slikui.Label, "...it logs here").set_color(slikui.Color.from_hex(0x44515F))
     lower = ui.vsplit.add(slikui.Column).set_gap(2)
     lower.add(slikui.Label, "lower pane").set_color(slikui.Color.from_hex(0xFFD377))
     lower.add(slikui.Label, "both panes stay live").set_color(slikui.Color.from_hex(0x44515F))
-    lower.add(slikui.Label, "fraction → log").set_color(slikui.Color.from_hex(0x44515F))
-    ui.vsplit.on_change(lambda f: demo.say("splitter → %.2f" % f))
+    lower.add(slikui.Label, "fraction -> log").set_color(slikui.Color.from_hex(0x44515F))
+    ui.vsplit.on_change(lambda f: demo.say("splitter -> %.2f" % f))
     ui.scroll = c_right.add(slikui.ScrollArea)
     ui.scroll.hint_w = 240.0
     ui.scroll.hint_h = 110.0
@@ -458,7 +458,7 @@ def build_ui(app, ui):
     p5.set_padding(12).set_gap(10)
     m_row = p5.add(slikui.Row).set_gap(14)
     m_left = m_row.add(slikui.Column).set_gap(6)
-    m_left.add(slikui.Label, "ImageView — wheel zooms at the cursor, drag pans") \
+    m_left.add(slikui.Label, "ImageView - wheel zooms at the cursor, drag pans") \
         .set_color(slikui.Color.from_hex(0x8A94A0)).set_font_size(12)
     ui.image_view = m_left.add(slikui.ImageView)
     w, h = 96, 72
@@ -472,7 +472,7 @@ def build_ui(app, ui):
     px[..., 3] = 255
     ui.image_view.set_pixels(px)
     m_right = m_row.add(slikui.Column).set_gap(6)
-    m_right.add(slikui.Label, "Image — plain, Contain fit") \
+    m_right.add(slikui.Label, "Image - plain, Contain fit") \
         .set_color(slikui.Color.from_hex(0x8A94A0)).set_font_size(12)
     img = m_right.add(slikui.Image, "gradient")
     w2, h2 = 64, 48
@@ -482,7 +482,7 @@ def build_ui(app, ui):
     px2[..., 2] = 128
     px2[..., 3] = 255
     img.set_pixels(px2).set_size(96, 72).set_fit(slikui.ImageFit.Contain)
-    m_right.add(slikui.Label, "CompareView — drag the A|B divider") \
+    m_right.add(slikui.Label, "CompareView - drag the A|B divider") \
         .set_color(slikui.Color.from_hex(0x8A94A0)).set_font_size(12)
     ui.compare = m_right.add(slikui.CompareView)
     pa = np.empty((h2, w2, 4), dtype=np.uint8)
@@ -503,14 +503,14 @@ def build_ui(app, ui):
     # --- page 6: Custom ---------------------------------------------------
     p6 = page_host.add(slikui.Panel)
     p6.set_padding(12).set_gap(10)
-    p6.add(slikui.Label, "LevelMeter — a custom widget (subclass of slikui.Widget)") \
+    p6.add(slikui.Label, "LevelMeter - a custom widget (subclass of slikui.Widget)") \
         .set_font_size(15)
-    p6.add(slikui.Label, "click or drag to scrub · peak marker decays · "
+    p6.add(slikui.Label, "click or drag to scrub | peak marker decays | "
             ">90% logs a warning").set_color(slikui.Color.from_hex(0x8A94A0)) \
         .set_font_size(12)
     ui.meter = p6.add(LevelMeter, 0.4)
     ui.meter.on_change = lambda v: demo.say(
-        "levelmeter → %.2f%s" % (v, " (clip!)" if v > 0.9 else ""),
+        "levelmeter -> %.2f%s" % (v, " (clip!)" if v > 0.9 else ""),
         WARN if v > 0.9 else INFO)
     m_btns = p6.add(slikui.Row).set_gap(8)
     for v in (0.25, 0.5, 0.75, 1.0):
@@ -520,9 +520,9 @@ def build_ui(app, ui):
             def on_click():
                 ui.meter.set_value(val)
                 if val > 0.9:
-                    demo.say(f"levelmeter set → {label} (clip!)", WARN)
+                    demo.say(f"levelmeter set -> {label} (clip!)", WARN)
                 else:
-                    demo.say(f"levelmeter set → {label}")
+                    demo.say(f"levelmeter set -> {label}")
             return on_click
         ui.meter_set_buttons.append(m_btns.add(slikui.Button, label)
                                     .on_click(make_set()))
@@ -530,11 +530,11 @@ def build_ui(app, ui):
 
     apply_page(ui, 0)
     tabs.on_change(lambda i: (apply_page(ui, i),
-                              demo.say("tabs → " + TAB_NAMES[i])))
+                              demo.say("tabs -> " + TAB_NAMES[i])))
 
     # ----- status bar -----------------------------------------------------
     status = root.add(slikui.StatusBar)
-    status.set_text("showcase ready — every component is live")
+    status.set_text("showcase ready - every component is live")
     demo.status = status
     status.add(slikui.Spinner).set_speed(1.5)
     demo.count = status.add(slikui.Label, "0 events") \
@@ -543,7 +543,7 @@ def build_ui(app, ui):
     # ----- shared actions -------------------------------------------------
     def open_about():
         box = slikui.MessageBox(
-            "About", "slikui showcase — every widget, live.\n"
+            "About", "slikui showcase - every widget, live.\n"
                      "Python build; examples/05_showcase is the C++ twin.")
         box.add_button("Nice", lambda: None)
         ctx.open_dialog(box)
@@ -551,27 +551,27 @@ def build_ui(app, ui):
 
     def open_file_dialog():
         fb = slikui.FileBrowser(slikui.FileBrowser.Mode.Open)
-        ui.file_dialog = fb  # valid until closed (smoke clicks its ✕)
-        fb.on_pick(lambda path: demo.say("file → " + path, OK))
+        ui.file_dialog = fb  # valid until closed (smoke clicks its X)
+        fb.on_pick(lambda path: demo.say("file -> " + path, OK))
         fb.on_close(lambda: demo.say("dialog 'Open' closed"))
         ctx.open_dialog(fb)
         demo.say("dialog 'Open' opened (navigate, pick a file)")
 
     def save():
-        demo.say("menu File → Save (saved showcase.ui)", OK)
+        demo.say("menu File -> Save (saved showcase.ui)", OK)
         if demo.status:
             demo.status.show_message("saved showcase.ui")
-        demo.say("toast → 'Saved showcase.ui'")
+        demo.say("toast -> 'Saved showcase.ui'")
 
     ui.open_about = open_about
     ui.open_file_dialog = open_file_dialog
     ui.save = save
 
     ctx.add_shortcut(slikui.Key.O, int(slikui.Mod.ModCtrl), lambda: (
-        demo.say("shortcut Ctrl+O → open dialog"),
+        demo.say("shortcut Ctrl+O -> open dialog"),
         ui.open_file_dialog and ui.open_file_dialog()))
     ctx.add_shortcut(slikui.Key.S, int(slikui.Mod.ModCtrl), lambda: (
-        demo.say("shortcut Ctrl+S → save"), ui.save and ui.save()))
+        demo.say("shortcut Ctrl+S -> save"), ui.save and ui.save()))
 
 
 # One live plot/progress update (shared by interactive loop and smoke).
@@ -585,7 +585,7 @@ def pump_plot(ui, now, dt):
         ui.samples[-1] = 0.35 + 0.3 * math.sin(ui.plot_phase * 3.0)
         ui.plot_logged += 1
         if ui.plot_logged % 8 == 1:
-            ui.demo.say("plot → sample %d" % len(ui.samples))
+            ui.demo.say("plot -> sample %d" % len(ui.samples))
     ui.progress.set_value(0.5 + 0.5 * math.sin(now))
 
 
@@ -599,7 +599,7 @@ def run_smoke(png_path):
     app = slikui.App(960, 640)
     ui = UI()
     build_ui(app, ui)
-    ui.demo.say("showcase started (smoke) — scripted pass over every component")
+    ui.demo.say("showcase started (smoke) - scripted pass over every component")
 
     state = {"now": 0.0}
 
@@ -609,7 +609,7 @@ def run_smoke(png_path):
         app.tick(state["now"], dt)
         app.render()
 
-    frame()  # layout pass — bounds are live after this
+    frame()  # layout pass - bounds are live after this
 
     # Synthetic-input helpers (bounds are live per tick).
     def center(w):
@@ -640,7 +640,7 @@ def run_smoke(png_path):
     def select_tab(i):
         ui.tabs.set_selected(i)
         apply_page(ui, i)
-        ui.demo.say("tabs → " + TAB_NAMES[i])
+        ui.demo.say("tabs -> " + TAB_NAMES[i])
         frame()
 
     # --- Controls page: real clicks, real slider drag ---------------------
@@ -673,21 +673,21 @@ def run_smoke(png_path):
     click(ui.search.field())
     type_text("q")
     ui.dropdown.set_selected(1)  # set_selected doesn't announce; say directly
-    ui.demo.say("dropdown → Linear")
+    ui.demo.say("dropdown -> Linear")
     ui.dv.set_value(42.0)  # set_value fires on_change itself
     ui.vec_vals[:] = (1.0, 2.0)
-    ui.demo.say("vec2 → (1.0, 2.0)")
+    ui.demo.say("vec2 -> (1.0, 2.0)")
     ui.color.set_color(slikui.Color.from_hex(0x7FD1FF))  # fires on_change
     frame()
 
     # --- Data page: direct selections, real pad drag, playing plot --------
     select_tab(2)
     ui.list.set_selected(1)
-    ui.demo.say("list → beta")
+    ui.demo.say("list -> beta")
     ui.tree.set_selected(2)
-    ui.demo.say("tree → main.cpp")
+    ui.demo.say("tree -> main.cpp")
     ui.table.set_selected(2)
-    ui.demo.say("table → row 2 (views.hpp)")
+    ui.demo.say("table -> row 2 (views.hpp)")
     ui.prop_opacity.set_value(0.5)  # fires on_change
     p = ui.pad.bounds
     drag(center(ui.pad),
@@ -697,7 +697,7 @@ def run_smoke(png_path):
         ui.samples[-1] = 0.35 + 0.3 * math.sin(ui.plot_phase * 3.0)
         ui.plot_phase += 1
     ui.plot_next = state["now"] + 0.25
-    ui.demo.say("plot → +8 samples (playing)")
+    ui.demo.say("plot -> +8 samples (playing)")
     frame()
 
     # --- Containers page: real expander/accordion clicks, splitter drag ---
@@ -707,14 +707,14 @@ def run_smoke(png_path):
     mid = (center(ui.vsplit)[0], ui.vsplit.bounds.y + ui.vsplit.bounds.h * 0.5)
     drag(mid, (mid[0], mid[1] + 24.0))
     wheel(center(ui.scroll), 3.0)
-    ui.demo.say("scrollarea → scrolled by 3 ticks")
+    ui.demo.say("scrollarea -> scrolled by 3 ticks")
     frame()
 
     # --- Media page: real wheel-zoom; compare fraction directly -----------
     select_tab(4)
     wheel(center(ui.image_view), 1.0)
     ui.compare.set_fraction(0.35)
-    ui.demo.say("compare → 0.35")
+    ui.demo.say("compare -> 0.35")
     frame()
 
     # --- Custom page: real meter scrub at 60%, then the 100% set button ---
@@ -723,7 +723,7 @@ def run_smoke(png_path):
     at = (m.x + m.w * 0.6, center(ui.meter)[1])
     app.handle(slikui.mouse_press(at))
     app.handle(slikui.mouse_release(at))
-    click(ui.meter_set_buttons[3])  # 100% → warning level
+    click(ui.meter_set_buttons[3])  # 100% -> warning level
     frame()
 
     frame(3.5)  # toast expiry + status transient clear
@@ -733,8 +733,8 @@ def run_smoke(png_path):
         print(line)
     print(f"smoke ok: {ui.demo.events} events, {ui.demo.log.line_count} log lines "
           f"live, screenshot {png_path}")
-    # Deterministic teardown: close() destroys the C++ tree — including the
-    # subtree owned by the Fill custom container — and every callback in it,
+    # Deterministic teardown: close() destroys the C++ tree - including the
+    # subtree owned by the Fill custom container - and every callback in it,
     # while the interpreter is alive, so exit is leak-free.
     app.close()
     del ui
@@ -824,7 +824,7 @@ def run_interactive():
     app = slikui.App(960, 640)
     ui = UI()
     build_ui(app, ui)
-    ui.demo.say("showcase started — click around, watch the log")
+    ui.demo.say("showcase started - click around, watch the log")
 
     # GLFW callbacks -> slikui events (all keys, both scroll axes, mapped
     # mouse buttons), plus clipboard and cursor shapes.

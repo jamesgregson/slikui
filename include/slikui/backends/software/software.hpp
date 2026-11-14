@@ -1,4 +1,4 @@
-// slikui/backends/software/software.hpp — rasterizer to raw uint32_t pixels.
+// slikui/backends/software/software.hpp - rasterizer to raw uint32_t pixels.
 //
 // SoftwareSink implements the IRenderSink contract with no dependencies
 // whatsoever: point it at a framebuffer (yours or owned) and draw.
@@ -83,7 +83,7 @@ inline Color sample_alpha(const std::uint8_t* tex, int tw, int th, float u, floa
     // Bilinear alpha sample, clamped to texture bounds. Texel i covers
     // [i, i+1) with its center at i+0.5 (as GL_LINEAR): an unscaled glyph
     // samples each texel exactly, and a fractionally placed one reaches at
-    // most one texel past its edge — into the atlas's 1px gutter, never the
+    // most one texel past its edge - into the atlas's 1px gutter, never the
     // neighboring glyph.
     float fx = std::fmax(0.f, std::fmin(u - .5f, float(tw - 1)));
     float fy = std::fmax(0.f, std::fmin(v - .5f, float(th - 1)));

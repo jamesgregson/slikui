@@ -8,7 +8,7 @@ set(GLFW_INCLUDE "")
 if(glfw3_FOUND)
   set(GLFW_LIBS glfw)
 else()
-  message(STATUS "GLFW not found — building only dependency-free examples")
+  message(STATUS "GLFW not found - building only dependency-free examples")
 endif()
 
 if(glfw3_FOUND)
@@ -34,7 +34,7 @@ if(SDL3_FOUND)
   add_executable(06_sdl_opengl 06_sdl_opengl/main.cpp)
   target_link_libraries(06_sdl_opengl PRIVATE slikui SDL3::SDL3)
 else()
-  message(STATUS "SDL3 not found — skipping 06_sdl_opengl")
+  message(STATUS "SDL3 not found - skipping 06_sdl_opengl")
 endif()
 
 if(APPLE)
@@ -52,6 +52,6 @@ elseif(UNIX)
   endforeach()
 endif()
 
-# Dependency-free headless example — always builds.
+# Dependency-free headless example - always builds.
 add_executable(02_raw_pixels 02_raw_pixels/main.cpp)
 target_link_libraries(02_raw_pixels PRIVATE slikui)

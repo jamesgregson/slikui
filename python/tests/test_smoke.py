@@ -96,7 +96,7 @@ def test_widget_identity_and_lifecycle():
 def test_fontless_context_does_not_crash():
     # Minimal Linux containers (e.g. manylinux wheel builds) have no system
     # fonts: find_system_font() returns "" and the font never loads. The
-    # fontless path must degrade to zero-size text, not segfault — the CI
+    # fontless path must degrade to zero-size text, not segfault - the CI
     # wheel tests crashed in App.tick() before the ok_ guards existed.
     from slikui._slikui import Context, Sink, Target
 
@@ -115,7 +115,7 @@ def test_fontless_context_does_not_crash():
 def test_fontless_list_widgets_render_with_items():
     # ListView/Tabs keep one text layout per item; fontless, that cache was
     # left empty and paint() read past it. The wheel CI segfaulted in
-    # test_dropdown_popup_opens_selects_closes — a Dropdown popup is a
+    # test_dropdown_popup_opens_selects_closes - a Dropdown popup is a
     # ListView, painted while open.
     from slikui._slikui import Context, Sink, Target
 

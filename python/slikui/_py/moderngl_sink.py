@@ -1,8 +1,8 @@
-"""ModernGLSink — slikui.RenderSink over moderngl (OpenGL 3.3).
+"""ModernGLSink - slikui.RenderSink over moderngl (OpenGL 3.3).
 
 Same design as slikui.GLSink (C++ GpuBatcher + the shared GLSL shaders: one
 buffer write and one instanced draw per scissor/texture batch), through
-moderngl instead of PyOpenGL — much lower per-call overhead, and it plugs
+moderngl instead of PyOpenGL - much lower per-call overhead, and it plugs
 into a moderngl host's own Context.
 
     import moderngl
@@ -95,7 +95,7 @@ class ModernGLSink(RenderSink):
         self._forget()
 
     def reset(self, context=None, mgl=None):
-        """GL context lost/recreated: drop the dead objects (not released —
+        """GL context lost/recreated: drop the dead objects (not released -
         they went with the old context), init() on `mgl` (or a context
         created for the current one) and re-upload via `context`."""
         self.mgl = mgl

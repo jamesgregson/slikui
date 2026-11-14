@@ -14,11 +14,11 @@ public:
 
 Two backends ship out of the box and are the reference implementations:
 
-- **`slikui::software::Sink`** — antialiased CPU rasterizer over a raw
+- **`slikui::software::Sink`** - antialiased CPU rasterizer over a raw
   `uint32_t` framebuffer (owned or borrowed). Works headless, on embedded
   targets, or blitted into any engine. `sink.set_scale()` renders logical
   coordinates at any pixel density.
-- **`slikui::opengl::OpenglSink`** — GL 3.3 core renderer using your **system
+- **`slikui::opengl::OpenglSink`** - GL 3.3 core renderer using your **system
   OpenGL headers** (no vendored loader).
 
 Window/input layers are separate and optional: GLFW (`backends/glfw/`) and
@@ -26,22 +26,22 @@ SDL3 (`backends/sdl/`), each split into input translation for a window you
 own and a ready-made window. All self-gate on `__has_include`, so they
 compile to nothing when the headers are absent.
 
-Anything else — Vulkan, Metal, SDL_Renderer, a raylib batch — implements the
-same two methods. A minimal sink is ~100–400 lines; the software sink is the
+Anything else - Vulkan, Metal, SDL_Renderer, a raylib batch - implements the
+same two methods. A minimal sink is ~100-400 lines; the software sink is the
 smallest complete example, start there when porting. Every screenshot on
-this site is real `IRenderSink` output from the software backend — the two
+this site is real `IRenderSink` output from the software backend - the two
 methods are the entire contract.
 
 ## Frame flow
 
 ```
 ctx.render()
-  ├─ upload() for dirty atlases (font atlas, images)
-  ├─ build DrawList (root tree, then popups, then dialogs/toasts)
-  └─ sink.render(list, framebuffer_size)
+  |- upload() for dirty atlases (font atlas, images)
+  |- build DrawList (root tree, then popups, then dialogs/toasts)
+  `- sink.render(list, framebuffer_size)
 ```
 
-`render` should clear nothing by default — the list contains a background
+`render` should clear nothing by default - the list contains a background
 rect (`Context::render(clear=true)` paints `Theme::background` first).
 Presenting (swap buffers, blit) stays with the window layer, not the sink.
 
@@ -59,13 +59,13 @@ struct TexUpload {
 - `Alpha8`: one coverage byte per pixel. Store it as `R8` (GL) or expand to
   RGBA on upload; shaders multiply color by the red/alpha channel.
 - `Rgba8`: straight (non-premultiplied) alpha.
-- `upload` may be called repeatedly for the same id (atlas regrows) — treat
+- `upload` may be called repeatedly for the same id (atlas regrows) - treat
   it as create-or-replace. Texture ids are never reused for different
   content.
 - `release(id)` is called when the widget owning a texture (`Image`,
   `ImageView`, `CompareView`) is destroyed; free it then. It can arrive
-  outside `render()` — e.g. from `Context::clear_tree()` at shutdown, with
-  no GPU context current — so GPU sinks should queue the delete and perform
+  outside `render()` - e.g. from `Context::clear_tree()` at shutdown, with
+  no GPU context current - so GPU sinks should queue the delete and perform
   it on the next `render()` (`OpenglSink` does). It is never called from
   `~Context`; a sink frees what it still holds when it is destroyed.
 - After a sink loses its textures (GPU context lost or recreated), call
@@ -75,7 +75,7 @@ struct TexUpload {
 ## DrawList semantics
 
 The list is flat commands in paint order. Geometry is in framebuffer pixels,
-y-down. Clipping is *not* pre-applied — apply the clip stack:
+y-down. Clipping is *not* pre-applied - apply the clip stack:
 
 | Cmd | Meaning | Fields |
 |-----|---------|--------|
@@ -88,14 +88,14 @@ y-down. Clipping is *not* pre-applied — apply the clip stack:
 Guarantees you can rely on:
 
 - `ClipPush`/`ClipPop` are balanced (`DrawList::clip_balanced()`).
-- `uv` values for glyphs/images are in **texture pixels** — normalize by the
+- `uv` values for glyphs/images are in **texture pixels** - normalize by the
   texture's size from the last `upload` of that id.
 - Whitespace glyphs are never emitted (widgets skip them).
 
 ## Event translation (window layer)
 
 The window layer converts native events into `slikui::Event` and calls
-`Context::handle` — one vocabulary regardless of platform:
+`Context::handle` - one vocabulary regardless of platform:
 
 | slikui event | GLFW source | builder (`slikui::glfw::`) |
 |--------------|-------------|----------------------------|
@@ -107,7 +107,7 @@ The window layer converts native events into `slikui::Event` and calls
 | `FocusLost` | window-focus callback (focus out) | `focus_event` |
 | `FrameResize` | framebuffer-size callback (`pos` = **pixel** size; Context converts to logical) | `framebuffer_size_event` |
 
-Mouse positions are **logical points** — GLFW's cursor coordinates (window
+Mouse positions are **logical points** - GLFW's cursor coordinates (window
 space) pass through unchanged, matching the layout space Context works in.
 Only `FrameResize` carries framebuffer pixels.
 
@@ -117,7 +117,7 @@ slikui uses `MouseLeft=0`, **`MouseMiddle=1`, `MouseRight=2`**.
 
 ### Using your own GLFW window
 
-`slikui/backends/glfw/glfw_input.hpp` works on any `GLFWwindow*` — it never
+`slikui/backends/glfw/glfw_input.hpp` works on any `GLFWwindow*` - it never
 creates a window or touches GL. Pick the level that fits your app:
 
 ```cpp
@@ -154,7 +154,7 @@ Python has the same three levels in `slikui.glfw_input` (pyGLFW):
 
 `slikui/backends/sdl/` mirrors the GLFW layers for SDL 3.2+. SDL delivers
 input through its event queue rather than callbacks, so there is nothing to
-install or chain — you hand slikui the events you poll:
+install or chain - you hand slikui the events you poll:
 
 ```cpp
 #include <slikui/backends/sdl/sdl_input.hpp>
@@ -178,7 +178,7 @@ input.dispatch(ctx);                         // or route input.events() yourself
   converts. **Keys** map by keycode, so shortcuts follow the user's layout
   (AZERTY Ctrl+Z is the key labelled Z). GLFW maps by physical position, so
   the two differ on non-US layouts.
-- Python: `slikui.sdl_input` (PySDL3) — `translate(ev)`, `slikui.SdlInput(win,
+- Python: `slikui.sdl_input` (PySDL3) - `translate(ev)`, `slikui.SdlInput(win,
   target)` with `process(ev)` / `take()`, `attach_services(ctx)`;
   `python/examples/sdl_demo.py`. PySDL3 downloads SDL binaries unless
   `SDL_DOWNLOAD_BINARIES=0 SDL_FIND_BINARIES=1 SDL_DISABLE_METADATA=1` (use a
@@ -198,8 +198,8 @@ bool to_ui = pointer ? ctx.wants_mouse(e.pos) : ctx.wants_keyboard();
 
 `wants_mouse(pos)` is true during a UI press or drag (so the release comes
 back to the UI), with a modal dialog open, or over any popup, dialog or
-widget that is not `mouse_transparent()`. Pure layout — `Column`, `Row`,
-`Spacer` — is transparent, so a full-window layout with a docked panel lets
+widget that is not `mouse_transparent()`. Pure layout - `Column`, `Row`,
+`Spacer` - is transparent, so a full-window layout with a docked panel lets
 the pointer through everywhere except the panel. Custom layout-only widgets
 override `mouse_transparent()` to return true (Python too).
 `wants_keyboard()` is true when a widget has focus or a modal is open.
@@ -231,11 +231,11 @@ class MySink : public slikui::IRenderSink {
 `slikui/render/batcher.hpp` does the API-independent half of a GPU sink.
 `GpuBatcher::build(list, frame, scale)` turns a frame into two arrays:
 
-- **instances** — one `GpuInstance` (20 floats: rect, rgba, uv in texels,
+- **instances** - one `GpuInstance` (20 floats: rect, rgba, uv in texels,
   shape `{kind, radius, border, line half-thickness}`, line endpoints) per
   drawable command, in logical px. Commands entirely outside their clip,
   transparent fills and empty quads are culled.
-- **batches** — `{first, count, tex_id, scissor x/y/w/h}` runs sharing one
+- **batches** - `{first, count, tex_id, scissor x/y/w/h}` runs sharing one
   scissor and one texture. Scissors are framebuffer px, bottom-left origin,
   ready for `glScissor`. Shapes never break a texture run, so a typical
   frame is a handful of batches.
@@ -243,10 +243,10 @@ class MySink : public slikui::IRenderSink {
 A sink uploads the instances once per frame and, per batch, sets the
 scissor, binds the texture and draws `count` instances of a 4-vertex
 triangle strip. The reference GLSL 330 shaders (`kGpuVertexShader`,
-`kGpuFragmentShader`) take the five vec4 attributes at locations 0–4 with
+`kGpuFragmentShader`) take the five vec4 attributes at locations 0-4 with
 divisor 1, and the uniforms `u_res`, `u_scale`, `u_tex`. Blend with
 `glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE,
-ONE_MINUS_SRC_ALPHA)` — the software sink's straight-alpha "over".
+ONE_MINUS_SRC_ALPHA)` - the software sink's straight-alpha "over".
 
 The shaders reproduce the software rasterizer's coverage (SDF rounded
 rects/borders, capsule lines, bilinear Alpha8, nearest Rgba8):
@@ -254,7 +254,7 @@ rects/borders, capsule lines, bilinear Alpha8, nearest Rgba8):
 `OpenglSink` offscreen and requires them to match the software sink to
 2/255 per channel. Both sinks cover a glyph/image quad by **pixel center**:
 pixel (x, y) is drawn when (x + .5, y + .5) lies inside the quad and its
-index lies inside the clip (the glScissor rule) — a CPU sink should do the
+index lies inside the clip (the glScissor rule) - a CPU sink should do the
 same, or fractional glyphs pick up a row of their atlas neighbour.
 
 ## Reference notes from the GL sink
@@ -274,7 +274,7 @@ same, or fractional glyphs pick up a row of their atlas neighbour.
 
 `slikui.RenderSink` is a trampoline over C++ `IRenderSink`: subclass it,
 implement `upload(tex)` and `render(commands, fb_size)`, and slikui hands you
-every frame as a flat command list — point it at pygame, moderngl, PIL,
+every frame as a flat command list - point it at pygame, moderngl, PIL,
 anything. `slikui.CanvasSink` is a worked example: a pure-numpy rasterizer
 producing **pixel-identical** output to the C++ software backend (verified by
 test). Details: [Python bindings](../reference/python-bindings.md).

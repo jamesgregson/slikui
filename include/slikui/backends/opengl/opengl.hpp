@@ -1,6 +1,6 @@
-// slikui/backends/opengl/opengl.hpp — OpenglSink: IRenderSink over OpenGL 3.3.
+// slikui/backends/opengl/opengl.hpp - OpenglSink: IRenderSink over OpenGL 3.3.
 //
-// Uses the SYSTEM OpenGL headers/libraries — no bundled loader. macOS links
+// Uses the SYSTEM OpenGL headers/libraries - no bundled loader. macOS links
 // OpenGL.framework directly; Linux uses the glvnd/libGL dev headers with
 // GL_GLEXT_PROTOTYPES. If they're missing, install them (see #error below).
 //
@@ -208,7 +208,7 @@ private:
         GLuint s = glCreateShader(type);
         if (s == 0) {
             std::fprintf(stderr,
-                         "slikui: glCreateShader returned 0 — is a GL context current on this thread?\n");
+                         "slikui: glCreateShader returned 0 - is a GL context current on this thread?\n");
             return 0;
         }
         glShaderSource(s, 1, &src, nullptr);

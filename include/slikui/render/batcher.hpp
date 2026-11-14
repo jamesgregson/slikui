@@ -1,4 +1,4 @@
-// slikui/render/batcher.hpp — GpuBatcher: DrawList -> GPU-ready arrays.
+// slikui/render/batcher.hpp - GpuBatcher: DrawList -> GPU-ready arrays.
 //
 // API-agnostic (no GL/Vulkan/Metal headers). Turns a frame's DrawList into
 //
@@ -36,7 +36,7 @@ enum class GpuKind : int { Rect = 0, Glyph = 1, Image = 2, Line = 3 };
 
 // One drawable command. Attribute order = vertex shader locations 0..4.
 struct GpuInstance {
-    float rect[4];  // x, y, w, h — quad bounds, logical px (Line: capsule bbox)
+    float rect[4];  // x, y, w, h - quad bounds, logical px (Line: capsule bbox)
     float color[4]; // r, g, b, a in 0..1, straight alpha
     float uv[4];    // u0, v0, u1, v1 in TEXELS (shader divides by textureSize)
     float shape[4]; // kind, radius, border width (0 = fill), line half-thickness
@@ -222,7 +222,7 @@ private:
 // N instances, no vertex buffer for the corners (gl_VertexID).
 // Uniforms: u_res (framebuffer px), u_scale (logical -> fb px), u_tex (unit).
 // Blend: glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE,
-// ONE_MINUS_SRC_ALPHA) — the software sink's straight-alpha "over".
+// ONE_MINUS_SRC_ALPHA) - the software sink's straight-alpha "over".
 // ---------------------------------------------------------------------------
 
 inline constexpr const char* kGpuVertexShader = R"(#version 330 core

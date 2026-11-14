@@ -9,7 +9,7 @@ Layout is immediate-mode in spirit but retained in the tree. `Column` and
 Both containers stack children with `set_gap` and `set_padding`, distribute
 extra main-axis space to children that expand, and align cross-axis with
 `set_cross` (`CrossMode::Stretch`, `Start`, `Center`). `Spacer` soaks up
-remaining space — use it to push siblings to the far edge. `Divider` draws a
+remaining space - use it to push siblings to the far edge. `Divider` draws a
 rule.
 
 === "C++"
@@ -18,7 +18,7 @@ rule.
     auto& panel = root.add<slikui::Panel>();
     panel.set_padding(14).set_gap(10);
     panel.set_radius(10);
-    panel.add<slikui::Label>("Panel — a bordered container");
+    panel.add<slikui::Label>("Panel - a bordered container");
     auto& top = panel.add<slikui::Row>();
     top.add<slikui::Label>("left");
     top.add<slikui::Spacer>();          // pushes "right" to the far edge
@@ -34,7 +34,7 @@ rule.
 
     ```python
     panel = root.add(slikui.Panel, padding=14, gap=10, radius=10)
-    panel.add(slikui.Label, "Panel — a bordered container")
+    panel.add(slikui.Label, "Panel - a bordered container")
     top = panel.add(slikui.Row)
     top.add(slikui.Label, "left")
     top.add(slikui.Spacer)              # pushes "right" to the far edge
@@ -49,7 +49,7 @@ rule.
 
 ## Panel
 
-`Panel` is a bordered, rounded container — a `Container` that paints a
+`Panel` is a bordered, rounded container - a `Container` that paints a
 surface. `set_background`, `set_border`, `set_radius` style it; everything
 else matches `Column`.
 
@@ -57,10 +57,10 @@ else matches `Column`.
 
 `Expander` shows/hides its subtree behind a titled header (`set_title`,
 `set_open`, `on_toggle(void(bool))`). Closed children get zero frames and
-skip hit-testing — collapsing is genuinely free.
+skip hit-testing - collapsing is genuinely free.
 
 `Accordion` stacks `Expander` sections. `add_section(title, open = false)`
-returns the section's `Expander` (itself a `Container`) — fill it with rows,
+returns the section's `Expander` (itself a `Container`) - fill it with rows,
 sliders, whatever the group needs. By default the accordion is **exclusive**:
 opening one section closes the others. `set_exclusive(false)` lets every
 section stand open.
@@ -98,7 +98,7 @@ section stand open.
 ## Splitter
 
 `Splitter` divides two children with a draggable divider: `set_fraction`
-(0–1), `on_change(void(float))`. Construct with `true` for a horizontal
+(0-1), `on_change(void(float))`. Construct with `true` for a horizontal
 divider / stacked panes. The capture below pairs it with an `Expander`:
 
 === "C++"
@@ -142,7 +142,7 @@ divider / stacked panes. The capture below pairs it with an `Expander`:
 Layout is recomputed from scratch every tick, so resizes reflow automatically:
 the backend emits a frame-resize event, `ScrollArea` clamps its offset, labels
 re-wrap to the available width, and popups re-clamp to the frame. HiDPI is a
-`theme().scale` change — layout stays in logical points, each sink maps them
+`theme().scale` change - layout stays in logical points, each sink maps them
 to device pixels (see [Theming](theming.md)).
 
 API details: [Containers](../reference/widgets-containers.md).

@@ -1,4 +1,4 @@
-// slikui/widgets/views.hpp — ScrollArea, ListView, Tabs, Dropdown.
+// slikui/widgets/views.hpp - ScrollArea, ListView, Tabs, Dropdown.
 #pragma once
 
 #include "slikui/context.hpp"
@@ -15,7 +15,7 @@
 namespace slikui {
 
 // ---------------------------------------------------------------------------
-// ScrollArea — vertical scroll region with a clipped content column.
+// ScrollArea - vertical scroll region with a clipped content column.
 // ---------------------------------------------------------------------------
 class ScrollArea : public Widget {
 public:
@@ -132,7 +132,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// ListView — vertical list of string rows with selection.
+// ListView - vertical list of string rows with selection.
 // ---------------------------------------------------------------------------
 class ListView : public Widget {
 public:
@@ -240,7 +240,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Tabs — header row with active underline.
+// Tabs - header row with active underline.
 // ---------------------------------------------------------------------------
 class Tabs : public Widget {
 public:
@@ -318,7 +318,7 @@ private:
     void refresh_metrics() const {
         if (valid_ || !ctx) return;
         if (!ctx->font().valid()) {
-            // Fontless: see ListView::refresh_metrics — one empty layout per
+            // Fontless: see ListView::refresh_metrics - one empty layout per
             // tab keeps paint()'s layouts_[i] in bounds.
             if (layouts_.size() != labels_.size()) layouts_.assign(labels_.size(), {});
             return;
@@ -345,7 +345,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Dropdown — button that opens a ListView popup.
+// Dropdown - button that opens a ListView popup.
 // ---------------------------------------------------------------------------
 class Dropdown : public Widget {
 public:

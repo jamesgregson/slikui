@@ -1,4 +1,4 @@
-// tests/test_golden.cpp — pixel checks through the software backend.
+// tests/test_golden.cpp - pixel checks through the software backend.
 #include "test.hpp"
 
 #include "slikui/backends/software/software.hpp"

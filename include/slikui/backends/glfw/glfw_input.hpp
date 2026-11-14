@@ -1,4 +1,4 @@
-// slikui/backends/glfw/glfw_input.hpp — GLFW event translation for YOUR window.
+// slikui/backends/glfw/glfw_input.hpp - GLFW event translation for YOUR window.
 //
 // Optional backend: compiles only when <GLFW/glfw3.h> is available. Nothing
 // here creates a window or touches GL. Three levels, pick one:
@@ -36,7 +36,7 @@
 
 #include "slikui/context.hpp"
 
-// slikui's wrapper never touches GL itself — keep GLFW from pulling in any
+// slikui's wrapper never touches GL itself - keep GLFW from pulling in any
 // OpenGL header (examples include their own, e.g. <OpenGL/gl3.h>).
 #ifndef GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_NONE
@@ -248,7 +248,7 @@ inline void attach_services(Context& ctx, GLFWwindow* window) {
     ctx.set_clipboard_sink([](std::string text) {
         glfwSetClipboardString(nullptr, text.c_str());
     });
-    // Cursor shapes → GLFW standard cursors (created lazily, shared, never
+    // Cursor shapes -> GLFW standard cursors (created lazily, shared, never
     // destroyed: glfwTerminate frees them).
     struct Cursors {
         GLFWcursor* map[7] = {};
@@ -327,7 +327,7 @@ public:
 
     GLFWwindow* window() const { return window_; }
 
-    // Detach without restoring callbacks — for when the window is already
+    // Detach without restoring callbacks - for when the window is already
     // destroyed (GLFW would be called with a dead handle otherwise).
     void release_window() { window_ = nullptr; }
 

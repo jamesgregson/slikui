@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""slikui cube viewer — Python-native GLFW + OpenGL host, slikui software UI.
+"""slikui cube viewer - Python-native GLFW + OpenGL host, slikui software UI.
 
 The Python twin of examples/04_glfw_opengl: a lit cube/sphere/torus over a
 procedural sky, with a slikui controls panel. The difference is who owns the
 window: here GLFW and OpenGL are driven from Python (glfw + PyOpenGL):
 
-    scene pass  — plain GL (sky + grid + shape)
-    UI pass     — slikui.GlApp.render(clear=False): GLSink draws the UI
+    scene pass  - plain GL (sky + grid + shape)
+    UI pass     - slikui.GlApp.render(clear=False): GLSink draws the UI
                   straight over the scene (a few instanced draws per frame)
-    input       — GLFW callbacks → slikui.Event for UI hits, camera ops else
+    input       - GLFW callbacks -> slikui.Event for UI hits, camera ops else
 
 With --software the UI pass is the CPU path instead: ctx.render(clear=False)
 into a uint32 Target cleared to transparent, uploaded as one texture every
@@ -32,7 +32,7 @@ K_MIN_DIST, K_MAX_DIST = 2.4, 10.0
 
 
 # ---------------------------------------------------------------------------
-# Shaders — one lit program for the shape, one procedural sky, one blit for
+# Shaders - one lit program for the shape, one procedural sky, one blit for
 # the UI texture. Same GLSL as the C++ example.
 # ---------------------------------------------------------------------------
 MESH_VS = """
@@ -158,7 +158,7 @@ def look_at(eye, target):
     m[12] = -float(np.dot(x, eye))
     m[13] = -float(np.dot(y, eye))
     m[14] = -float(np.dot(z, eye))
-    m[15] = 1.0  # w row — C++ Mat4 identity-initializes this; zeros would
+    m[15] = 1.0  # w row - C++ Mat4 identity-initializes this; zeros would
                  # make clip.w = 0 for every vertex (NaN after the divide)
     return m
 
@@ -259,7 +259,7 @@ def make_grid():
 
 def upload_mesh(verts, idx=None):
     """verts: (N, 6) float32 [pos|normal] for indexed shapes, or (N, 7)
-    [pos|color] for the grid. One VBO per attribute — PyOpenGL's
+    [pos|color] for the grid. One VBO per attribute - PyOpenGL's
     glVertexAttribPointer only accepts None (offset 0) pointers on this
     stack, so interleaved layouts with non-zero offsets silently break
     vertex fetch."""
@@ -320,7 +320,7 @@ def uniforms(prog, *names):
 
 
 # ---------------------------------------------------------------------------
-# App state — everything the panel edits, plus the camera.
+# App state - everything the panel edits, plus the camera.
 # ---------------------------------------------------------------------------
 class State:
     shape = 0  # 0 cube, 1 sphere, 2 torus
@@ -509,7 +509,7 @@ def setup_gl():
                 upload_mesh(*make_torus())]
     g.grid = upload_mesh(make_grid())
 
-    # Blit quad: separate pos/uv VBOs (see upload_mesh — None-offset rule);
+    # Blit quad: separate pos/uv VBOs (see upload_mesh - None-offset rule);
     # v=0 is the top row of the CPU pixels.
     g.blit_vao = GL.glGenVertexArrays(1)
     GL.glBindVertexArray(g.blit_vao)
@@ -639,7 +639,7 @@ def draw_ui(g, app, tex_size):
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, w, h, 0, GL.GL_RGBA,
                         GL.GL_UNSIGNED_BYTE, None)
         tex_size[:] = [w, h]
-    # ...and upload every frame — an allocate-only frame would show undefined
+    # ...and upload every frame - an allocate-only frame would show undefined
     # texture contents (and glTexImage2D with data=None does not upload).
     GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0, w, h, GL.GL_RGBA,
                        GL.GL_UNSIGNED_BYTE, pix.view(np.uint8))
@@ -710,7 +710,7 @@ def main(argv=None):
                 ctl["dragging"] = False
             else:
                 # Always deliver releases that slikui saw a press for (e.g. a
-                # slider press that slid off the panel) — slikui ignores
+                # slider press that slid off the panel) - slikui ignores
                 # releases it did not pair.
                 app.handle(gi.mouse_button_event(w, button, action, mods))
 

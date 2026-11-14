@@ -4,14 +4,14 @@ The data-display family for demo panels: lists, trees, tables, the property
 inspector, plots and images. Series and rows accept `numpy` arrays in Python
 and `std::vector` in C++.
 
-Each image is real output from `tools/components_capture.cpp` — the snippets
+Each image is real output from `tools/components_capture.cpp` - the snippets
 are the capture code.
 
 ## ListView, Tabs, Dropdown
 
 `ListView` is a selectable item list (`on_select(void(size_t))`). `Tabs` is a
 tab bar (`set_tabs`, `on_change`). `Dropdown` opens its selection popup on
-click — the screenshot shows it after a simulated press:
+click - the screenshot shows it after a simulated press:
 
 === "C++"
 
@@ -24,7 +24,7 @@ click — the screenshot shows it after a simulated press:
     col.set_gap(10);
     col.add<slikui::Tabs>().set_tabs({"Home", "Edits", "View"}).set_selected(1);
     col.add<slikui::Dropdown>().set_items({"Linear", "Nearest", "Cubic", "Lanczos"})
-        .set_placeholder("Filter…").set_selected(0);
+        .set_placeholder("Filter...").set_selected(0);
     ```
 
 === "Python"
@@ -36,7 +36,7 @@ click — the screenshot shows it after a simulated press:
     col = row.add(slikui.Column, gap=10)
     col.add(slikui.Tabs, tabs=["Home", "Edits", "View"], selected=1)
     col.add(slikui.Dropdown, items=["Linear", "Nearest", "Cubic", "Lanczos"],
-            placeholder="Filter…", selected=0)
+            placeholder="Filter...", selected=0)
     ```
 
 ![views](../images/views.png)
@@ -53,7 +53,7 @@ click — the screenshot shows it after a simulated press:
 ## Plot
 
 Line series with autoscale (or `set_x_range`/`set_y_range`), grid + tick
-labels, optional area fill, markers — and `set_bars` turns series 0 into a
+labels, optional area fill, markers - and `set_bars` turns series 0 into a
 histogram.
 
 === "C++"
@@ -80,14 +80,14 @@ histogram.
 
 | API | Signature |
 |-----|-----------|
-| `set_series` | C++ `(std::vector<Vec2>, color)` · Python `(ys_array, color)` |
+| `set_series` | C++ `(std::vector<Vec2>, color)` | Python `(ys_array, color)` |
 | `add_series` | extra series (C++ also `(xs_array, ys_array, color)` in Python) |
-| `set_x_range` / `set_y_range` | `(min, max)` — disable autoscale |
+| `set_x_range` / `set_y_range` | `(min, max)` - disable autoscale |
 | `set_bars` / `set_fill` / `set_markers` | `(bool)` |
 
 ## Vec2Pad
 
-A 2D pad with a draggable dot — light directions, UV offsets. Pictured bottom
+A 2D pad with a draggable dot - light directions, UV offsets. Pictured bottom
 left of the capture below.
 
 === "C++"

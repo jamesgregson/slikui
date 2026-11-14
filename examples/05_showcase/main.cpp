@@ -1,20 +1,20 @@
-// examples/05_showcase/main.cpp — every widget, live, in one window.
+// examples/05_showcase/main.cpp - every widget, live, in one window.
 //
 // The interactive sibling of 03_gallery: each component prints its state
 // changes into the on-screen LogView as you use it, so the log doubles as a
 // trace of what you touched. Layout:
 //
-//     MenuBar ─ Toolbar ─ [ log panel | tabbed pages ] ─ StatusBar
+//     MenuBar - Toolbar - [ log panel | tabbed pages ] - StatusBar
 //
 // The tabbed pages cover the whole component set (controls, inputs, data,
 // containers, media, custom); Tabs only carry labels, so pages are a column
 // of Panels with visibility toggled from the Tabs callback.
 //
 // Two custom widgets exercise the measure/paint/on_event/tick contract:
-//   Fill       — expands on the main axis and delegates to its one child
+//   Fill       - expands on the main axis and delegates to its one child
 //                (the trick that lets the splitter fill the window).
-//   LevelMeter — LED bar meter: click/drag to scrub, peak-hold marker,
-//                green→amber→red gradient, warns above 90%.
+//   LevelMeter - LED bar meter: click/drag to scrub, peak-hold marker,
+//                green->amber->red gradient, warns above 90%.
 //
 // Modes:
 //   ./slikui_showcase          interactive (GLFW + OpenGL, like 03_gallery)
@@ -43,7 +43,7 @@
 using namespace slikui;
 
 // ---------------------------------------------------------------------------
-// Custom widget 1: Fill — a plain Widget that expands on the main axis and
+// Custom widget 1: Fill - a plain Widget that expands on the main axis and
 // hands its whole area to a single child. Column only gives leftover height
 // to children whose expands_main() is true; this wrapper is the honest way
 // to get a splitter (or any natural-height composite) to fill the window.
@@ -64,7 +64,7 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Custom widget 2: LevelMeter — LED bar with click/drag scrubbing, a peak
+// Custom widget 2: LevelMeter - LED bar with click/drag scrubbing, a peak
 // marker, and a gradient from success through warning to danger.
 // ---------------------------------------------------------------------------
 class LevelMeter : public Widget {
@@ -143,7 +143,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Demo plumbing: every state change flows through say() — into the LogView
+// Demo plumbing: every state change flows through say() - into the LogView
 // and into a transcript the smoke mode prints.
 // ---------------------------------------------------------------------------
 struct Demo {
@@ -279,25 +279,25 @@ static void build_ui(Context& ctx, UI& ui) {
     // ----- menu bar -------------------------------------------------------
     auto& bar = root.add<MenuBar>();
     auto& mfile = bar.add_menu("File");
-    mfile.add_item("New", [&] { demo.say("menu File → New"); }, "Ctrl+N");
-    mfile.add_item("Open…", [&] { if (ui.open_file_dialog) ui.open_file_dialog(); },
+    mfile.add_item("New", [&] { demo.say("menu File -> New"); }, "Ctrl+N");
+    mfile.add_item("Open...", [&] { if (ui.open_file_dialog) ui.open_file_dialog(); },
                    "Ctrl+O");
     mfile.add_item("Save", [&] { if (ui.save) ui.save(); }, "Ctrl+S");
     mfile.add_separator();
-    mfile.add_item("Exit", [&] { demo.say("menu File → Exit (close the window)"); });
+    mfile.add_item("Exit", [&] { demo.say("menu File -> Exit (close the window)"); });
     auto& mview = bar.add_menu("View");
     auto& appearance = mview.add_submenu("Appearance", std::make_unique<Menu>("Appearance"));
     for (size_t i = 0; i < theme_presets().size(); ++i) {
         std::string name = theme_presets()[i].name;
         appearance.add_item(name, [&, i, name] {
             apply_preset(ctx.theme(), i);
-            demo.say("theme → '" + name + "'");
+            demo.say("theme -> '" + name + "'");
         });
     }
     mview.add_separator();
     mview.add_checkable("Play samples", [&] { return ui.playing; }, [&] {
         ui.playing = !ui.playing;
-        demo.say(std::string("menu View → play samples ")
+        demo.say(std::string("menu View -> play samples ")
                  + (ui.playing ? "on" : "off"));
     });
     auto& mhelp = bar.add_menu("Help");
@@ -307,16 +307,16 @@ static void build_ui(Context& ctx, UI& ui) {
     auto& tb = root.add<Toolbar>();
     tb.add_button(Icon::Play, [&] {
         ui.playing = true;
-        demo.say("toolbar → play");
+        demo.say("toolbar -> play");
     }, "Play the live plot + progress");
     tb.add_button(Icon::Pause, [&] {
         ui.playing = false;
-        demo.say("toolbar → pause");
+        demo.say("toolbar -> pause");
     }, "Pause the live plot + progress");
     tb.add_button(Icon::Stop, [&] {
         ui.playing = false;
         ui.samples.assign(24, 0.35f);
-        demo.say("toolbar → stop (plot reset)");
+        demo.say("toolbar -> stop (plot reset)");
     }, "Stop and reset the plot");
     tb.add_separator();
     tb.add_button(Icon::Folder, [&] { if (ui.open_file_dialog) ui.open_file_dialog(); },
@@ -326,7 +326,7 @@ static void build_ui(Context& ctx, UI& ui) {
         auto t = std::make_unique<Toast>("Screenshot saved to /tmp");
         t->set_icon(Icon::Camera);
         ctx.push_toast(std::move(t), 3.0);
-        demo.say("toast → 'Screenshot saved to /tmp'");
+        demo.say("toast -> 'Screenshot saved to /tmp'");
     }, "Push a toast");
     tb.add_button(Icon::Eye, [&] { if (ui.open_about) ui.open_about(); }, "About");
     tb.add_button(Icon::Trash, [&] {
@@ -347,7 +347,7 @@ static void build_ui(Context& ctx, UI& ui) {
     auto& log_head = log_panel.add<Row>().set_gap(8);
     log_head.add<Label>("event log").set_font_size(15);
     log_head.add<Spacer>();
-    log_head.add<Label>("live — every component reports here")
+    log_head.add<Label>("live - every component reports here")
         .set_color(Color::from_hex(0x8A94A0))
         .set_font_size(12);
     auto& logview = log_panel.add<LogView>();
@@ -374,7 +374,7 @@ static void build_ui(Context& ctx, UI& ui) {
         .set_variant(Button::Variant::Primary)
         .on_click([&] { demo.say("button 'Primary' clicked"); });
     ui.btn_danger = &btn_row.add<Button>("Cause error").on_click([&] {
-        demo.say("button 'Cause error' clicked — boom", LogView::Level::Error);
+        demo.say("button 'Cause error' clicked - boom", LogView::Level::Error);
     });
     btn_row.add<Button>("Ghost")
         .set_variant(Button::Variant::Ghost)
@@ -382,7 +382,7 @@ static void build_ui(Context& ctx, UI& ui) {
     auto& g_sel = p1.add<GroupBox>("toggles");
     auto& sel_row = g_sel.add<Row>().set_gap(16);
     ui.checkbox = &sel_row.add<Checkbox>("autosave", true).on_change([&](bool v) {
-        demo.say(std::string("checkbox autosave → ") + (v ? "on" : "off"));
+        demo.say(std::string("checkbox autosave -> ") + (v ? "on" : "off"));
     });
     for (int i = 0; i < 3; ++i) {
         auto& r = sel_row.add<Radio>("pick " + std::to_string(i + 1), i == 0);
@@ -390,12 +390,12 @@ static void build_ui(Context& ctx, UI& ui) {
         r.on_change([&ui, &demo, i](bool on) {
             if (!on) return;
             for (auto* r2 : ui.radios) r2->set_checked(r2 == ui.radios[i]);
-            demo.say("radio → pick " + std::to_string(i + 1));
+            demo.say("radio -> pick " + std::to_string(i + 1));
         });
     }
     ui.sw = &sel_row.add<Switch>();
     ui.sw->on_change([&demo](bool v) {
-        demo.say(std::string("switch → ") + (v ? "on" : "off"));
+        demo.say(std::string("switch -> ") + (v ? "on" : "off"));
     });
     auto& g_rng = p1.add<GroupBox>("ranges");
     auto& rng_row = g_rng.add<Row>().set_gap(16);
@@ -404,7 +404,7 @@ static void build_ui(Context& ctx, UI& ui) {
     ui.slider->on_change([&demo](float v) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "%.2f", double(v));
-        demo.say("slider gain → " + std::string(buf));
+        demo.say("slider gain -> " + std::string(buf));
     });
     ui.progress = &rng_row.add<ProgressBar>();
     auto& rng_row2 = g_rng.add<Row>().set_gap(16);
@@ -412,7 +412,7 @@ static void build_ui(Context& ctx, UI& ui) {
     ui.segmented = &rng_row2.add<Segmented>();
     ui.segmented->set_items({"line", "tree", "grid"}).set_selected(0);
     ui.segmented->on_select([&demo](size_t i) {
-        demo.say("segmented → " + std::vector<std::string>{"line", "tree", "grid"}[i]);
+        demo.say("segmented -> " + std::vector<std::string>{"line", "tree", "grid"}[i]);
     });
     ui.pages.push_back(&p1);
 
@@ -422,28 +422,28 @@ static void build_ui(Context& ctx, UI& ui) {
     auto& g_text = p2.add<GroupBox>("text");
     ui.field = &g_text.add<TextField>().set_placeholder("type here, Enter submits");
     ui.field->on_change([&demo](std::string_view s) {
-        demo.say("text → '" + std::string(s) + "'");
+        demo.say("text -> '" + std::string(s) + "'");
     });
     ui.field->on_submit([&demo](std::string_view s) {
-        demo.say("text submit → '" + std::string(s) + "'", LogView::Level::Success);
+        demo.say("text submit -> '" + std::string(s) + "'", LogView::Level::Success);
     });
-    g_text.add<TextArea>().set_placeholder("multiline…").set_rows(3).on_change(
+    g_text.add<TextArea>().set_placeholder("multiline...").set_rows(3).on_change(
         [&demo](std::string_view s) {
-            demo.say("area → " + std::to_string(s.size()) + " chars");
+            demo.say("area -> " + std::to_string(s.size()) + " chars");
         });
-    ui.search = &g_text.add<SearchBox>().set_placeholder("search…");
+    ui.search = &g_text.add<SearchBox>().set_placeholder("search...");
     ui.search->on_change([&demo](std::string_view s) {
-        demo.say("search → '" + std::string(s) + "'");
+        demo.say("search -> '" + std::string(s) + "'");
     });
     ui.search->on_submit([&demo](std::string_view s) {
-        demo.say("search submit → '" + std::string(s) + "'");
+        demo.say("search submit -> '" + std::string(s) + "'");
     });
     auto& g_val = p2.add<GroupBox>("values");
     auto& val_row = g_val.add<Row>().set_gap(14);
     ui.dropdown = &val_row.add<Dropdown>();
-    ui.dropdown->set_items({"Nearest", "Linear", "Cubic"}).set_placeholder("filter…");
+    ui.dropdown->set_items({"Nearest", "Linear", "Cubic"}).set_placeholder("filter...");
     ui.dropdown->on_select([&demo](size_t i) {
-        demo.say("dropdown → "
+        demo.say("dropdown -> "
                  + std::vector<std::string>{"Nearest", "Linear", "Cubic"}[i]);
     });
     ui.dv = &val_row.add<DragValue>(1.f);
@@ -451,7 +451,7 @@ static void build_ui(Context& ctx, UI& ui) {
     ui.dv->on_change([&demo](float v) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "%.1f", double(v));
-        demo.say("dragvalue → " + std::string(buf));
+        demo.say("dragvalue -> " + std::string(buf));
     });
     ui.vec2 = &val_row.add<VecNEdit<2>>(ui.vec_vals, "xy");
     ui.vec2->set_range(-10.f, 10.f);
@@ -459,7 +459,7 @@ static void build_ui(Context& ctx, UI& ui) {
         char buf[64];
         std::snprintf(buf, sizeof buf, "(%.1f, %.1f)", double(ui.vec_vals[0]),
                       double(ui.vec_vals[1]));
-        demo.say("vec2 → " + std::string(buf));
+        demo.say("vec2 -> " + std::string(buf));
     });
     auto& g_col = p2.add<GroupBox>("color");
     auto& col_row = g_col.add<Row>().set_gap(14);
@@ -468,7 +468,7 @@ static void build_ui(Context& ctx, UI& ui) {
     ui.color->on_change([&demo](Color c) {
         char buf[16];
         std::snprintf(buf, sizeof buf, "#%02X%02X%02X", c.r, c.g, c.b);
-        demo.say("color → " + std::string(buf));
+        demo.say("color -> " + std::string(buf));
     });
     col_row.add<Label>("click the swatch for the picker popup")
         .set_color(Color::from_hex(0x8A94A0))
@@ -482,7 +482,7 @@ static void build_ui(Context& ctx, UI& ui) {
     plot.set_fill(true);
     ui.samples.assign(24, 0.35f);
     plot.set_series(ui.samples, Color::from_hex(0x4C8DFF));
-    plot.set_tooltip("live series — press play in the toolbar");
+    plot.set_tooltip("live series - press play in the toolbar");
     auto& data_row = p3.add<Row>().set_gap(10);
     ui.tree = &data_row.add<TreeView>();
     ui.tree->set_rows({
@@ -497,7 +497,7 @@ static void build_ui(Context& ctx, UI& ui) {
     });
     ui.tree->set_expanded(0, true).set_expanded(1, true).set_expanded(3, true);
     ui.tree->on_select([&demo](size_t i) {
-        demo.say("tree → " + std::vector<std::string>{
+        demo.say("tree -> " + std::vector<std::string>{
                                   "slikui/", "src/", "main.cpp", "widgets/",
                                   "controls.hpp", "shells.hpp", "docs/",
                                   "widgets-roadmap.md"}[i]);
@@ -511,7 +511,7 @@ static void build_ui(Context& ctx, UI& ui) {
         {"menus.hpp", "18", "warn"},
     });
     ui.table->on_select([&demo](size_t i) {
-        demo.say("table → row " + std::to_string(i) + " ("
+        demo.say("table -> row " + std::to_string(i) + " ("
                  + std::vector<std::string>{"controls.hpp", "shells.hpp",
                                             "views.hpp", "menus.hpp"}[i]
                  + ")");
@@ -520,7 +520,7 @@ static void build_ui(Context& ctx, UI& ui) {
     ui.list = &data_row2.add<ListView>();
     ui.list->set_items({"alpha", "beta", "gamma", "delta"});
     ui.list->on_select([&demo](size_t i) {
-        demo.say("list → "
+        demo.say("list -> "
                  + std::vector<std::string>{"alpha", "beta", "gamma", "delta"}[i]);
     });
     auto& grid = data_row2.add<PropertyGrid>();
@@ -529,13 +529,13 @@ static void build_ui(Context& ctx, UI& ui) {
     ui.prop_opacity->on_change([&demo](float v) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "%.2f", double(v));
-        demo.say("property opacity → " + std::string(buf));
+        demo.say("property opacity -> " + std::string(buf));
     });
     auto& adv = grid.add_section("advanced", true);
     auto& dv2 = adv.add_property("threads").add<DragValue>(4.f);
     dv2.set_range(1.f, 64.f).set_int_mode(true);
     dv2.on_change([&demo](float v) {
-        demo.say("property threads → " + std::to_string(int(v)));
+        demo.say("property threads -> " + std::to_string(int(v)));
     });
     auto& pad_row = p3.add<Row>().set_gap(14);
     ui.pad = &pad_row.add<Vec2Pad>();
@@ -544,9 +544,9 @@ static void build_ui(Context& ctx, UI& ui) {
     ui.pad->on_change([&demo](Vec2 v) {
         char buf[64];
         std::snprintf(buf, sizeof buf, "(%.2f, %.2f)", double(v.x), double(v.y));
-        demo.say("pad → " + std::string(buf));
+        demo.say("pad -> " + std::string(buf));
     });
-    pad_row.add<Label>("Vec2Pad — drag the dot")
+    pad_row.add<Label>("Vec2Pad - drag the dot")
         .set_color(Color::from_hex(0x8A94A0))
         .set_font_size(12);
     ui.pages.push_back(&p3);
@@ -558,23 +558,23 @@ static void build_ui(Context& ctx, UI& ui) {
     auto& c_left = c_row.add<Column>().set_gap(8);
     auto& accordion = c_left.add<Accordion>().set_exclusive(true);
     auto& sec_geo = accordion.add_section("geometry", true);
-    sec_geo.add<Label>("vertex buffer contents…");
+    sec_geo.add<Label>("vertex buffer contents...");
     auto& sec_sh = accordion.add_section("shaders");
-    sec_sh.add<Label>("glsl sources…");
+    sec_sh.add<Label>("glsl sources...");
     ui.acc_geo = &sec_geo;
     ui.acc_sh = &sec_sh;
     sec_geo.on_toggle([&demo](bool opening) {
-        demo.say(std::string("accordion → 'geometry' ")
+        demo.say(std::string("accordion -> 'geometry' ")
                  + (opening ? "opened" : "closed"));
     });
     sec_sh.on_toggle([&demo](bool opening) {
-        demo.say(std::string("accordion → 'shaders' ")
+        demo.say(std::string("accordion -> 'shaders' ")
                  + (opening ? "opened" : "closed"));
     });
     ui.expander = &c_left.add<Expander>("more options");
     ui.expander->add<Checkbox>("nested checkbox", false);
     ui.expander->on_toggle([&demo](bool opening) {
-        demo.say(std::string("expander → ") + (opening ? "opened" : "closed"));
+        demo.say(std::string("expander -> ") + (opening ? "opened" : "closed"));
     });
     auto& demo_panel = c_left.add<Panel>();
     demo_panel.set_background(Color::from_hex(0x223344)).set_radius(8);
@@ -585,15 +585,15 @@ static void build_ui(Context& ctx, UI& ui) {
     auto& upper = ui.vsplit->add<Column>().set_gap(2);
     upper.add<Label>("upper pane").set_color(Color::from_hex(0x77C7FF));
     upper.add<Label>("drag the divider").set_color(Color::from_hex(0x44515F));
-    upper.add<Label>("…it logs here").set_color(Color::from_hex(0x44515F));
+    upper.add<Label>("...it logs here").set_color(Color::from_hex(0x44515F));
     auto& lower = ui.vsplit->add<Column>().set_gap(2);
     lower.add<Label>("lower pane").set_color(Color::from_hex(0xFFD377));
     lower.add<Label>("both panes stay live").set_color(Color::from_hex(0x44515F));
-    lower.add<Label>("fraction → log").set_color(Color::from_hex(0x44515F));
+    lower.add<Label>("fraction -> log").set_color(Color::from_hex(0x44515F));
     ui.vsplit->on_change([&demo](float f) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "%.2f", double(f));
-        demo.say("splitter → " + std::string(buf));
+        demo.say("splitter -> " + std::string(buf));
     });
     ui.scroll = &c_right.add<ScrollArea>();
     ui.scroll->hint_w_ = 240;
@@ -607,7 +607,7 @@ static void build_ui(Context& ctx, UI& ui) {
     p5.set_padding(12).set_gap(10);
     auto& m_row = p5.add<Row>().set_gap(14);
     auto& m_left = m_row.add<Column>().set_gap(6);
-    m_left.add<Label>("ImageView — wheel zooms at the cursor, drag pans")
+    m_left.add<Label>("ImageView - wheel zooms at the cursor, drag pans")
         .set_color(Color::from_hex(0x8A94A0))
         .set_font_size(12);
     ui.image_view = &m_left.add<ImageView>();
@@ -626,7 +626,7 @@ static void build_ui(Context& ctx, UI& ui) {
         ui.image_view->set_pixels(w, h, px.data());
     }
     auto& m_right = m_row.add<Column>().set_gap(6);
-    m_right.add<Label>("Image — plain, Contain fit")
+    m_right.add<Label>("Image - plain, Contain fit")
         .set_color(Color::from_hex(0x8A94A0))
         .set_font_size(12);
     auto& img = m_right.add<Image>("gradient");
@@ -643,7 +643,7 @@ static void build_ui(Context& ctx, UI& ui) {
             }
         img.set_pixels(w, h, px.data()).set_size(96, 72).set_fit(Image::Fit::Contain);
     }
-    m_right.add<Label>("CompareView — drag the A|B divider")
+    m_right.add<Label>("CompareView - drag the A|B divider")
         .set_color(Color::from_hex(0x8A94A0))
         .set_font_size(12);
     ui.compare = &m_right.add<CompareView>();
@@ -666,9 +666,9 @@ static void build_ui(Context& ctx, UI& ui) {
     // --- page 6: Custom ---------------------------------------------------
     auto& p6 = page_host.add<Panel>();
     p6.set_padding(12).set_gap(10);
-    p6.add<Label>("LevelMeter — a custom widget (direct subclass of Widget)")
+    p6.add<Label>("LevelMeter - a custom widget (direct subclass of Widget)")
         .set_font_size(15);
-    p6.add<Label>("click or drag to scrub · peak marker decays · >90% logs a warning")
+    p6.add<Label>("click or drag to scrub | peak marker decays | >90% logs a warning")
         .set_color(Color::from_hex(0x8A94A0))
         .set_font_size(12);
     ui.meter = &p6.add<LevelMeter>();
@@ -677,10 +677,10 @@ static void build_ui(Context& ctx, UI& ui) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "%.2f", double(v));
         if (v > 0.9f)
-            demo.say("levelmeter → " + std::string(buf) + " (clip!)",
+            demo.say("levelmeter -> " + std::string(buf) + " (clip!)",
                      LogView::Level::Warning);
         else
-            demo.say("levelmeter → " + std::string(buf));
+            demo.say("levelmeter -> " + std::string(buf));
     });
     auto& m_btns = p6.add<Row>().set_gap(8);
     for (float v : {0.25f, 0.5f, 0.75f, 1.0f}) {
@@ -689,10 +689,10 @@ static void build_ui(Context& ctx, UI& ui) {
         auto& b = m_btns.add<Button>(label).on_click([&ui, &demo, val, label] {
             ui.meter->set_value(val);
             if (val > 0.9f)
-                demo.say("levelmeter set → " + label + " (clip!)",
+                demo.say("levelmeter set -> " + label + " (clip!)",
                          LogView::Level::Warning);
             else
-                demo.say("levelmeter set → " + label);
+                demo.say("levelmeter set -> " + label);
         });
         ui.meter_set_buttons.push_back(&b);
     }
@@ -701,12 +701,12 @@ static void build_ui(Context& ctx, UI& ui) {
     apply_page(ui, 0);
     tabs.on_change([&ui, &demo](size_t i) {
         apply_page(ui, i);
-        demo.say(std::string("tabs → ") + kTabNames[i]);
+        demo.say(std::string("tabs -> ") + kTabNames[i]);
     });
 
     // ----- status bar -----------------------------------------------------
     auto& status = root.add<StatusBar>();
-    status.set_text("showcase ready — every component is live");
+    status.set_text("showcase ready - every component is live");
     ui.demo.status = &status;
     status.add<Spinner>().set_speed(1.5f);
     auto& count = status.add<Label>("0 events");
@@ -716,7 +716,7 @@ static void build_ui(Context& ctx, UI& ui) {
     // ----- shared actions -------------------------------------------------
     ui.open_about = [&ctx, &demo] {
         auto box = std::make_unique<MessageBox>(
-            "About", "slikui showcase — every widget, live.\n"
+            "About", "slikui showcase - every widget, live.\n"
                      "C++ build; python/examples/showcase.py is the twin.");
         box->add_button("Nice", [] {});
         ctx.open_dialog(std::move(box));
@@ -725,26 +725,26 @@ static void build_ui(Context& ctx, UI& ui) {
     ui.open_file_dialog = [&ui, &ctx, &demo] {
         auto browser = std::make_unique<FileBrowser>(FileBrowser::Mode::Open);
         FileBrowser& fb = *browser; // capture BEFORE releasing ownership
-        ui.file_dialog = &fb;       // valid until closed (smoke clicks its ✕)
+        ui.file_dialog = &fb;       // valid until closed (smoke clicks its X)
         fb.on_pick([&demo](std::string path) {
-            demo.say("file → " + path, LogView::Level::Success);
+            demo.say("file -> " + path, LogView::Level::Success);
         });
         fb.on_close([&demo] { demo.say("dialog 'Open' closed"); });
         ctx.open_dialog(std::move(browser));
         demo.say("dialog 'Open' opened (navigate, pick a file)");
     };
     ui.save = [&demo] {
-        demo.say("menu File → Save (saved showcase.ui)", LogView::Level::Success);
+        demo.say("menu File -> Save (saved showcase.ui)", LogView::Level::Success);
         if (demo.status) demo.status->show_message("saved showcase.ui");
-        demo.say("toast → 'Saved showcase.ui'");
+        demo.say("toast -> 'Saved showcase.ui'");
     };
 
     ctx.add_shortcut(Key::O, ModCtrl, [&] {
-        demo.say("shortcut Ctrl+O → open dialog");
+        demo.say("shortcut Ctrl+O -> open dialog");
         if (ui.open_file_dialog) ui.open_file_dialog();
     });
     ctx.add_shortcut(Key::S, ModCtrl, [&] {
-        demo.say("shortcut Ctrl+S → save");
+        demo.say("shortcut Ctrl+S -> save");
         if (ui.save) ui.save();
     });
 }
@@ -758,7 +758,7 @@ static void pump_plot(UI& ui, double now, double dt) {
         ui.samples.push_back(0.35f + 0.3f * std::sin(float(ui.plot_phase) * 3.f));
         ui.samples.erase(ui.samples.begin());
         if (++ui.plot_logged % 8 == 1)
-            ui.demo.say("plot → sample " + std::to_string(ui.samples.size()));
+            ui.demo.say("plot -> sample " + std::to_string(ui.samples.size()));
     }
     ui.progress->set_value(0.5f + 0.5f * std::sin(float(now)));
 }
@@ -780,7 +780,7 @@ static int run_smoke(const char* ppm_path) {
 
     UI ui;
     build_ui(ctx, ui);
-    ui.demo.say("showcase started (smoke) — scripted pass over every component");
+    ui.demo.say("showcase started (smoke) - scripted pass over every component");
 
     double now = 0.0;
     auto frame = [&](double dt) {
@@ -789,14 +789,14 @@ static int run_smoke(const char* ppm_path) {
         ctx.tick(Time{now, clamp_dt(dt)});
         ctx.render();
     };
-    frame(0.016); // layout pass — bounds are live after this
+    frame(0.016); // layout pass - bounds are live after this
 
     // Pages are visibility-toggled Panels, so the script switches tabs before
     // touching each page's widgets (hit-testing skips hidden subtrees).
     auto select_tab = [&](size_t i) {
         ui.tabs->set_selected(i);
         apply_page(ui, i);
-        ui.demo.say(std::string("tabs → ") + kTabNames[i]);
+        ui.demo.say(std::string("tabs -> ") + kTabNames[i]);
         frame(0.016);
     };
 
@@ -812,7 +812,7 @@ static int run_smoke(const char* ppm_path) {
     frame(0.016);
 
     // Dialogs via real plumbing while the Controls page is up: Ctrl+O opens
-    // the file browser, its ✕ closes it, and the tree is still live after.
+    // the file browser, its X closes it, and the tree is still live after.
     key(ctx, Key::O, ModCtrl);
     frame(0.016);
     click(ctx, ui.file_dialog->close_button());
@@ -830,22 +830,22 @@ static int run_smoke(const char* ppm_path) {
     click(ctx, ui.search->field());
     type(ctx, "q");
     ui.dropdown->set_selected(1); // set_selected doesn't announce; say directly
-    ui.demo.say("dropdown → Linear");
+    ui.demo.say("dropdown -> Linear");
     ui.dv->set_value(42.f); // set_value fires on_change itself
     ui.vec_vals[0] = 1.f;
     ui.vec_vals[1] = 2.f;
-    ui.demo.say("vec2 → (1.0, 2.0)");
+    ui.demo.say("vec2 -> (1.0, 2.0)");
     ui.color->set_color(Color::from_hex(0x7FD1FF)); // fires on_change
     frame(0.016);
 
     // --- Data page: direct selections, real pad drag, playing plot --------
     select_tab(2);
     ui.list->set_selected(1);
-    ui.demo.say("list → beta");
+    ui.demo.say("list -> beta");
     ui.tree->set_selected(2);
-    ui.demo.say("tree → main.cpp");
+    ui.demo.say("tree -> main.cpp");
     ui.table->set_selected(2);
-    ui.demo.say("table → row 2 (views.hpp)");
+    ui.demo.say("table -> row 2 (views.hpp)");
     ui.prop_opacity->set_value(0.5f); // fires on_change
     drag(ctx, center(*ui.pad),
          {ui.pad->bounds.x + ui.pad->bounds.w * 0.55f,
@@ -856,7 +856,7 @@ static int run_smoke(const char* ppm_path) {
         ++ui.plot_phase;
     }
     ui.plot_next = now + 0.25;
-    ui.demo.say("plot → +8 samples (playing)");
+    ui.demo.say("plot -> +8 samples (playing)");
     frame(0.016);
 
     // --- Containers page: real expander/accordion clicks, splitter drag ---
@@ -869,20 +869,20 @@ static int run_smoke(const char* ppm_path) {
         drag(ctx, mid, {mid.x, mid.y + 24.f});
     }
     wheel(ctx, center(*ui.scroll), 3.f);
-    ui.demo.say("scrollarea → scrolled by 3 ticks");
+    ui.demo.say("scrollarea -> scrolled by 3 ticks");
     frame(0.016);
 
     // --- Media page: real wheel-zoom; compare fraction directly -----------
     select_tab(4);
     wheel(ctx, center(*ui.image_view), 1.f);
     ui.compare->set_fraction(0.35f);
-    ui.demo.say("compare → 0.35");
+    ui.demo.say("compare -> 0.35");
     frame(0.016);
 
     // --- Custom page: real meter scrub at 60%, then the 100% set button ---
     select_tab(5);
     click_at(ctx, {ui.meter->bounds.x + ui.meter->bounds.w * 0.6f, center(*ui.meter).y});
-    click(ctx, *ui.meter_set_buttons[3]); // 100% → warning level
+    click(ctx, *ui.meter_set_buttons[3]); // 100% -> warning level
     frame(0.016);
 
     frame(3.5); // toast expiry + status transient clear
@@ -914,7 +914,7 @@ int main(int argc, char** argv) {
 
     if (smoke) return run_smoke(ppm_path);
 
-    slikui::glfw::GlfwWindow win(960, 640, "slikui showcase — every widget, live");
+    slikui::glfw::GlfwWindow win(960, 640, "slikui showcase - every widget, live");
     win.set_min_size(720, 480);
     if (!win.ok()) return 1;
     slikui::opengl::OpenglSink sink;
@@ -925,7 +925,7 @@ int main(int argc, char** argv) {
 
     UI ui;
     build_ui(ctx, ui);
-    ui.demo.say("showcase started — click around, watch the log");
+    ui.demo.say("showcase started - click around, watch the log");
 
     auto last = std::chrono::steady_clock::now();
     double now = 0;

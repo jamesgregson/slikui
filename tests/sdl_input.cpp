@@ -1,4 +1,4 @@
-// tests/sdl_input.cpp — SDL3 event translation through SDL's real queue.
+// tests/sdl_input.cpp - SDL3 event translation through SDL's real queue.
 //
 // Uses the dummy video driver (no display, no GL needed). Events go in with
 // SDL_PushEvent and come back out of SDL_PollEvent, as in a real app.
@@ -93,7 +93,7 @@ void mapping() {
     out.clear();
     SDL_Event t{};
     t.type = SDL_EVENT_TEXT_INPUT;
-    t.text.text = "a\xC3\xA9\xE2\x98\xBA"; // a é ☺
+    t.text.text = "a\xC3\xA9\xE2\x98\xBA"; // a, U+00E9, U+263A
     EXPECT(sdl::translate(t, out) && out.size() == 3);
     if (out.size() == 3)
         EXPECT(out[0].codepoint == 'a' && out[1].codepoint == 0xE9 && out[2].codepoint == 0x263A);

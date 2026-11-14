@@ -15,14 +15,14 @@ the system clipboard; without a host the shortcuts are silent no-ops).
 
     ```cpp
     root.add<slikui::TextField>().set_text("jane@example.com").set_placeholder("you@host");
-    root.add<slikui::TextField>().set_placeholder("Search…");
+    root.add<slikui::TextField>().set_placeholder("Search...");
     ```
 
 === "Python"
 
     ```python
     root.add(slikui.TextField, text="jane@example.com", placeholder="you@host")
-    root.add(slikui.TextField, placeholder="Search…")
+    root.add(slikui.TextField, placeholder="Search...")
     ```
 
 ## TextArea
@@ -34,7 +34,7 @@ suggests a height in lines.
 
     ```cpp
     root.add<slikui::TextArea>().set_rows(3)
-        .set_text("slikui renders this entirely on the CPU —\n"
+        .set_text("slikui renders this entirely on the CPU -\n"
                   "no GPU, no window, no dependencies.");
     ```
 
@@ -42,7 +42,7 @@ suggests a height in lines.
 
     ```python
     root.add(slikui.TextArea, rows=3,
-             text="slikui renders this entirely on the CPU —\n"
+             text="slikui renders this entirely on the CPU -\n"
                   "no GPU, no window, no dependencies.")
     ```
 
@@ -53,9 +53,9 @@ suggests a height in lines.
 | `set_text` | `(std::string)` |
 | `set_placeholder` | `(std::string)` |
 | `on_change` | `(std::function<void(const std::string&)>)` |
-| `set_password` | TextField only — `(bool)` |
-| `on_submit` | TextField only — `(std::function<void()>)` — fires on Enter |
-| `set_rows` | TextArea only — `(int)` |
+| `set_password` | TextField only - `(bool)` |
+| `on_submit` | TextField only - `(std::function<void()>)` - fires on Enter |
+| `set_rows` | TextArea only - `(int)` |
 
 ## ScrollArea
 
@@ -69,7 +69,7 @@ viewport heights change (including window resizes).
     auto& scroll = root.add<slikui::ScrollArea>();
     for (int i = 1; i <= 12; ++i)
         scroll.add<slikui::Label>("Item " + std::to_string(i) +
-                                  " — laid out, painted and clipped on the CPU");
+                                  " - laid out, painted and clipped on the CPU");
     ```
 
 === "Python"
@@ -78,7 +78,7 @@ viewport heights change (including window resizes).
     scroll = root.add(slikui.ScrollArea)
     for i in range(1, 13):
         scroll.add(slikui.Label,
-                   f"Item {i} — laid out, painted and clipped on the CPU")
+                   f"Item {i} - laid out, painted and clipped on the CPU")
     ```
 
 ![scroll](../images/scroll.png)
@@ -86,7 +86,7 @@ viewport heights change (including window resizes).
 ## SearchBox and GroupBox
 
 These two dress up the inputs above, but they are pictured with the shells
-family (a GroupBox + SearchBox + LogView row in the capture) — see
+family (a GroupBox + SearchBox + LogView row in the capture) - see
 [Shells & dialogs](widgets-shells.md#groupbox).
 
 !!! note

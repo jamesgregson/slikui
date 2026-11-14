@@ -1,6 +1,6 @@
 site_name: slikui
 site_description: >-
-  A sleek, header-only C++ UI library for graphics applications — retained-mode
+  A sleek, header-only C++ UI library for graphics applications - retained-mode
   widget tree, declarative builder API, one narrow rendering contract. Python
   bindings included.
 site_url: https://jamesgregson.github.io/slikui/
@@ -8,7 +8,7 @@ repo_url: https://github.com/jamesgregson/slikui
 repo_name: jamesgregson/slikui
 edit_uri: edit/main/docs/
 
-copyright: MIT licensed · stb libraries are public domain
+copyright: MIT licensed | stb libraries are public domain
 
 strict: true
 
@@ -76,9 +76,9 @@ plugins:
   - search
   - llmstxt:
       # llms.txt (index) + llms-full.txt (entire site as markdown) at the site
-      # root — machine/agent-readable entry point alongside the HTML.
+      # root - machine/agent-readable entry point alongside the HTML.
       markdown_description: >-
-        slikui — a header-only C++20 UI library for graphics applications,
+        slikui - a header-only C++20 UI library for graphics applications,
         with first-class Python bindings. Guides and per-widget reference.
       full_output: llms-full.txt
       sections:

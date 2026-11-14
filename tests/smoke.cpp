@@ -1,4 +1,4 @@
-// tests/smoke.cpp — compile-and-link every public header in one TU.
+// tests/smoke.cpp - compile-and-link every public header in one TU.
 #include "slikui/context.hpp"
 #include "slikui/backends/software/software.hpp"
 #include "slikui/widgets/containers.hpp"

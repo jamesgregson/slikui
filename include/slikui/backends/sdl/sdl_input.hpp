@@ -1,4 +1,4 @@
-// slikui/backends/sdl/sdl_input.hpp — SDL3 event translation for YOUR window.
+// slikui/backends/sdl/sdl_input.hpp - SDL3 event translation for YOUR window.
 //
 // Optional backend: compiles only when <SDL3/SDL.h> is available. Nothing
 // here creates a window or touches GL. SDL hands events to the app through
@@ -17,7 +17,7 @@
 //          else for (auto& e : out) ctx.handle(e);
 //      }
 //
-// 2. SdlInput: bound to one window — filters by window id, enables SDL text
+// 2. SdlInput: bound to one window - filters by window id, enables SDL text
 //    input on it, and queues events.
 //
 //      slikui::sdl::SdlInput input(window);
@@ -140,7 +140,7 @@ inline SDL_WindowID event_window(const SDL_Event& e) {
 }
 
 // Appends the slikui events for `e` to `out` (TEXT_INPUT can yield several:
-// one per codepoint). Returns false when slikui has no use for `e` — the
+// one per codepoint). Returns false when slikui has no use for `e` - the
 // caller's to handle (quit, gamepads, unmapped keys, ...).
 inline bool translate(const SDL_Event& e, std::vector<Event>& out) {
     Event s{};
@@ -213,7 +213,7 @@ inline void attach_services(Context& ctx) {
         return out;
     });
     ctx.set_clipboard_sink([](std::string text) { SDL_SetClipboardText(text.c_str()); });
-    // Cursor shapes → SDL system cursors (created lazily, shared, never
+    // Cursor shapes -> SDL system cursors (created lazily, shared, never
     // destroyed: SDL_Quit frees them).
     struct Cursors {
         SDL_Cursor* map[7] = {};
@@ -277,7 +277,7 @@ public:
     SDL_Window* window() const { return window_; }
     SDL_WindowID window_id() const { return id_; }
 
-    // Detach without touching SDL — for when the window is already gone.
+    // Detach without touching SDL - for when the window is already gone.
     void release_window() { window_ = nullptr; }
 
 private:

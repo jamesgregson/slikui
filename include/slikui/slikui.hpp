@@ -1,4 +1,4 @@
-// slikui/slikui.hpp — umbrella header: everything the library offers.
+// slikui/slikui.hpp - umbrella header: everything the library offers.
 //
 //   #include <slikui/slikui.hpp>
 //

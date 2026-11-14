@@ -1,4 +1,4 @@
-// slikui/style/theme.hpp — palette + metrics shared by all widgets.
+// slikui/style/theme.hpp - palette + metrics shared by all widgets.
 //
 // Widgets never hardcode colors: they read `Theme` values through
 // Context::theme(), optionally overridden per-widget via style setters.
@@ -19,7 +19,7 @@ struct Theme {
 
     float s(float v) const { return v * scale; } // logical -> framebuffer px
 
-    // Palette — dark default.
+    // Palette - dark default.
     Color background   = Color::from_hex(0x101418); // app/window backdrop
     Color surface      = Color::from_hex(0x1B2027); // panels, cards
     Color surface_alt  = Color::from_hex(0x242B34); // elevated, hover fills
@@ -58,7 +58,7 @@ struct Theme {
 
     // --- Built-in presets ------------------------------------------------
     // Each returns a complete Theme with scale = 1; apps set `scale`
-    // themselves (see use_theme below). Everything else is fair game —
+    // themselves (see use_theme below). Everything else is fair game -
     // presets also vary `radius` so each scheme gets its own character.
     static Theme dark() { return Theme{}; } // the default palette
 
@@ -119,7 +119,7 @@ struct Theme {
         return t;
     }
 
-    static Theme mocha() { // Catppuccin Mocha — pastel on deep indigo
+    static Theme mocha() { // Catppuccin Mocha - pastel on deep indigo
         Theme t;
         t.background  = Color::from_hex(0x1E1E2E);
         t.surface     = Color::from_hex(0x313244);
@@ -153,7 +153,7 @@ struct Theme {
         return t;
     }
 
-    static Theme phosphor() { // green CRT terminal — square corners
+    static Theme phosphor() { // green CRT terminal - square corners
         Theme t;
         t.background  = Color::from_hex(0x050A06);
         t.surface     = Color::from_hex(0x0B140C);
@@ -184,7 +184,7 @@ struct ThemePreset {
     Theme (*make)();
 };
 
-// Built-in presets in display order — handy for theme pickers.
+// Built-in presets in display order - handy for theme pickers.
 inline const std::vector<ThemePreset>& theme_presets() {
     static const std::vector<ThemePreset> list = {
         {"Dark",      &Theme::dark},

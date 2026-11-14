@@ -1,4 +1,4 @@
-// slikui/backends/glfw/glfw_window.hpp — a ready-made GLFW window for slikui.
+// slikui/backends/glfw/glfw_window.hpp - a ready-made GLFW window for slikui.
 //
 // Optional backend: compiles only when <GLFW/glfw3.h> is available. Creates
 // a GL 3.3 core window and owns a GlfwInput for it. Already have a window
@@ -91,7 +91,7 @@ public:
         return {float(w), float(h)};
     }
     // Framebuffer px per logical point for this window (HiDPI-aware, always
-    // current — queried from GLFW, never cached).
+    // current - queried from GLFW, never cached).
     float ui_scale() const {
         int fw = 0, fh = 0, ww = 0, wh = 0;
         glfwGetFramebufferSize(window_, &fw, &fh);

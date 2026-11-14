@@ -1,4 +1,4 @@
-// tests/test_textures.cpp — texture lifetime through IRenderSink:
+// tests/test_textures.cpp - texture lifetime through IRenderSink:
 // upload / release / invalidate, dialogs, and re-attachment.
 #include "test.hpp"
 

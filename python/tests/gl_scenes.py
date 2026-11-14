@@ -39,7 +39,7 @@ def close_gl_window(win):
 class Shapes(slikui.Widget):
     """Fractional SDF geometry, borders, angled lines, nested clips. Kept on
     whole pixels where the software sink has documented quirks (radius-0
-    fills, clips) — see tests/gl_parity.cpp."""
+    fills, clips) - see tests/gl_parity.cpp."""
 
     def paint(self, env):
         L, C, R, V = env.list, slikui.Color, slikui.Rect, slikui.Vec2
@@ -68,7 +68,7 @@ def shapes_tree(ctx):
 
 def widgets_tree(ctx):
     root = ctx.set_root(slikui.Column, padding=10, gap=6)
-    root.add(slikui.Label, "GLSink parity — glyphs, shapes, clips")
+    root.add(slikui.Label, "GLSink parity - glyphs, shapes, clips")
     row = root.add(slikui.Row, gap=4)
     row.add(slikui.Button, "Primary", variant=slikui.ButtonVariant.Primary)
     row.add(slikui.Button, "Cancel")

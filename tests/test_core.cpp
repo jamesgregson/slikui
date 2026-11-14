@@ -1,4 +1,4 @@
-// tests/test_core.cpp — math, color, utf8.
+// tests/test_core.cpp - math, color, utf8.
 #include "test.hpp"
 
 #include "slikui/core/color.hpp"
@@ -32,7 +32,7 @@ TEST(color_blend) {
     slikui::Color bg(0, 0, 0);
     slikui::Color half_white(255, 255, 255, 128);
     slikui::Color out = slikui::blend(bg, half_white);
-    CHECK(out.r == 128 && out.g == 128 && out.b == 128); // 255*128/255 ≈ 127.5→128
+    CHECK(out.r == 128 && out.g == 128 && out.b == 128); // 255*128/255 ~ 127.5->128
 
     slikui::Color full(10, 20, 30, 255);
     CHECK(slikui::blend(bg, full) == full); // opaque overwrites
@@ -47,7 +47,8 @@ TEST(color_abgr_roundtrip) {
 }
 
 TEST(utf8_decode) {
-    std::string s = "aé€𝄞"; // 1, 2, 3, 4 bytes
+    // a, U+00E9, U+20AC, U+1D11E: 1, 2, 3, 4 bytes (escaped: sources are ASCII)
+    std::string s = "a\xC3\xA9\xE2\x82\xAC\xF0\x9D\x84\x9E";
     size_t i = 0;
     CHECK(slikui::utf8_next(s, i) == 'a');
     CHECK(slikui::utf8_next(s, i) == 0xE9);

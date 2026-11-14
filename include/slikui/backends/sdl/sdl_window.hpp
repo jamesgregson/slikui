@@ -1,4 +1,4 @@
-// slikui/backends/sdl/sdl_window.hpp — a ready-made SDL3 window for slikui.
+// slikui/backends/sdl/sdl_window.hpp - a ready-made SDL3 window for slikui.
 //
 // Optional backend: compiles only when <SDL3/SDL.h> is available. Creates a
 // resizable, HiDPI-aware window with a GL 3.3 core context and owns an

@@ -1,10 +1,10 @@
-// examples/06_sdl_opengl/main.cpp — SDL3 + system OpenGL, UI over a "scene".
+// examples/06_sdl_opengl/main.cpp - SDL3 + system OpenGL, UI over a "scene".
 //
 // SdlWindow creates the window and GL context; the event loop is the app's.
 // Each translated event goes to the UI when the UI wants it
 // (Context::wants_mouse / wants_keyboard) and to the scene otherwise: here
-// the scene is just the clear color — click to pick a hue, scroll to change
-// brightness — under a docked slikui panel.
+// the scene is just the clear color - click to pick a hue, scroll to change
+// brightness - under a docked slikui panel.
 #include <slikui/backends/opengl/opengl.hpp> // system GL headers first
 #include <slikui/backends/sdl/sdl_window.hpp>
 #include <slikui/slikui.hpp>

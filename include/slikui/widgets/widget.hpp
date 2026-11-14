@@ -1,4 +1,4 @@
-// slikui/widgets/widget.hpp — Widget base class and tree protocol.
+// slikui/widgets/widget.hpp - Widget base class and tree protocol.
 //
 // Frames are ABSOLUTE framebuffer coordinates, assigned during arrange().
 // That makes hit-testing, painting and clipping trivial for every widget.
@@ -27,8 +27,8 @@
 namespace slikui {
 
 struct Theme;   // style/theme.hpp
-struct PaintEnv; // widgets/env.hpp — draw list + theme + font for paint()
-class Context;   // context.hpp — back-reference set during arrange
+struct PaintEnv; // widgets/env.hpp - draw list + theme + font for paint()
+class Context;   // context.hpp - back-reference set during arrange
 class Widget;
 
 // Defined in context.hpp: logical px per framebuffer px for a widget's context.
@@ -45,7 +45,7 @@ public:
     explicit Widget(std::string id) : id(std::move(id)) {}
     // A destroyed widget must not stay focused/hovered/captured: the Context
     // would later dispatch into freed memory. ctx_alive_ guards the reverse
-    // case — a borrowed widget (Menu, Dialog) outliving its Context.
+    // case - a borrowed widget (Menu, Dialog) outliving its Context.
     virtual ~Widget() {
         if (ctx && !ctx_alive_.expired()) context_forget(ctx, this);
     }
@@ -86,7 +86,7 @@ public:
     virtual void paint(const PaintEnv&) const {}
 
     // Paints after (on top of) the subtree, outside this widget's own
-    // clip_rect: decorations over children — marks on a wrapped Slider's
+    // clip_rect: decorations over children - marks on a wrapped Slider's
     // track, selection outlines, focus rings around content.
     virtual void paint_over(const PaintEnv&) const {}
 
@@ -153,7 +153,7 @@ public:
     // calls release(). The default destroys a C++-owned widget. Bindings
     // override release() for widgets whose storage is owned by the Python
     // runtime (Python-subclass instances live inside a PyObject allocation,
-    // where `delete` is undefined behavior) — see
+    // where `delete` is undefined behavior) - see
     // docs/python-custom-widgets.md.
     virtual void release() noexcept { delete this; }
 
@@ -166,7 +166,7 @@ public:
 
     // Text shown in a popup after hovering this widget (Context manages the
     // popup: 0.6 s hover delay, dismissed by moving away or pressing).
-    // NOTE: returns Widget& — in fluent chains, call base-class setters last
+    // NOTE: returns Widget& - in fluent chains, call base-class setters last
     // (pre-C++23 has no deducing-this, so Widget& can't know the leaf type).
     Widget& set_tooltip(std::string t) { tooltip_ = std::move(t); return *this; }
     const std::string& tooltip() const { return tooltip_; }

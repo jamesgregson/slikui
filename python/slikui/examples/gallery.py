@@ -1,4 +1,4 @@
-"""02 — Widget gallery: the whole set in one headless surface.
+"""02 - Widget gallery: the whole set in one headless surface.
 
 Same tree as the repo's development gallery, now shipped inside the wheel.
 Run:
@@ -23,12 +23,12 @@ def build(app):
     root = app.set_root(slikui.Column, padding=14, gap=8)
 
     # header + menu bar + toolbar
-    root.add(slikui.Label, "slikui — widget gallery", font_size=22)
-    root.add(slikui.Label, "Python bindings · software backend") \
+    root.add(slikui.Label, "slikui - widget gallery", font_size=22)
+    root.add(slikui.Label, "Python bindings | software backend") \
         .set_color(slikui.Color.from_hex(MUTED))
     bar = root.add(slikui.MenuBar)
     file = bar.add_menu("File")
-    file.add_item("Open…", lambda: None, hint="Ctrl+O")
+    file.add_item("Open...", lambda: None, hint="Ctrl+O")
     file.add_item("Save", lambda: None, hint="Ctrl+S")
     edit = bar.add_menu("Edit")
     edit.add_item("Undo", lambda: None, hint="Ctrl+Z")
@@ -58,16 +58,16 @@ def build(app):
     slider = root.add(slikui.Slider, 0, 100, value=62)
     root.add(slikui.ProgressBar, value=0.72)
     sp_row = root.add(slikui.Row, gap=8)
-    sp_row.add(slikui.Label, "Working…").set_color(slikui.Color.from_hex(MUTED))
+    sp_row.add(slikui.Label, "Working...").set_color(slikui.Color.from_hex(MUTED))
     sp_row.add(slikui.Spacer)
     sp_row.add(slikui.Spinner, speed=240)
 
     # inputs
     root.add(slikui.TextField, text="jane@example.com", placeholder="you@host")
-    root.add(slikui.TextArea, rows=2, text="CPU-rendered UI —\nno GPU, no window.")
+    root.add(slikui.TextArea, rows=2, text="CPU-rendered UI -\nno GPU, no window.")
 
     # editors: DragValue scrub fields, a Vec3Edit bound to a numpy buffer,
-    # ColorEdit chips (click → popup), Segmented, and a labeled Slider.
+    # ColorEdit chips (click -> popup), Segmented, and a labeled Slider.
     material_buf = np.array([0.75, 0.42, 0.31], dtype=np.float32)
     root.add(slikui.Segmented, items=["Cube", "Sphere", "Torus"])
     root.add(slikui.Vec3Edit, material_buf, labels="RGB")
@@ -94,7 +94,7 @@ def build(app):
     root.add(slikui.ListView, items=["alpha", "beta", "gamma", "delta"], selected=1)
     root.add(slikui.Tabs, tabs=["Home", "Edits", "View"], selected=1)
     dropdown = root.add(slikui.Dropdown, items=["Linear", "Nearest", "Cubic", "Lanczos"],
-                        placeholder="Filter…")
+                        placeholder="Filter...")
 
     # shells: dialog layer, toast, group box, search, log view
     shells_row = root.add(slikui.Row, gap=10)
@@ -102,12 +102,12 @@ def build(app):
     gb = sleft.add(slikui.GroupBox, "Light")
     gb.add(slikui.Checkbox, "Enabled", checked=True)
     gb.add(slikui.Slider, 0, 1, value=0.35)
-    sleft.add(slikui.SearchBox, placeholder="Search assets…")
+    sleft.add(slikui.SearchBox, placeholder="Search assets...")
     shells_log = shells_row.add(slikui.LogView)
     shells_log.log(slikui.LogView.Level.Info, "loaded scene.dragon (24 ms)")
     shells_log.log(slikui.LogView.Level.Warning, "missing texture: bark_d")
     shells_log.log(slikui.LogView.Level.Error, "shader compile failed")
-    # Note: no modal dialog / toast here — they sit on the popup stack and
+    # Note: no modal dialog / toast here - they sit on the popup stack and
     # would sit under every smoke click for their lifetime (showcase covers
     # dialogs and toasts properly).
 
@@ -122,14 +122,14 @@ def build(app):
 
     # panel + image
     panel = root.add(slikui.Panel, padding=10, gap=6, radius=10)
-    panel.add(slikui.Label, "Panel — a bordered container")
+    panel.add(slikui.Label, "Panel - a bordered container")
     prow = panel.add(slikui.Row, gap=12)
     prow.add(slikui.Checkbox, "Snap", checked=True)
     prow.add(slikui.Checkbox, "Grid")
 
     grad = np.zeros((28, 180, 4), dtype=np.uint8)
     ramp = np.linspace(40, 220, 180).astype(np.uint8)[None, :]
-    grad[..., 0] = ramp  # red ramps left→right
+    grad[..., 0] = ramp  # red ramps left->right
     grad[..., 2] = ramp[::-1]
     grad[..., 3] = 255
     panel.add(slikui.Image, "gradient").set_pixels(grad).set_size(180, 28).set_fit(

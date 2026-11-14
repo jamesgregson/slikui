@@ -1,8 +1,8 @@
-"""08 — A live app in a window: the GLFW host plus a small tour.
+"""08 - A live app in a window: the GLFW host plus a small tour.
 
 ``python -m slikui.examples.window --window`` opens a real window (needs
 ``pip install "slikui-python[demo]"`` for glfw + PyOpenGL); the host lives
-in ``slikui/examples/_window.py`` — GLFW callbacks become slikui events,
+in ``slikui/examples/_window.py`` - GLFW callbacks become slikui events,
 the numpy frame is blitted each frame, HiDPI, cursors, clipboard and
 window focus are wired. Any other toolkit works the same way: translate its
 input into ``slikui.mouse_*`` / ``key_*`` / ``text_input`` events for
@@ -10,7 +10,7 @@ input into ``slikui.mouse_*`` / ``key_*`` / ``text_input`` events for
 the returned (H, W) uint32 array however you like.
 
 The tour: type into the field (echoed below it), drag the slider, click
-the button for a toast; the status bar follows the pointer — a custom root
+the button for a toast; the status bar follows the pointer - a custom root
 widget sees every MouseMove that bubbles up unconsumed. Ctrl+Q quits.
 
 Run:
@@ -62,8 +62,8 @@ def build(app):
     col.add(slikui.Label, "A live slikui app", font_size=24)
 
     field = col.add(slikui.TextField, placeholder="type something")
-    echo = col.add(slikui.Label, "you typed: —")
-    field.on_change(lambda text: echo.set_text(f"you typed: {text or '—'}"))
+    echo = col.add(slikui.Label, "you typed: -")
+    field.on_change(lambda text: echo.set_text(f"you typed: {text or '-'}"))
 
     slider = col.add(slikui.Slider, 0, 100, value=25)
     slider.set_label("volume").set_format("%.0f")

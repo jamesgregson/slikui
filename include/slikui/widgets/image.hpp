@@ -1,6 +1,6 @@
-// slikui/widgets/image.hpp — Image: an RGBA bitmap drawn from app-provided
+// slikui/widgets/image.hpp - Image: an RGBA bitmap drawn from app-provided
 // pixels. The upload flows through the normal sink texture contract
-// (TexFormat::Rgba8, IRenderSink::upload) — both bundled sinks already
+// (TexFormat::Rgba8, IRenderSink::upload) - both bundled sinks already
 // implement it. Decoding helpers wrap the vendored stb_image (PNG/JPEG/BMP/
 // GIF/PNM/...); a private static copy is compiled into every TU so the
 // library stays header-only with no link requirements.

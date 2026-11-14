@@ -1,4 +1,4 @@
-// tests/test_theme.cpp — built-in theme presets and use_theme/apply_preset.
+// tests/test_theme.cpp - built-in theme presets and use_theme/apply_preset.
 #include "test.hpp"
 
 #include <slikui/style/theme.hpp>

@@ -1,4 +1,4 @@
-// tests/test_batcher.cpp — GpuBatcher: DrawList -> instances + batches.
+// tests/test_batcher.cpp - GpuBatcher: DrawList -> instances + batches.
 // Pure CPU: no GL needed, runs everywhere.
 #include "test.hpp"
 

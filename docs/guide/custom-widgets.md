@@ -1,7 +1,7 @@
 # Custom widgets
 
 Both languages can define new widgets against the same core contract. The
-C++ core lays out, paints, hit-tests and dispatches events to your class —
+C++ core lays out, paints, hit-tests and dispatches events to your class -
 in Python this works through a nanobind trampoline, and it is pixel-identical
 to the C++ path (there is a parity test against the C++ `Swatch`).
 
@@ -23,9 +23,9 @@ A widget implements whichever of these it needs:
 
 Layout runs in `Context::tick` (Python `app.tick()`), not in `render`: bounds
 are zero, and `context()` is null, until the first tick after a widget is
-added. What `on_event` receives — every mouse button, synthesized
+added. What `on_event` receives - every mouse button, synthesized
 `Click`/`DoubleClick`, `MouseEnter`/`MouseLeave`, `FocusGained`/`FocusLost`,
-`KeyRelease` — and the mouse-capture drag idiom are in
+`KeyRelease` - and the mouse-capture drag idiom are in
 [Input & events](input-events.md#routing-rules).
 
 Frames are absolute framebuffer coordinates; `paint_tree`, hit-testing and
@@ -33,13 +33,13 @@ Frames are absolute framebuffer coordinates; `paint_tree`, hit-testing and
 overrides `measure`/`arrange` keeps its subtree fully live.
 
 Painting emits into `env.list` (`rect`, `hollow_rect`, `line`, `circle`,
-`image`, `glyph`, clip stack) using `env.theme` colors — the same
+`image`, `glyph`, clip stack) using `env.theme` colors - the same
 [DrawList commands](backends.md#drawlist-semantics) every backend receives.
 
 ## C++ example
 
 Define the widget, implement `measure`/`paint`/`on_event`, add it like any
-other. `Meter` below is the C++ twin of the Python example further down —
+other. `Meter` below is the C++ twin of the Python example further down -
 the capture tool renders the identical tree: same 10 px measure, same paint
 math, same click-to-scrub event. State is a private `float` in C++ and a
 plain attribute in Python; the trampoline forwards the protocol calls either
@@ -81,7 +81,7 @@ root.add<slikui::Label>("Click the bar to scrub it")
     .set_color(ctx.theme().text_dim);
 ```
 
-![Meter — the same tree rendered from C++ by the capture tool](../images/custom_cpp.png)
+![Meter - the same tree rendered from C++ by the capture tool](../images/custom_cpp.png)
 
 `examples/05_showcase` ships two production custom widgets: `Fill` (expands
 on the main axis and hands its whole area to a single child) and
@@ -128,13 +128,13 @@ Add instances with `container.add_widget(obj)` or
 `container.add(Meter, 0.4)`; a custom root is `context.set_root_widget(...)`.
 Python state lives in ordinary instance attributes.
 
-![The Meter — a pure-Python custom widget rendered by the C++ core](../images/custom_widget.png)
+![The Meter - a pure-Python custom widget rendered by the C++ core](../images/custom_widget.png)
 
 ## Rules and gotchas
 
 - Python subclasses **must call `super().__init__()`**.
 - Subclassing the *bound* C++ widget types (`Column`, `Row`, `Slider`, ...)
-  is rejected — build layouts from Python code instead. Only
+  is rejected - build layouts from Python code instead. Only
   `slikui.Widget` subclasses are the extension seam. To decorate a built-in,
   wrap it: delegate `measure`/`arrange` to the child and draw in
   `paint_over` (`LimitSlider` in `slikui.examples.controls`).

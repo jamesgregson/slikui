@@ -1,4 +1,4 @@
-// tests/glfw_input.cpp — GLFW event translation on a host-owned window.
+// tests/glfw_input.cpp - GLFW event translation on a host-owned window.
 //
 // GLFW cannot inject synthetic OS events, so this fetches the callbacks
 // GlfwInput installed (glfwSet* returns the current one) and calls them

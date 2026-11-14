@@ -1,6 +1,6 @@
 """The 0.3 input model, from Python: what a custom widget receives.
 
-Mirrors tests/test_input.cpp for the binding surface — capture, Click /
+Mirrors tests/test_input.cpp for the binding surface - capture, Click /
 DoubleClick / clicks, Enter / Leave, focus notifications, KeyRelease,
 paint_over / clip_rect / attached overrides, and readable reprs.
 """

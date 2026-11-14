@@ -8,7 +8,7 @@ that onto a fullscreen quad each frame. Needs the optional ``demo`` extra:
 
     pip install "slikui-python[demo]"
 
-Examples stay headless by default — this module is imported lazily, so
+Examples stay headless by default - this module is imported lazily, so
 ``import slikui.examples.hello`` never pulls in glfw or PyOpenGL.
 """
 

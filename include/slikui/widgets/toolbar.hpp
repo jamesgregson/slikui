@@ -1,7 +1,7 @@
-// slikui/widgets/toolbar.hpp — IconButton + Toolbar.
+// slikui/widgets/toolbar.hpp - IconButton + Toolbar.
 //
 // IconButton is Button's geometry and interaction with a procedural icon
-// (widgets/icons.hpp) instead of text — Ghost by default, the way toolbar
+// (widgets/icons.hpp) instead of text - Ghost by default, the way toolbar
 // buttons read. Toolbar is a Row of them with separators, a bottom rule and
 // an optional icon-over-label mode for chunkier app-toolbars.
 #pragma once
@@ -20,7 +20,7 @@
 namespace slikui {
 
 // ---------------------------------------------------------------------------
-// IconButton — small square button with an icon instead of text.
+// IconButton - small square button with an icon instead of text.
 // ---------------------------------------------------------------------------
 class IconButton : public Widget {
 public:
@@ -139,7 +139,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Toolbar — horizontal strip of IconButtons with separators and a bottom
+// Toolbar - horizontal strip of IconButtons with separators and a bottom
 // rule. `add_button(icon, label, ...)` renders the label under the icon.
 // ---------------------------------------------------------------------------
 class Toolbar : public Row {

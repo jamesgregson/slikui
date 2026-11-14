@@ -63,7 +63,7 @@ jobs:
       - name: test
         run: ctest --test-dir build --output-on-failure
 
-  # Every public header must compile standalone — apple-libc++ hides missing
+  # Every public header must compile standalone - apple-libc++ hides missing
   # std includes (cstdint, functional, ...) that libstdc++/MSVC reject.
   headers:
     name: every header compiles standalone (linux/gcc)

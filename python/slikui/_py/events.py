@@ -1,4 +1,4 @@
-"""Friendly slikui::Event constructors — for tests, apps and window bridges.
+"""Friendly slikui::Event constructors - for tests, apps and window bridges.
 
 `Context.handle()` consumes these directly. Positions are logical points
 (Vec2-compatible pairs); `mods` accepts an int mask or a string like
@@ -61,7 +61,7 @@ def mouse_release(pos, button=MouseButton.MouseLeft, mods_=0):
 
 
 def mouse_click(pos, button=MouseButton.MouseLeft, mods_=0):
-    """Press + release pair at `pos` — handle both; the Context then
+    """Press + release pair at `pos` - handle both; the Context then
     synthesizes the Click (and DoubleClick, when a second click follows
     within Event.MULTI_CLICK_TIME seconds of tick-clock time) itself. There is no
     host-sent Click event."""

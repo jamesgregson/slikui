@@ -1,4 +1,4 @@
-// slikui/widgets/text.hpp — Label.
+// slikui/widgets/text.hpp - Label.
 #pragma once
 
 #include "slikui/context.hpp"

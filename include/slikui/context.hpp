@@ -1,4 +1,4 @@
-// slikui/context.hpp — Context: root widget tree + theme + font + sink wiring.
+// slikui/context.hpp - Context: root widget tree + theme + font + sink wiring.
 //
 // Typical frame:
 //   while (running) {
@@ -24,8 +24,8 @@
 
 namespace slikui {
 
-class Menu; // widgets/menus.hpp — borrowed popups, opened by right-click
-class Dialog; // widgets/shells.hpp — floating shell layer (see open_dialog)
+class Menu; // widgets/menus.hpp - borrowed popups, opened by right-click
+class Dialog; // widgets/shells.hpp - floating shell layer (see open_dialog)
 
 // Where an anchored popup opens relative to its anchor widget. When the
 // preferred side would leave the frame, the popup flips to the opposite side
@@ -110,7 +110,7 @@ public:
     // Destroys the widget tree, popups and deferred closures, releasing the
     // Python callbacks they hold. The Python bindings route App.close() /
     // App.__del__ through this: a callback capturing a widget wrapper forms a
-    // cycle closed by C++ ownership, which the GC cannot traverse — destroying
+    // cycle closed by C++ ownership, which the GC cannot traverse - destroying
     // the tree while the interpreter is alive is what makes shutdown
     // leak-free (see python/tests/test_shutdown_leaks.py). Not safe to call
     // from inside a widget callback: destruction is immediate, not deferred.
@@ -136,7 +136,7 @@ public:
 
     // --- input ---
 
-    // NOTE: popup destruction is deferred to the end of handle() — callbacks
+    // NOTE: popup destruction is deferred to the end of handle() - callbacks
     // may close the popup they're executing in.
     void handle(const Event& e) {
         {
@@ -215,8 +215,8 @@ public:
     // --- popups ---
     //
     // Popups float above the tree and are dismissed by clicking outside,
-    // Escape (topmost only), or FocusLost. They form a stack — a submenu is
-    // pushed above its parent menu — and clicks are resolved against the
+    // Escape (topmost only), or FocusLost. They form a stack - a submenu is
+    // pushed above its parent menu - and clicks are resolved against the
     // topmost popup containing the cursor: everything above it closes, the
     // popup itself stays (unless the click lands outside every popup, which
     // closes the whole stack).
@@ -302,7 +302,7 @@ public:
     // --- dialogs ---
     //
     // Floating shell windows ABOVE the popup layer (Dialog, MessageBox,
-    // FileBrowser — widgets/dialogs.hpp). Borrowed entries are app-owned and
+    // FileBrowser - widgets/dialogs.hpp). Borrowed entries are app-owned and
     // must outlive their stay; owned entries are destroyed on close. A modal
     // dialog dims the app and traps presses outside it.
     template <class D>
@@ -352,7 +352,7 @@ public:
     //
     // Global accelerators, checked on KeyPress before widget dispatch. A
     // shortcut requires at least one modifier so plain typing never fires one;
-    // matching is exact (Ctrl+S ≠ Ctrl+Shift+S).
+    // matching is exact (Ctrl+S != Ctrl+Shift+S).
     Context& add_shortcut(Key key, unsigned mods, std::function<void()> action) {
         shortcuts_.push_back(Shortcut{key, mods, std::move(action)});
         return *this;
@@ -507,7 +507,7 @@ private:
     }
 
     // A widget is being destroyed: drop every raw pointer to it. Touches only
-    // pointer fields (never containers being cleared) — it can run from
+    // pointer fields (never containers being cleared) - it can run from
     // inside popups_.clear(), closing_.clear() or a dialog erase.
     void forget(const Widget* w) noexcept {
         if (focused_ == w) focused_ = nullptr;
@@ -603,7 +603,7 @@ private:
             w.attached(*this);
         }
         for (auto& c : w.children) attach_tree(*c);
-        // NOTE: popups are attached individually in push_popup — never here,
+        // NOTE: popups are attached individually in push_popup - never here,
         // or a popup re-attaching its own subtree recurses forever.
     }
 
@@ -905,7 +905,7 @@ inline void Context::handle_event(const Event& e) {
         return;
     case T::FocusLost: {
         // The app lost focus: releases may never arrive. Tell the captured
-        // widget (if it is not also the focused one — set_focus covers that)
+        // widget (if it is not also the focused one - set_focus covers that)
         // so drags can cancel, then drop all transient input state.
         if (mouse_capture_ && mouse_capture_ != focused_)
             focus_notes_.push_back({mouse_capture_, T::FocusLost});
@@ -1039,7 +1039,7 @@ inline void Context::handle_press(const Event& in) {
         return;
     }
     // A press outside every popup closes the whole stack; a press inside one
-    // dispatches into it untouched — menu items manage their own sub-stack.
+    // dispatches into it untouched - menu items manage their own sub-stack.
     if (has_popups() && topmost_popup_containing(e.pos) < 0) {
         close_popups();
         return;

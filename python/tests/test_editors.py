@@ -77,7 +77,7 @@ def test_dragvalue_escape_cancels():
     dv = root.add(slikui.DragValue, 1.5)
     ui.tick(0.0, 1 / 60)
 
-    click(ui, center(dv))  # click → typing mode
+    click(ui, center(dv))  # click -> typing mode
     for e in slikui.text_input_str("999"):
         ui.handle(e)
     ui.handle(slikui.key_press(slikui.Key.Escape))  # Context drops focus
@@ -144,7 +144,7 @@ def test_coloredit_popup_and_sv_drag():
     p = ui.ctx.popup(0)
     ui.tick(1 / 60, 1 / 60)
 
-    # Drag inside the SV square toward its top-right (s→1, v→1).
+    # Drag inside the SV square toward its top-right (s->1, v->1).
     sx, sy = p.bounds.x + 8, p.bounds.y + 8
     drag(ui, (sx + 20, sy + 20), (sx + 150, sy + 2))
     ui.tick(1 / 60, 1 / 60)

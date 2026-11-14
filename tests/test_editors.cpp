@@ -1,4 +1,4 @@
-// tests/test_editors.cpp — Phase A editors: DragValue, VecNEdit, ColorEdit,
+// tests/test_editors.cpp - Phase A editors: DragValue, VecNEdit, ColorEdit,
 // Segmented, Slider upgrades (label/format/log/step), TextField selection +
 // clipboard, and the Context clipboard host callbacks.
 #include "test.hpp"
@@ -98,7 +98,7 @@ TEST(dragvalue_scrub_and_type) {
     });
     f.frame();
 
-    // Drag right by 50px with default speed 0.02/px → +1.
+    // Drag right by 50px with default speed 0.02/px -> +1.
     slikui::Vec2 c = dv.bounds.center();
     f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, c.x, c.y));
     f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, c.x + 50, c.y));
@@ -127,7 +127,7 @@ TEST(dragvalue_escape_and_focus_loss_cancel) {
 
     slikui::Vec2 c = dv.bounds.center();
     f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, c.x, c.y));
-    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, c.x, c.y)); // click → typing
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, c.x, c.y)); // click -> typing
     for (char ch : "999") f.ctx.handle(f.text(unsigned(ch)));
     // Escape clears focus at the Context level; the field abandons the edit.
     f.ctx.handle(f.key(slikui::Key::Escape));
@@ -209,7 +209,7 @@ TEST(coloredit_popup_and_sv_drag) {
     f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, sx + 150, sy + 2));
     f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, sx + 150, sy + 2));
     f.frame();
-    CHECK(picked.r > 200); // s=1, v=1 at a red hue → strong red
+    CHECK(picked.r > 200); // s=1, v=1 at a red hue -> strong red
     CHECK(picked.g < 80);
     CHECK(ce.color().r == picked.r);
 

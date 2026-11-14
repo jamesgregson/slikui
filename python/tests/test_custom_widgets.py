@@ -1,7 +1,7 @@
 """Custom-widget trampoline: Python classes subclassing slikui.Widget.
 
 Layout participation, painting, events, exception propagation, identity,
-anchor lifetime, root widgets, builder integration — plus the acceptance
+anchor lifetime, root widgets, builder integration - plus the acceptance
 test: a pure-Python Swatch renders pixel-identically to the C++ Swatch.
 """
 
@@ -72,7 +72,7 @@ def test_layout_and_paint():
     sw = row.add(Swatch, RED)  # builder fallback route
     ui.tick(0.0, 1 / 60)
     assert (sw.bounds.w, sw.bounds.h) == (22, 22)
-    assert sw.type == "Widget"  # no widget_type override → base name
+    assert sw.type == "Widget"  # no widget_type override -> base name
     frame = ui.render()
     assert frame[21][21] == abgr(RED)  # center of the 22x22 chip at (10, 10)
 
@@ -96,7 +96,7 @@ def test_events():
     assert sw.selected is False
     ui.handle(slikui.mouse_press((21, 21)))  # inside the chip
     assert sw.selected is True
-    ui.handle(slikui.mouse_press((199, 199)))  # outside → not consumed
+    ui.handle(slikui.mouse_press((199, 199)))  # outside -> not consumed
     assert sw.selected is True
 
 
@@ -138,7 +138,7 @@ def test_exceptions_propagate():
 def test_skipped_super_init_rejected():
     class Bad(slikui.Widget):
         def __init__(self):
-            self.calls = 0  # no super().__init__() — C++ object uninitialized
+            self.calls = 0  # no super().__init__() - C++ object uninitialized
 
     ui, root = make_ui()
     with pytest.raises(TypeError):

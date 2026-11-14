@@ -114,7 +114,7 @@ def test_translate_wheel_and_text():
 
     t = sdl3.SDL_Event()
     t.type = sdl3.SDL_EVENT_TEXT_INPUT
-    t.text.text = "aé☺".encode()
+    t.text.text = "a\u00e9\u263a".encode()
     out = si.translate(t)
     assert [e.codepoint for e in out] == [ord("a"), 0xE9, 0x263A]
 

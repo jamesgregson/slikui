@@ -16,11 +16,11 @@ SDL3 support. Miscellaneous bug fixes.
 - **`Context::release_texture(id)`** and **`Context::invalidate_textures()`**
   (re-upload the font atlas and every live widget texture after a sink lost
   them).
-- Python: **`DrawList.as_array()`** — zero-copy read-only structured view of
-  the frame's commands (`slikui.DRAWCMD_DTYPE`), ~18× cheaper than iterating
+- Python: **`DrawList.as_array()`** - zero-copy read-only structured view of
+  the frame's commands (`slikui.DRAWCMD_DTYPE`), ~18x cheaper than iterating
   `DrawCmd` objects. **`RenderSink.release()`** is overridable;
   `Sink.texture_count` / `CanvasSink.texture_count` for leak checks.
-- **`GpuBatcher`** (`render/batcher.hpp`, API-agnostic): DrawList → one
+- **`GpuBatcher`** (`render/batcher.hpp`, API-agnostic): DrawList -> one
   20-float instance per drawable command + scissor/texture batches, with
   reference GLSL 330 shaders matching the software rasterizer's coverage.
 - Python: **`slikui.GLSink`** (PyOpenGL `RenderSink` on `GpuBatcher`) and
@@ -29,9 +29,9 @@ SDL3 support. Miscellaneous bug fixes.
   software sink (~55 ms for `CanvasSink`). Also `slikui.GpuBatcher`,
   `GpuKind`, `GPU_VERTEX_SHADER` / `GPU_FRAGMENT_SHADER`,
   `read_framebuffer()`.
-- Python: **`slikui.ModernGLSink`** — the same sink over a
+- Python: **`slikui.ModernGLSink`** - the same sink over a
   `moderngl.Context` (~0.36 ms/frame on the gallery).
-- **GLFW input without the window**: `backends/glfw/glfw_input.hpp` —
+- **GLFW input without the window**: `backends/glfw/glfw_input.hpp` -
   event builders (`mouse_button_event`, `cursor_pos_event`, `key_event`,
   ...), `map_button`, `GlfwInput` (installs slikui's callbacks on YOUR
   `GLFWwindow*`, chaining to existing ones and restoring them on
@@ -40,9 +40,9 @@ SDL3 support. Miscellaneous bug fixes.
   (same API, plus `input()`). Python twin: `slikui.glfw_input` /
   `slikui.GlfwInput`.
 - **SDL3 backend** (`backends/sdl/`, SDL 3.2+), same layering as GLFW:
-  `sdl_input.hpp` — `translate()` (SDL_Event → slikui events), `SdlInput`
+  `sdl_input.hpp` - `translate()` (SDL_Event -> slikui events), `SdlInput`
   (one window's events, text input, queue/dispatch), `attach_services`;
-  `sdl_window.hpp` — `SdlWindow` (window + GL 3.3 context + input).
+  `sdl_window.hpp` - `SdlWindow` (window + GL 3.3 context + input).
   Python: `slikui.sdl_input` / `slikui.SdlInput` (PySDL3). New
   `examples/06_sdl_opengl`, `python/examples/sdl_demo.py`; tests
   `slikui_sdl_input` (SDL's real event queue, dummy video driver) and
@@ -59,8 +59,17 @@ SDL3 support. Miscellaneous bug fixes.
 
 ### Changed
 
+- **`shortcut_label` is plain ASCII on every platform**: "Cmd+Shift+S",
+  "Ctrl+S", "Alt+Left" (Apple used the symbol form with the command,
+  option and arrow glyphs). Digit keys now label as "Ctrl+1".
+  `fit_shortcut_label` always spells such symbols out (the font argument is
+  unused); menu hints written with them render as text.
+- **The repository is ASCII-only** - sources, tests, examples, docs and
+  generated files (`dist/slikui.hpp`, the type stub). Example and showcase
+  labels/transcripts use "-", "->", "..." instead of typographic symbols.
+  `python/tests/test_ascii.py` enforces it.
 - **`OpenglSink` rewritten on `GpuBatcher`**: instanced quads (80 bytes per
-  command instead of 6 × 68-byte vertices), one draw per batch, blending
+  command instead of 6 x 68-byte vertices), one draw per batch, blending
   via `glBlendFuncSeparate` so destination alpha is correct when rendering
   into a transparent FBO. RGBA images now sample `GL_NEAREST` (as the
   software sink does; was `GL_LINEAR`). New `shutdown()`; disables
@@ -76,13 +85,13 @@ SDL3 support. Miscellaneous bug fixes.
 - **Software sink (and `CanvasSink`): glyph/image quads cover pixels by
   center.** They looped from `int(x)`/`int(y)`, so a fractionally placed
   glyph also painted the row/column whose center lies outside it, sampling
-  past its atlas cell — faint dots from the neighbouring glyph above some
-  letters ("Ġ", "Ċ"). Text now matches the GPU sinks to 2/255. Text pixels
+  past its atlas cell - faint dots from the neighbouring glyph above some
+  letters (e.g. G, C). Text now matches the GPU sinks to 2/255. Text pixels
   at glyph edges shift slightly in software output.
 - **GLFW mouse buttons: right and middle were swapped.** GLFW numbers them
   LEFT=0, RIGHT=1, MIDDLE=2; slikui uses MouseLeft=0, MouseMiddle=1,
   MouseRight=2. `GlfwWindow` passed GLFW's number through unmapped, as did
-  the Python `--window` host and `python/examples/showcase.py` — a right
+  the Python `--window` host and `python/examples/showcase.py` - a right
   click arrived as a middle click and vice versa, so context menus opened
   on middle-click and never on right-click. `python/examples/glfw_demo.py` was already correct.
 - `GlfwWindow` dropped the modifier state of mouse presses/releases
@@ -113,7 +122,7 @@ package documents itself.
   A right press on a widget with a context menu still opens the menu; that
   press and its release are not delivered.
 - **`KeyRelease` is dispatched** to the focused widget (else the hovered
-  one), only for presses the tree received — no orphan releases for Tab,
+  one), only for presses the tree received - no orphan releases for Tab,
   Escape or shortcut chords.
 - **Key presses with nothing focused** go to the hovered widget instead of
   hit-testing the event's unset position.
@@ -137,7 +146,7 @@ package documents itself.
   Slider's value, TextField metrics) were missing for a frame, and a
   Slider's value text vanished on frames that showed new digits.
 - **Shortcut hints never show missing-glyph boxes.** Menus spell out any
-  symbol the font lacks (`⌃⇧S` → `Ctrl+Shift+S`, `←` → `Left`).
+  symbol the font lacks (`CtrlShiftS` -> `Ctrl+Shift+S`, `<-` -> `Left`).
 - Software renderer: RGBA image sampling clamped the row against the
   texture's width instead of its height.
 
@@ -145,11 +154,11 @@ package documents itself.
 
 - Event types `Click`, `DoubleClick`, `MouseEnter`, `MouseLeave`,
   `FocusGained` (appended: existing enum values are unchanged).
-- `Event::clicks` — consecutive-click count on press/release/click
+- `Event::clicks` - consecutive-click count on press/release/click
   (`kMultiClickTime` 0.4 s on the tick clock, `kMultiClickSlop` 4 px);
   `Event::repeat` for auto-repeat key presses.
-- `Key::Num0` … `Key::Num9` (appended).
-- `Widget::paint_over` — drawn after the children, for decorations.
+- `Key::Num0` ... `Key::Num9` (appended).
+- `Widget::paint_over` - drawn after the children, for decorations.
 - Destroyed widgets are dropped from the Context's focus / hover / capture
   / press state (no dispatch into freed widgets); widgets that outlive their
   Context are safe to destroy. `Context` has a destructor and is

@@ -1,6 +1,6 @@
 """slikui.GpuBatcher: DrawList -> (instances, batches) zero-copy arrays.
 
-Pure CPU — no GL needed. The GL side is covered by tests/gl_parity.cpp
+Pure CPU - no GL needed. The GL side is covered by tests/gl_parity.cpp
 (C++ OpenglSink) and test_gl_sink.py (Python sinks, skipped without GL).
 """
 

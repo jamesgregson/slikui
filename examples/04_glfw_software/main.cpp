@@ -1,4 +1,4 @@
-// examples/04_glfw_software/main.cpp — GLFW window + CPU rasterizer.
+// examples/04_glfw_software/main.cpp - GLFW window + CPU rasterizer.
 //
 // Demonstrates the dual-backend story: the exact same widget tree rendered by
 // the software rasterizer into a raw pixel buffer, then blitted through a

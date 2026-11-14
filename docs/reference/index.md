@@ -3,7 +3,7 @@
 Every widget class, grouped by reference page. All are exported from
 `slikui/widgets/all.hpp` in C++ and the `slikui` module in Python.
 
-## Controls — [widgets-controls.md](widgets-controls.md)
+## Controls - [widgets-controls.md](widgets-controls.md)
 
 | Widget | Purpose |
 |--------|---------|
@@ -11,11 +11,11 @@ Every widget class, grouped by reference page. All are exported from
 | `Checkbox`, `Radio`, `Switch` | bool controls with `on_change` |
 | `Slider` | float range, built-in label + live value row |
 | `Segmented` | compact radio-style row |
-| `ProgressBar` | clamped 0–1 fraction |
+| `ProgressBar` | clamped 0-1 fraction |
 | `Spinner` | animated forever, driven by `tick` |
 | `Label` | static text, size/color/wrap |
 
-## Text inputs — [widgets-inputs.md](widgets-inputs.md)
+## Text inputs - [widgets-inputs.md](widgets-inputs.md)
 
 | Widget | Purpose |
 |--------|---------|
@@ -25,7 +25,7 @@ Every widget class, grouped by reference page. All are exported from
 | `SearchBox` | TextField + magnifier + clear button |
 | `GroupBox` | titled panel |
 
-## Editors — [widgets-editors.md](widgets-editors.md)
+## Editors - [widgets-editors.md](widgets-editors.md)
 
 | Widget | Purpose |
 |--------|---------|
@@ -34,7 +34,7 @@ Every widget class, grouped by reference page. All are exported from
 | `ColorEdit` | swatch + SV/hue popup |
 | `Vec2Pad` | 2D pad with draggable dot |
 
-## Data display — [widgets-data.md](widgets-data.md)
+## Data display - [widgets-data.md](widgets-data.md)
 
 | Widget | Purpose |
 |--------|---------|
@@ -47,7 +47,7 @@ Every widget class, grouped by reference page. All are exported from
 | `PropertyGrid` | inspector with fixed label column + sections |
 | `Image` | PNG/JPEG/pixels, `Stretch`/`Contain`/`Cover` |
 
-## Containers — [widgets-containers.md](widgets-containers.md)
+## Containers - [widgets-containers.md](widgets-containers.md)
 
 | Widget | Purpose |
 |--------|---------|
@@ -59,7 +59,7 @@ Every widget class, grouped by reference page. All are exported from
 | `Accordion` | stack of expanders, exclusive by default |
 | `Splitter` | two panes + draggable divider |
 
-## Shells & dialogs — [widgets-shells.md](widgets-shells.md)
+## Shells & dialogs - [widgets-shells.md](widgets-shells.md)
 
 | Widget | Purpose |
 |--------|---------|
@@ -71,7 +71,7 @@ Every widget class, grouped by reference page. All are exported from
 | `ImageView` | pan/zoom bitmap over a checkerboard |
 | `CompareView` | two images split by a draggable divider |
 
-## Menus & toolbars — [widgets-menus.md](widgets-menus.md)
+## Menus & toolbars - [widgets-menus.md](widgets-menus.md)
 
 | Widget | Purpose |
 |--------|---------|

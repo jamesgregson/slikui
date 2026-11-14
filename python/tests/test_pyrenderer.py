@@ -54,7 +54,7 @@ def test_parity_scroll_and_lines():
         root.add(slikui.Label, "scroll me")
         scroll = root.add(slikui.ScrollArea)
         for i in range(20):
-            scroll.add(slikui.Label, f"line {i} — overflow the clip")
+            scroll.add(slikui.Label, f"line {i} - overflow the clip")
         root.add(slikui.ProgressBar).set_value(0.7)
         root.add(slikui.Divider)
 

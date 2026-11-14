@@ -48,7 +48,7 @@ class Sink:
 # -- mapping (no window) ----------------------------------------------------
 
 def test_buttons_map_glfw_order_to_slikui():
-    # GLFW: LEFT=0 RIGHT=1 MIDDLE=2 — slikui: Left=0 Middle=1 Right=2.
+    # GLFW: LEFT=0 RIGHT=1 MIDDLE=2 - slikui: Left=0 Middle=1 Right=2.
     assert (glfw.MOUSE_BUTTON_LEFT, glfw.MOUSE_BUTTON_RIGHT, glfw.MOUSE_BUTTON_MIDDLE) == (0, 1, 2)
     assert gi.map_button(glfw.MOUSE_BUTTON_LEFT) == int(MouseButton.MouseLeft)
     assert gi.map_button(glfw.MOUSE_BUTTON_RIGHT) == int(MouseButton.MouseRight)

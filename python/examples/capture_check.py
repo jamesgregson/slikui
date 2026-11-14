@@ -2,7 +2,7 @@
 """Render real frames of glfw_demo.py and capture per-pass images.
 
 Maintenance tool: runs the demo's actual GL passes (sky, mesh, grid, UI blit)
-in a live window, captures the framebuffer BETWEEN passes (before swap —
+in a live window, captures the framebuffer BETWEEN passes (before swap -
 reading after swap sees an undefined buffer), prints GL errors and pixel
 probes. Use it to diagnose compositing without a human watching the window.
 
@@ -136,7 +136,7 @@ def main():
     for i in range(41, 50):
         frame(i)
 
-    # diagnostic: cube-only pass on magenta — isolates the mesh draw path
+    # diagnostic: cube-only pass on magenta - isolates the mesh draw path
     GL.glClearColor(1.0, 0.0, 1.0, 1.0)
     GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
     proj = demo.perspective(45 * demo.DEG2RAD, 960 / 640, 0.1, 100.0)

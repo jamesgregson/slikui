@@ -117,7 +117,7 @@ class GlApp:
 
     Same surface as App (set_root, handle, tick, ctx) for hosts that own a
     GL 3.3 window (glfw, pygame, Qt, ...). render() draws into whatever
-    framebuffer is bound — no CPU framebuffer, no texture upload.
+    framebuffer is bound - no CPU framebuffer, no texture upload.
 
         app = slikui.GlApp(960, 640, scale=fb_width / win_width)  # context current
         ...
@@ -179,7 +179,7 @@ class GlApp:
 
     def close(self):
         """Destroy the widget tree and free the GL objects. Needs the GL
-        context current — call it before destroying the window. Safe twice."""
+        context current - call it before destroying the window. Safe twice."""
         self.ctx.clear_tree()
         if self.sink.initialized:
             self.sink.shutdown()
@@ -187,7 +187,7 @@ class GlApp:
 
     def _close_at_exit(self):
         # Interpreter shutdown: the window (and its GL context) may already
-        # be gone, so no GL calls — the driver frees them with the context.
+        # be gone, so no GL calls - the driver frees them with the context.
         self.ctx.clear_tree()
         self.sink._forget()
         self._unregister_exit()

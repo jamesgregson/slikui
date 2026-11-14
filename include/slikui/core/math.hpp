@@ -1,4 +1,4 @@
-// slikui/core/math.hpp — minimal 2D math used across the library.
+// slikui/core/math.hpp - minimal 2D math used across the library.
 #pragma once
 
 #include <algorithm>

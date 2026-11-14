@@ -1,4 +1,4 @@
-// slikui/layout/layout.hpp — constraint-based layout primitives.
+// slikui/layout/layout.hpp - constraint-based layout primitives.
 //
 // Widgets implement two passes:
 //   measure(area)  -> intrinsic Size under Constraints

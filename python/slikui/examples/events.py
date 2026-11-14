@@ -1,28 +1,28 @@
-"""03 — Event anatomy: what a custom widget receives, in what order, and how
+"""03 - Event anatomy: what a custom widget receives, in what order, and how
 consumption, capture and focus work.
 
 The EventProbe is a custom widget whose whole job is narrating its input:
 every event routed to it becomes one line in the adjacent LogView. The demo
-exercises the whole vocabulary — enter/leave, press/release/click,
+exercises the whole vocabulary - enter/leave, press/release/click,
 double-click, a captured drag that leaves the widget, scroll, right-click
 context menu, focus gained/lost, focus-routed keys (press *and* release)
 and text, Tab traversal and the app losing focus.
 
 What a widget receives (slikui 0.3):
 
-* MouseMove, MousePress, MouseRelease, Scroll — the widget under the pointer
+* MouseMove, MousePress, MouseRelease, Scroll - the widget under the pointer
   (or the mouse-capture widget), bubbling to ancestors until one returns
   True. Every button arrives; check ``event.button``.
-* Click — press + release on the same widget (any button), after the
+* Click - press + release on the same widget (any button), after the
   release; ``event.clicks`` counts consecutive clicks. DoubleClick follows
   the Click whose ``clicks == 2``.
-* MouseEnter / MouseLeave — this widget only, no bubbling. Moving onto a
+* MouseEnter / MouseLeave - this widget only, no bubbling. Moving onto a
   child is not a leave.
-* KeyPress / KeyRelease — the focused widget (else the hovered one).
+* KeyPress / KeyRelease - the focused widget (else the hovered one).
   Tab, Escape and shortcut chords are consumed by the Context first;
   KeyRelease only follows a KeyPress the tree received.
-* TextInput — the focused widget only (``focusable()`` must return True).
-* FocusGained / FocusLost — this widget only. FocusLost also arrives when
+* TextInput - the focused widget only (``focusable()`` must return True).
+* FocusGained / FocusLost - this widget only. FocusLost also arrives when
   the app loses focus while the widget is focused or capturing the mouse:
   cancel drags there.
 * Layout runs in ``tick()``: bounds are zero until the first tick.
@@ -52,7 +52,7 @@ LEFT = slikui.MouseButton.MouseLeft
 
 
 def mods_str(mask):
-    """0x3 → 'ctrl+shift' — the inverse of slikui.mods('ctrl+shift')."""
+    """0x3 -> 'ctrl+shift' - the inverse of slikui.mods('ctrl+shift')."""
     names = []
     for bit, name in ((slikui.Mod.ModShift, "shift"), (slikui.Mod.ModCtrl, "ctrl"),
                       (slikui.Mod.ModAlt, "alt"), (slikui.Mod.ModSuper, "super")):
@@ -62,7 +62,7 @@ def mods_str(mask):
 
 
 def describe(e):
-    """One human line per event — the shape of the whole vocabulary."""
+    """One human line per event - the shape of the whole vocabulary."""
     t = e.type
     if t == T.MouseMove:
         return (f"move     pos ({e.pos.x:.0f}, {e.pos.y:.0f})"
@@ -88,13 +88,13 @@ class EventProbe(slikui.Widget):
     Also the reference drag idiom: capture the mouse on press, so moves and
     the release keep arriving after the pointer leaves the widget; release
     the capture on MouseRelease; cancel on FocusLost (the app lost focus
-    mid-drag — the release may never come).
+    mid-drag - the release may never come).
     """
 
     def __init__(self):
         super().__init__()
-        self.sink = None            # callable(level, text) — usually a LogView
-        self.seen = []              # (EventType, line) — full record, for tests
+        self.sink = None            # callable(level, text) - usually a LogView
+        self.seen = []              # (EventType, line) - full record, for tests
         self.last_pos = None        # last pointer position seen, for painting
         self.hovered = False
         self.dragging = False
@@ -175,13 +175,13 @@ def build(app):
 
     probe = panel.add(EventProbe)
     probe.sink = lambda lvl, msg: logview.log(lvl, msg)
-    panel.add(slikui.Label, "click · drag out · scroll · right-click") \
+    panel.add(slikui.Label, "click | drag out | scroll | right-click") \
         .set_color(muted)
 
     field = left.add(slikui.TextField, placeholder="click, then type")
-    left.add(slikui.Label, "TextField — text is focus-routed").set_color(muted)
+    left.add(slikui.Label, "TextField - text is focus-routed").set_color(muted)
 
-    # Right-click target: a borrowed Menu — State keeps the object alive.
+    # Right-click target: a borrowed Menu - State keeps the object alive.
     menu = slikui.Menu("probe")
     menu.add_item("Clear the log", lambda: logview.clear(), hint="Esc")
     menu.add_separator()
@@ -266,7 +266,7 @@ def smoke(app, state, session, log):
     session.advance(2)
     c.ok(app.ctx.popup_count == 0, "escape closed the context menu")
 
-    # keys are focus-routed — press and release
+    # keys are focus-routed - press and release
     probe.request_focus()
     n = len(probe.seen)
     _support.tap(app, slikui.Key.Z)

@@ -1,4 +1,4 @@
-// tests/test_input.cpp — the 0.3 input model: every button reaches widgets,
+// tests/test_input.cpp - the 0.3 input model: every button reaches widgets,
 // Click/DoubleClick/clicks synthesis, Enter/Leave, focus notifications,
 // KeyRelease routing, destruction safety and paint_over.
 #include "test.hpp"

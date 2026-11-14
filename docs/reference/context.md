@@ -2,7 +2,7 @@
 
 `slikui::Context` owns the tree, routes input, lays out, animates and paints.
 One context per thread; drive it with
-[handle → tick → render](../guide/core-concepts.md#the-frame-loop).
+[handle -> tick -> render](../guide/core-concepts.md#the-frame-loop).
 
 ## Tree
 
@@ -19,7 +19,7 @@ One context per thread; drive it with
 | API | Notes |
 |-----|-------|
 | `handle(const Event&)` | route one event; popups close at the end, never mid-dispatch |
-| `tick(Time{now, dt})` | attach → measure → arrange → animation |
+| `tick(Time{now, dt})` | attach -> measure -> arrange -> animation |
 | `render(bool clear = true)` | paint the tree + popups + shells into the sink |
 | `set_frame_size(Vec2)` | logical frame size (backends derive it from resize events) |
 
@@ -37,13 +37,13 @@ Owned by the context; destroyed at the end of the event that closes them.
 
 ## Dialogs, toasts
 
-The shell layer above popups — see
+The shell layer above popups - see
 [Shells & dialogs](widgets-shells.md).
 
 | API | Notes |
 |-----|-------|
 | `open_dialog(unique_ptr<D>)` | owned dialog |
-| `open_dialog(D&)` | **borrowed** — keep the Python object alive |
+| `open_dialog(D&)` | **borrowed** - keep the Python object alive |
 | `close_dialog(widget)` | explicit close |
 | `dialog_count()` / `dialog(i)` | inspection |
 | `push_toast(widget, seconds)` | auto-dismissing corner notice |
@@ -66,7 +66,7 @@ The shell layer above popups — see
 | `set_clipboard_source(fn)` / `set_clipboard_sink(fn)` | host clipboard for text fields |
 | `clipboard_text()` / `set_clipboard_text(str)` | direct clipboard access |
 | `set_cursor_host(fn)` | map `set_cursor` requests to system cursors |
-| `next_texture_id()` | ids for custom `TexUpload`s — never reused for different content |
+| `next_texture_id()` | ids for custom `TexUpload`s - never reused for different content |
 
 Tooltips need no context API: any widget's `set_tooltip` makes the context
 show a popup after a ~0.6 s hover.

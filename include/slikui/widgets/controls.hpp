@@ -1,4 +1,4 @@
-// slikui/widgets/controls.hpp — Button, Checkbox, Switch, Slider, ProgressBar,
+// slikui/widgets/controls.hpp - Button, Checkbox, Switch, Slider, ProgressBar,
 // Spinner. All controls follow the same pattern: fluent setters, theme-driven
 // colors, Anim-driven hover/press transitions, focusable keyboard support.
 #pragma once
@@ -149,7 +149,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Radio — single-select circle marker. Exclusivity is the app's job: from
+// Radio - single-select circle marker. Exclusivity is the app's job: from
 // on_change, set_checked(true) on the picked radio and set_checked(false) on
 // the rest of its group (or drive `checked` from app state each frame).
 // ---------------------------------------------------------------------------
@@ -274,7 +274,7 @@ public:
         }
         if (!label_.empty()) {
             // Logical gap: bounds are in points; the sink scales once. Do NOT
-            // route this through Theme::s() — that is raster px, and it would
+            // route this through Theme::s() - that is raster px, and it would
             // double-scale the gap (16pt at 2x instead of 8pt).
             Vec2 top_left{box.right() + 8.f,
                           bounds.center().y - cached_text_.size.h * inv * .5f};
@@ -523,7 +523,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Segmented — N-option single-select row (a Dropdown for 2-5 options)
+// Segmented - N-option single-select row (a Dropdown for 2-5 options)
 // ---------------------------------------------------------------------------
 class Segmented : public Widget {
 public:

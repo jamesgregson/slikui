@@ -1,4 +1,4 @@
-// slikui/style/anim.hpp — tiny 1D tween used for hover/press transitions.
+// slikui/style/anim.hpp - tiny 1D tween used for hover/press transitions.
 #pragma once
 
 #include "theme.hpp"

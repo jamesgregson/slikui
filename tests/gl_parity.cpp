@@ -1,4 +1,4 @@
-// tests/gl_parity.cpp — OpenglSink vs software::Sink on the same frames.
+// tests/gl_parity.cpp - OpenglSink vs software::Sink on the same frames.
 //
 // Renders into an offscreen FBO through a hidden GLFW window and compares
 // against the CPU rasterizer. GPU float blending/sampling is not bit-exact
@@ -14,7 +14,7 @@
 #include "slikui/widgets/all.hpp"
 
 // The GL context comes from GLFW, or from slikui's SdlWindow when built
-// with SLIKUI_PARITY_SDL (ctest slikui_sdl_gl_parity) — same checks, so
+// with SLIKUI_PARITY_SDL (ctest slikui_sdl_gl_parity) - same checks, so
 // both backends' contexts are covered.
 #ifdef SLIKUI_PARITY_SDL
 #include "slikui/backends/sdl/sdl_window.hpp"
@@ -55,7 +55,7 @@ void build(Context& ctx) {
     static const std::vector<std::uint8_t> img = checker(24, 16);
     auto& root = ctx.set_root<Column>();
     root.set_padding(10).set_gap(6);
-    root.add<Label>("GL parity — glyphs, shapes, clips");
+    root.add<Label>("GL parity - glyphs, shapes, clips");
     auto& row = root.add<Row>();
     row.set_gap(4);
     row.add<Button>("Primary").set_variant(Button::Variant::Primary);
@@ -153,7 +153,7 @@ void shapes_scene(IRenderSink& sink, Vec2 fr) {
     l.image({120, 110, 64, 48}, 42, {0, 0, 16, 12});
     // Fractional placement exercises the pixel-center rule. (Kept off exact
     // texel boundaries, where nearest sampling of GPU-interpolated UVs vs
-    // the CPU's exact ones is a coin toss — e.g. y = 110.5 at 2x.)
+    // the CPU's exact ones is a coin toss - e.g. y = 110.5 at 2x.)
     l.image({190.3f, 110.3f, 16, 12}, 42, {0, 0, 16, 12});
     sink.render(l, fr);
 }

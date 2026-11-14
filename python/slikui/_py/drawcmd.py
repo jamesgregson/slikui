@@ -1,4 +1,4 @@
-"""DRAWCMD_DTYPE — numpy structured dtype matching C++ `slikui::DrawCmd`.
+"""DRAWCMD_DTYPE - numpy structured dtype matching C++ `slikui::DrawCmd`.
 
 `DrawList.as_array()` returns a zero-copy, read-only `(N,)` array of this
 dtype over the list's command storage. Field offsets come from the compiled
