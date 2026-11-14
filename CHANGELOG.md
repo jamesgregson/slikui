@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+Added OpenGL renderer support in python. Batcher collects draw calls and is
+reused across most renderers. Split input from windowing with GLFW. Added 
+SDL3 support. Miscellaneous bug fixes.
 
 ### Added
 
