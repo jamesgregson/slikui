@@ -25364,7 +25364,7 @@ private:
 // Keep the three #define lines in this exact form: those parsers rely on it.
 
 #define SLIKUI_VERSION_MAJOR 0
-#define SLIKUI_VERSION_MINOR 3
+#define SLIKUI_VERSION_MINOR 4
 #define SLIKUI_VERSION_PATCH 0
 
 #define SLIKUI_VERSION_STR_(x) #x
