@@ -1,9 +1,10 @@
 """Shared GLFW host for the shipped examples' ``--window`` mode.
 
 Port of the repo-only showcase's live loop. GLFW callbacks are translated
-into ``slikui`` events and fed to the app; the core renders into its numpy
-framebuffer and we blit that premultiplied onto a fullscreen quad each
-frame. Needs the optional ``demo`` extra:
+into ``slikui`` events and fed to the app. By default the UI is drawn on the
+GPU by ``slikui.GlApp`` (GLSink: a few instanced draws per frame); with
+``--software`` the core rasterizes into its numpy framebuffer and we blit
+that onto a fullscreen quad each frame. Needs the optional ``demo`` extra:
 
     pip install "slikui-python[demo]"
 
@@ -53,6 +54,10 @@ def _key_map(glfw):
 _BUTTON_MAP = {0: slikui.MouseButton.MouseLeft,
                1: slikui.MouseButton.MouseMiddle,
                2: slikui.MouseButton.MouseRight}
+
+# "gl" (GlApp, default) or "software" (App + texture blit); main_entry's
+# --software flag sets it before calling an example's interactive().
+RENDERER = "gl"
 
 # Cap window height so tall trees (gallery) still open on a laptop; the
 # tree scrolls if it is taller than the window.
@@ -105,6 +110,31 @@ def run(name, size, build, scale=1.0):
     glfw.make_context_current(win)
     glfw.set_window_size_limits(win, 320, 240, glfw.DONT_CARE, glfw.DONT_CARE)
 
+    if RENDERER == "gl":
+        fw, fh = glfw.get_framebuffer_size(win)
+        ww, _ = glfw.get_window_size(win)
+        app = slikui.GlApp(int(lw), int(lh), scale=fw / ww if ww > 0 else 1.0)
+        build(app)
+
+        def prepare(fw, fh, ww, wh, ui_scale):
+            app.set_scale(ui_scale)
+            app.resize(ww, wh)          # logical points
+
+        def draw(fw, fh):
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+            app.render()                # clear rect + UI, straight to the window
+    else:
+        app, prepare, draw = _software_host(GL, build_program, lw, lh, build)
+
+    _loop(glfw, win, app, prepare, draw)
+    app.close()  # GL objects + UI callbacks, while the context and interpreter live
+    glfw.destroy_window(win)
+    glfw.terminate()
+    return 0
+
+
+def _software_host(GL, build_program, lw, lh, build):
+    """App + CPU framebuffer blitted as one texture (the --software path)."""
     # Blit program + fullscreen quad.
     prog = build_program(_BLIT_VS, _BLIT_FS)
     u_tex = GL.glGetUniformLocation(prog, "u_tex")
@@ -126,6 +156,40 @@ def run(name, size, build, scale=1.0):
 
     app = slikui.App(int(lw), int(lh))
     build(app)
+
+    def prepare(fw, fh, ww, wh, ui_scale):
+        if (fw, fh) != (app.target.width, app.target.height):
+            app.target.resize(fw, fh)
+        app.ctx.theme.scale = ui_scale
+        app.sink.set_scale(ui_scale)
+        app.ctx.set_frame_size(float(ww), float(wh))  # logical points
+
+    def draw(fw, fh):
+        GL.glViewport(0, 0, fw, fh)
+        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        pix = app.render()  # (H, W) uint32 ABGR
+        hh, wwd = pix.shape
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)  # premultiplied
+        GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
+        if tex_size[0] != wwd or tex_size[1] != hh:
+            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, wwd, hh, 0,
+                            GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None)
+            tex_size[:] = [wwd, hh]
+        GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0, wwd, hh, GL.GL_RGBA,
+                           GL.GL_UNSIGNED_BYTE, pix.view(np.uint8))
+        GL.glUseProgram(prog)
+        GL.glUniform1i(u_tex, 0)
+        GL.glBindVertexArray(vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+        GL.glDisable(GL.GL_BLEND)
+
+    return app, prepare, draw
+
+
+def _loop(glfw, win, app, prepare, draw):
+    """Input callbacks + the frame loop, shared by both renderers."""
 
     def on_button(_w, button, action, _mods):
         x, y = glfw.get_cursor_pos(win)
@@ -215,40 +279,12 @@ def run(name, size, build, scale=1.0):
         glfw.poll_events()
         fw, fh = glfw.get_framebuffer_size(win)
         ww, wh = glfw.get_window_size(win)
-        if (fw, fh) != (app.target.width, app.target.height):
-            app.target.resize(fw, fh)
         ui_scale = fw / ww if ww > 0 else 1.0
-        app.ctx.theme.scale = ui_scale
-        app.sink.set_scale(ui_scale)
-        app.ctx.set_frame_size(float(ww), float(wh))  # logical points
+        prepare(fw, fh, ww, wh, ui_scale)  # size + scale before layout
 
         now = _time.perf_counter()
         dt = min(now - last, 0.05)
         last = now
         app.tick(now, dt)
-
-        GL.glViewport(0, 0, fw, fh)
-        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        pix = app.render()  # (H, W) uint32 ABGR
-        hh, wwd = pix.shape
-        GL.glEnable(GL.GL_BLEND)
-        GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)  # premultiplied
-        GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
-        if tex_size[0] != wwd or tex_size[1] != hh:
-            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, wwd, hh, 0,
-                            GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None)
-            tex_size[:] = [wwd, hh]
-        GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0, wwd, hh, GL.GL_RGBA,
-                           GL.GL_UNSIGNED_BYTE, pix.view(np.uint8))
-        GL.glUseProgram(prog)
-        GL.glUniform1i(u_tex, 0)
-        GL.glBindVertexArray(vao)
-        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
-        GL.glDisable(GL.GL_BLEND)
+        draw(fw, fh)
         glfw.swap_buffers(win)
-
-    glfw.destroy_window(win)
-    app.close()  # release UI callbacks while the interpreter is alive
-    glfw.terminate()
-    return 0

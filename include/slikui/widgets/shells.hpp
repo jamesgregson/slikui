@@ -633,7 +633,15 @@ public:
     float zoom() const { return zoom_; }
     Vec2 pan() const { return pan_; }
 
-    void attached(Context& c) override { tex_id_ = c.next_texture_id(); }
+    ~ImageView() override { release_texture(tex_id_); }
+
+    // A fresh id per context: mark pixels dirty so the new sink gets them.
+    void attached(Context& c) override {
+        tex_id_ = c.next_texture_id();
+        dirty_ = !pixels_.empty();
+    }
+
+    void invalidate_uploads() override { dirty_ = !pixels_.empty(); }
 
     Size measure(const Constraints& c) override { return c.clamp({200.f, 150.f}); }
     bool expands_main() const override { return true; }
@@ -754,9 +762,21 @@ public:
     }
     float fraction() const { return fraction_; }
 
+    ~CompareView() override {
+        release_texture(tex_a_);
+        release_texture(tex_b_);
+    }
+
+    // Fresh ids per context: mark both slots dirty so the new sink gets them.
     void attached(Context& c) override {
         tex_a_ = c.next_texture_id();
         tex_b_ = c.next_texture_id();
+        invalidate_uploads();
+    }
+
+    void invalidate_uploads() override {
+        a_.dirty = !a_.px.empty();
+        b_.dirty = !b_.px.empty();
     }
 
     Size measure(const Constraints& c) override { return c.clamp({220.f, 140.f}); }

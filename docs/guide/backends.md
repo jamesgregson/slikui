@@ -8,6 +8,7 @@ public:
     virtual ~IRenderSink() = default;
     virtual void upload(const TexUpload&) = 0;
     virtual void render(const DrawList&, Vec2 framebuffer_size) = 0;
+    virtual void release(std::uint32_t id) {} // optional: texture is dead
 };
 ```
 
@@ -59,6 +60,15 @@ struct TexUpload {
 - `upload` may be called repeatedly for the same id (atlas regrows) — treat
   it as create-or-replace. Texture ids are never reused for different
   content.
+- `release(id)` is called when the widget owning a texture (`Image`,
+  `ImageView`, `CompareView`) is destroyed; free it then. It can arrive
+  outside `render()` — e.g. from `Context::clear_tree()` at shutdown, with
+  no GPU context current — so GPU sinks should queue the delete and perform
+  it on the next `render()` (`OpenglSink` does). It is never called from
+  `~Context`; a sink frees what it still holds when it is destroyed.
+- After a sink loses its textures (GPU context lost or recreated), call
+  `Context::invalidate_textures()`: the next `render()` re-uploads the font
+  atlas and every live widget texture.
 
 ## DrawList semantics
 
@@ -119,15 +129,48 @@ class MySink : public slikui::IRenderSink {
 };
 ```
 
+## GPU sinks: `GpuBatcher`
+
+`slikui/render/batcher.hpp` does the API-independent half of a GPU sink.
+`GpuBatcher::build(list, frame, scale)` turns a frame into two arrays:
+
+- **instances** — one `GpuInstance` (20 floats: rect, rgba, uv in texels,
+  shape `{kind, radius, border, line half-thickness}`, line endpoints) per
+  drawable command, in logical px. Commands entirely outside their clip,
+  transparent fills and empty quads are culled.
+- **batches** — `{first, count, tex_id, scissor x/y/w/h}` runs sharing one
+  scissor and one texture. Scissors are framebuffer px, bottom-left origin,
+  ready for `glScissor`. Shapes never break a texture run, so a typical
+  frame is a handful of batches.
+
+A sink uploads the instances once per frame and, per batch, sets the
+scissor, binds the texture and draws `count` instances of a 4-vertex
+triangle strip. The reference GLSL 330 shaders (`kGpuVertexShader`,
+`kGpuFragmentShader`) take the five vec4 attributes at locations 0–4 with
+divisor 1, and the uniforms `u_res`, `u_scale`, `u_tex`. Blend with
+`glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE,
+ONE_MINUS_SRC_ALPHA)` — the software sink's straight-alpha "over".
+
+The shaders reproduce the software rasterizer's coverage (SDF rounded
+rects/borders, capsule lines, bilinear Alpha8, nearest Rgba8):
+`tests/gl_parity.cpp` renders through `OpenglSink` offscreen and requires
+shapes to match the software sink to 2/255. Text differs at glyph edges
+because the software sink's glyph/image loops start at `int(x)`, painting
+pixels whose centers lie outside the quad (it can show faint dots from the
+neighbouring atlas glyph); GPUs rasterize pixel centers only.
+
 ## Reference notes from the GL sink
 
-- One interleaved VBO (15 floats/vertex: pos, rgba, uv, tex-kind, center,
-  half-extents, radius/border/dir), one SDF fragment shader: rounded rects
-  and capsule lines get their AA for free from `sd_box` coverage.
-- `ClipPush`/`ClipPop` flush the batch and call `glScissor` (y-flipped: GL's
-  origin is bottom-left, slikui's is top-left).
-- Glyphs sample the R8 atlas and multiply by `v_col`; images multiply the
-  sampled RGBA into the vertex color.
+- `OpenglSink` is a thin layer over `GpuBatcher`: one streamed VBO
+  (orphaned each frame), one instanced draw per batch. GL 3.3 has no
+  base-instance draw, so it re-points the attributes at `first`.
+- `render()` sets viewport, program, VAO, texture unit 0, blending and
+  scissor, disables depth/cull/stencil, and leaves them that way; it draws
+  into the bound framebuffer. `shutdown()` frees everything (context
+  current).
+- Textures: R8 for Alpha8 (`GL_LINEAR`), RGBA8 for Rgba8 (`GL_NEAREST`, as
+  the software sink samples). `release()` defers `glDeleteTextures` to the
+  next `render()`.
 
 ## Python: your own renderer
 

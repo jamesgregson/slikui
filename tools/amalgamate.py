@@ -26,6 +26,7 @@ ORDER = [
     "slikui/layout/layout.hpp",
     "slikui/render/draw_list.hpp",
     "slikui/render/sink.hpp",
+    "slikui/render/batcher.hpp",
     "slikui/style/theme.hpp",
     "slikui/style/anim.hpp",
     # NOTE: the stb detail headers are NOT listed here — text/font.hpp defines

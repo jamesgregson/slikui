@@ -363,6 +363,22 @@ public:
 
     std::uint32_t next_texture_id() { return next_tex_id_++; }
 
+    // A texture id will never be drawn again (its owning widget died):
+    // forwards to IRenderSink::release so the sink can free it.
+    void release_texture(std::uint32_t id) {
+        if (sink_ && id) sink_->release(id);
+    }
+
+    // The sink lost every texture it held (GPU context lost or recreated,
+    // sink reset): re-upload the font atlas and every live widget texture
+    // on the next render().
+    void invalidate_textures() {
+        font_.mark_dirty();
+        if (root_) root_->invalidate_tree();
+        for (auto& p : popups_) p.widget->invalidate_tree();
+        for (auto& d : dialogs_) d.widget->invalidate_tree();
+    }
+
     // --- mouse capture ---
 
     // While captured, all mouse move/press/release events go to `w`, even
@@ -573,6 +589,7 @@ private:
         uploads_.clear();
         if (root_) root_->collect_tree(uploads_);
         for (auto& p : popups_) p.widget->collect_tree(uploads_);
+        for (auto& d : dialogs_) d.widget->collect_tree(uploads_);
         for (const auto& up : uploads_) sink_->upload(up);
     }
 
@@ -777,6 +794,12 @@ inline float theme_scale_of(const Context* ctx) {
 // Called from ~Widget (Context is complete here).
 inline void context_forget(Context* ctx, const Widget* w) noexcept {
     if (ctx) ctx->forget(w);
+}
+
+// noexcept: runs from widget destructors. A sink's release() must not throw
+// (the Python trampoline reports Python exceptions as unraisable).
+inline void context_release_texture(Context* ctx, std::uint32_t id) noexcept {
+    if (ctx) ctx->release_texture(id);
 }
 
 // Minimal text widget for tooltip popups. Lives in this header (not

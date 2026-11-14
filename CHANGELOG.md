@@ -1,5 +1,60 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`IRenderSink::release(id)`** (optional, default no-op): called when an
+  `Image`, `ImageView` or `CompareView` is destroyed, so sinks can free its
+  texture. Previously every image widget leaked its texture for the life of
+  the sink. The software and OpenGL sinks implement it (OpenGL defers the
+  `glDeleteTextures` to the next `render()`).
+- **`Context::release_texture(id)`** and **`Context::invalidate_textures()`**
+  (re-upload the font atlas and every live widget texture after a sink lost
+  them).
+- Python: **`DrawList.as_array()`** — zero-copy read-only structured view of
+  the frame's commands (`slikui.DRAWCMD_DTYPE`), ~18× cheaper than iterating
+  `DrawCmd` objects. **`RenderSink.release()`** is overridable;
+  `Sink.texture_count` / `CanvasSink.texture_count` for leak checks.
+- **`GpuBatcher`** (`render/batcher.hpp`, API-agnostic): DrawList → one
+  20-float instance per drawable command + scissor/texture batches, with
+  reference GLSL 330 shaders matching the software rasterizer's coverage.
+- Python: **`slikui.GLSink`** (PyOpenGL `RenderSink` on `GpuBatcher`) and
+  **`slikui.GlApp`** (App-like shell over it): the UI draws straight into
+  your GL context. ~0.5 ms/frame on the gallery vs ~3 ms for the C++
+  software sink (~55 ms for `CanvasSink`). Also `slikui.GpuBatcher`,
+  `GpuKind`, `GPU_VERTEX_SHADER` / `GPU_FRAGMENT_SHADER`,
+  `read_framebuffer()`.
+- `tests/gl_parity.cpp` (ctest `slikui_gl_parity`, built when GLFW is
+  found; skips without a display): `OpenglSink` vs software sink offscreen.
+- `python/benchmarks/bench_render.py`: ms/frame per sink on the gallery.
+
+### Changed
+
+- **`OpenglSink` rewritten on `GpuBatcher`**: instanced quads (80 bytes per
+  command instead of 6 × 68-byte vertices), one draw per batch, blending
+  via `glBlendFuncSeparate` so destination alpha is correct when rendering
+  into a transparent FBO. RGBA images now sample `GL_NEAREST` (as the
+  software sink does; was `GL_LINEAR`). New `shutdown()`; disables
+  depth/cull/stencil in `render()`.
+- Python `--window` examples and `python/examples/glfw_demo.py` draw the UI
+  with `GlApp`; `--software` keeps the CPU rasterizer + texture blit.
+- Python: **`TexUpload.pixels` is a zero-copy read-only ndarray view**
+  (`(H, W)` uint8 for Alpha8, `(H, W, 4)` for Rgba8) instead of `bytes`.
+  `bytes(up.pixels)` still works; the view is valid only during `upload()`.
+
+### Fixes
+
+- Images inside a `Dialog` are now uploaded (dialogs were skipped when
+  collecting texture uploads, so they drew nothing).
+- A texture widget moved to another `Context` re-uploads its pixels under
+  its new id (it was never marked dirty, so it drew nothing).
+- `OpenglSink` drew nothing for zero-length lines; the software sink draws
+  a dot, and now both do.
+- `python/examples/glfw_demo.py` (software UI path): translucent panels
+  accumulated alpha frame over frame until opaque (the UI target was never
+  cleared), and the blit multiplied alpha twice.
+
 ## 0.3.0
 
 The input model now delivers what custom widgets expect, and the Python

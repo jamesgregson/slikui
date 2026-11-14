@@ -71,6 +71,36 @@ implement `upload(tex)` and `render(commands, fb_size)`, and slikui hands you
 every frame as a flat command list — point it at pygame, moderngl, PIL,
 anything.
 
+```python
+class MySink(slikui.RenderSink):
+    def upload(self, up):
+        # up.pixels: zero-copy read-only view, (H, W) uint8 for Alpha8,
+        # (H, W, 4) for Rgba8. Valid during this call only: copy or upload.
+        self.textures[up.id] = make_texture(up.id, up.pixels)
+
+    def release(self, tex_id):          # optional: the owning widget died
+        self.textures.pop(tex_id).free()
+
+    def render(self, cmds, fb_size):
+        a = cmds.as_array()             # (N,) slikui.DRAWCMD_DTYPE, zero-copy
+        rects = a[a["type"] == slikui.DrawCmdType.Rect.value]
+        ...                             # a["rect"] (N, 4) f32, a["color"] (N, 4) u8
+```
+
+- **`cmds.as_array()`** is the fast path: one read-only structured view over
+  the C++ command storage (fields `type rect radius thickness hollow color
+  tex_id uv`, see `slikui.DRAWCMD_DTYPE`), about 18× cheaper than
+  `for c in cmds` on the gallery. Like `up.pixels` it borrows C++ memory
+  valid only during the call — `.copy()` to keep it.
+- **`release(tex_id)`** is called when an `Image`, `ImageView` or
+  `CompareView` is destroyed. It can run outside `render()` (e.g. from
+  `ctx.clear_tree()`), so a GPU sink should queue the delete until a context
+  is current. Exceptions raised there are reported as unraisable, not
+  propagated. The default is a no-op.
+- **`ctx.invalidate_textures()`**: call after your sink lost its textures
+  (GL context recreated); the next `render()` re-uploads the font atlas and
+  every live widget texture.
+
 `slikui.CanvasSink` is a worked example: a pure-numpy rasterizer producing
 **pixel-identical** output to the C++ software backend (same blend/SDF/
 sampling math, verified by test):
@@ -90,6 +120,48 @@ tree through both renderers and reports the pixel diff (it is 0).
 
 ![Software-backend output — which CanvasSink reproduces pixel-for-pixel
 (same blend/SDF/sampling math, verified by test)](../images/custom_widget.png)
+
+## OpenGL: `GlApp` and `GLSink`
+
+For a PyOpenGL host (glfw, pygame, Qt, ...) the UI can draw straight into
+your GL 3.3 context — no CPU framebuffer, no per-frame texture upload:
+
+```python
+app = slikui.GlApp(960, 640, scale=fb_w / win_w)   # GL context current
+root = app.set_root(slikui.Column, padding=12)
+...
+while running:
+    app.set_scale(fb_w / win_w); app.resize(win_w, win_h)   # before tick
+    app.tick(now, dt)
+    draw_scene()
+    app.render(clear=False)        # over the scene; clear=True paints the background
+    swap_buffers()
+app.close()                        # BEFORE destroying the window (frees GL objects)
+```
+
+`GlApp` wraps `slikui.GLSink`, a `RenderSink` built on the C++
+`slikui.GpuBatcher`: each frame is one buffer upload plus one instanced draw
+per scissor/texture batch (a handful per frame). On the gallery it renders
+in ~0.5 ms/frame at 1× and ~0.6 ms at 2×, against ~3 ms / ~11 ms for the C++
+software sink, before that path's texture upload
+(`python/benchmarks/bench_render.py`).
+
+- **GL state**: `render()` sets viewport, program, VAO, texture unit 0,
+  blending and scissor, disables depth/cull/stencil, and leaves them —
+  set what your next pass needs. `GLSink(preserve_state=True)` saves and
+  restores them instead (slower: `glGet*` per frame).
+- **Lifecycle**: `init()` / `shutdown()` need the context current;
+  `release()` only queues texture deletes. After a lost/recreated context,
+  `app.reset()` (or `sink.reset(ctx)`) rebuilds GL objects and re-uploads.
+  One sink per `Context`, one GL context per sink.
+- `slikui.read_framebuffer(w, h)` reads the bound framebuffer in
+  `Target.pixels()` layout (tests, screenshots).
+- `--window` examples use `GlApp`; add `--software` for the CPU path.
+
+`slikui.GpuBatcher().build(list, frame, scale)` returns the arrays
+zero-copy — `(N, 20)` float32 instances and `(M, 7)` int32 batches — with
+`slikui.GPU_VERTEX_SHADER` / `GPU_FRAGMENT_SHADER`, for other APIs
+(moderngl, wgpu, Vulkan via Python). See [Render backends](../guide/backends.md).
 
 ## Custom widgets in Python
 

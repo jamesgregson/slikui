@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from slikui._slikui import DrawCmdType, RenderSink, TexFormat
+from slikui._slikui import DrawCmdType, RenderSink
 
 _F32 = np.float32
 _U32 = np.uint32
@@ -99,13 +99,15 @@ class CanvasSink(RenderSink):
     # -- IRenderSink ---------------------------------------------------------
 
     def upload(self, up):
-        n = up.width * up.height * (4 if up.format == TexFormat.Rgba8 else 1)
-        data = np.frombuffer(bytes(up.pixels), np.uint8, n).copy()
-        if up.format == TexFormat.Rgba8:
-            data = data.reshape(up.height, up.width, 4)
-        else:
-            data = data.reshape(up.height, up.width)
-        self._textures[up.id] = data
+        # up.pixels is a borrowed (H, W[, 4]) view, valid during this call.
+        self._textures[up.id] = np.array(up.pixels, np.uint8)
+
+    def release(self, tex_id):
+        self._textures.pop(tex_id, None)
+
+    @property
+    def texture_count(self):
+        return len(self._textures)
 
     def render(self, cmds, framebuffer_size):
         self._clips = [(_F32(0), _F32(0), _F32(self.width), _F32(self.height))]

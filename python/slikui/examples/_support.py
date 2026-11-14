@@ -206,7 +206,8 @@ def main_entry(*, name, size, build, smoke=None, interactive=None, docs=None,
                      render one of the module's DOCS images (exact trees the
                      docs pages embed); ``tools/python_examples_capture.py``
                      loops these
-    --window         live window via the module's ``interactive()`` (optional)
+    --window         live window via the module's ``interactive()`` (optional);
+                     add --software for the CPU rasterizer + blit
     """
     docs = docs or {}
     p = argparse.ArgumentParser(
@@ -223,12 +224,18 @@ def main_entry(*, name, size, build, smoke=None, interactive=None, docs=None,
                    help="render a named DOCS image")
     p.add_argument("--window", action="store_true",
                    help='open a live window (needs: pip install "slikui-python[demo]")')
+    p.add_argument("--software", action="store_true",
+                   help="with --window: CPU rasterizer + texture blit instead "
+                        "of the GPU renderer (GlApp)")
     args = p.parse_args(argv)
 
     if args.window:
         if interactive is None:
             print(f"{name}: no window mode (headless by design)")
             return 2
+        if args.software:
+            from slikui.examples import _window
+            _window.RENDERER = "software"
         return interactive() or 0
     if args.docs_image:
         image, path = args.docs_image

@@ -14,7 +14,7 @@ from slikui._slikui import Context, Sink, Target, find_system_font
 _exit_close_refs = []
 
 
-def _register_exit_close(app):
+def _register_exit_close(app, method="close"):
     """Run app.close() during interpreter shutdown, before module teardown.
 
     Python-level atexit callbacks run while every module (slikui's extension
@@ -31,7 +31,7 @@ def _register_exit_close(app):
         a = ref()
         if a is not None:
             try:
-                a.close()
+                getattr(a, method)()
             except Exception:
                 pass
 
@@ -110,3 +110,97 @@ class App:
             self.close()
         except Exception:
             pass
+
+
+class GlApp:
+    """App over slikui.GLSink: draws the UI into the current OpenGL context.
+
+    Same surface as App (set_root, handle, tick, ctx) for hosts that own a
+    GL 3.3 window (glfw, pygame, Qt, ...). render() draws into whatever
+    framebuffer is bound — no CPU framebuffer, no texture upload.
+
+        app = slikui.GlApp(960, 640, scale=fb_width / win_width)  # context current
+        ...
+        app.tick(now, dt); app.render(); swap_buffers()
+        ...
+        app.close()          # BEFORE destroying the window: frees GL objects
+
+    `resize(w, h)` takes logical points; `set_scale(s)` maps them to
+    framebuffer pixels (HiDPI). If the GL context is lost or recreated, call
+    `reset()` with the new context current.
+    """
+
+    def __init__(self, width, height, *, font=None, scale=1.0, theme=None,
+                 preserve_state=False):
+        from slikui._py.gl import GLSink
+
+        self.width = int(width)
+        self.height = int(height)
+        self.scale = float(scale)
+        self.sink = GLSink(scale=self.scale, preserve_state=preserve_state).init()
+        self.ctx = Context(self.sink)
+        self.ctx.set_frame_size(float(self.width), float(self.height))
+        if font is not None:
+            self.ctx.load_font_file(font)
+        elif not self.ctx.load_font_file(find_system_font()):
+            self.ctx.load_default_font()
+        if theme is not None:
+            self.ctx.theme = theme
+        self.ctx.theme.scale = self.scale
+        _register_exit_close(self, "_close_at_exit")
+
+    def set_root(self, cls, *args, **props):
+        return context_set_root(self.ctx, cls, *args, **props)
+
+    def resize(self, width, height):
+        """New logical size (points)."""
+        self.width, self.height = int(width), int(height)
+        self.ctx.set_frame_size(float(self.width), float(self.height))
+
+    def set_scale(self, scale):
+        """Framebuffer pixels per logical point (glfw: fb width / window width)."""
+        self.scale = float(scale)
+        self.sink.scale = self.scale
+        self.ctx.theme.scale = self.scale
+
+    def tick(self, now=0.0, dt=0.0):
+        self.ctx.tick(now, dt)
+
+    def handle(self, event):
+        self.ctx.handle(event)
+
+    def render(self, clear=True):
+        """Draw into the bound framebuffer. clear=False: draw over the scene."""
+        self.ctx.render(clear)
+
+    def reset(self):
+        """GL context lost/recreated: rebuild GL objects and re-upload."""
+        self.sink.reset(self.ctx)
+
+    def close(self):
+        """Destroy the widget tree and free the GL objects. Needs the GL
+        context current — call it before destroying the window. Safe twice."""
+        self.ctx.clear_tree()
+        if self.sink.initialized:
+            self.sink.shutdown()
+        self._unregister_exit()
+
+    def _close_at_exit(self):
+        # Interpreter shutdown: the window (and its GL context) may already
+        # be gone, so no GL calls — the driver frees them with the context.
+        self.ctx.clear_tree()
+        self.sink._forget()
+        self._unregister_exit()
+
+    def _unregister_exit(self):
+        ec = getattr(self, "_exit_close", None)
+        if ec is not None:
+            atexit.unregister(ec)
+            self._exit_close = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False

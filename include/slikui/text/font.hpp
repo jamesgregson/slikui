@@ -266,6 +266,7 @@ public:
     int atlas_height() const { return kAtlasPage; }
     bool atlas_dirty() const { return atlas_dirty_; }
     void clear_dirty() { atlas_dirty_ = false; }
+    void mark_dirty() { atlas_dirty_ = true; }
 
 private:
     static bool is_separator(std::uint32_t) { return false; } // kerning across spaces is fine

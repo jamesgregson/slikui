@@ -578,7 +578,7 @@ class TexUpload:
     def format(self) -> TexFormat: ...
 
     @property
-    def pixels(self) -> bytes: ...
+    def pixels(self) -> NDArray[numpy.uint8]: ...
 
 class DrawCmdType(enum.Enum):
     Rect = 0
@@ -639,6 +639,8 @@ class DrawList:
 
     def clear(self) -> None: ...
 
+    def as_array(self) -> NDArray[numpy.void]: ...
+
     @property
     def commands(self) -> list[DrawCmd]: ...
 
@@ -663,6 +665,42 @@ class IRenderSink:
 
 class RenderSink(IRenderSink):
     def __init__(self) -> None: ...
+
+    def release(self, tex_id: int) -> None: ...
+
+class GpuKind(enum.Enum):
+    Rect = 0
+
+    Glyph = 1
+
+    Image = 2
+
+    Line = 3
+
+class GpuBatcher:
+    """
+    Turns a DrawList into GPU-ready arrays: one 20-float instance per drawable command and scissor/texture batches. See docs/guide/backends.md.
+    """
+
+    def __init__(self) -> None: ...
+
+    def build(self, list: DrawList, frame: Vec2, scale: float = 1.0) -> tuple[Annotated[NDArray[numpy.float32], dict(shape=(None, 20))], Annotated[NDArray[numpy.int32], dict(shape=(None, 7))]]:
+        """
+        Rebuild for one frame. Returns read-only zero-copy views (instances (N, 20) float32, batches (M, 7) int32: first, count, tex_id, scissor x, y, w, h). They stay valid until the next build() on this batcher.
+        """
+
+    @property
+    def framebuffer_width(self) -> int: ...
+
+    @property
+    def framebuffer_height(self) -> int: ...
+
+    @property
+    def scale(self) -> float: ...
+
+GPU_VERTEX_SHADER: str = ...
+
+GPU_FRAGMENT_SHADER: str = ...
 
 class Target:
     @overload
@@ -692,6 +730,9 @@ class Sink(IRenderSink):
 
     @property
     def scale(self) -> float: ...
+
+    @property
+    def texture_count(self) -> int: ...
 
 class Context:
     def __init__(self, sink: IRenderSink) -> None: ...
@@ -727,6 +768,10 @@ class Context:
     def theme(self, arg: Theme, /) -> None: ...
 
     def next_texture_id(self) -> int: ...
+
+    def release_texture(self, tex_id: int) -> None: ...
+
+    def invalidate_textures(self) -> None: ...
 
     def find(self, id: str) -> Widget: ...
 

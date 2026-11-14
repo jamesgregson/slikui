@@ -36,6 +36,8 @@ float theme_scale_of(const Context* ctx);
 // Defined in context.hpp: drop every Context reference (focus, hover, mouse
 // capture, press targets) to a widget that is being destroyed.
 void context_forget(Context* ctx, const Widget* w) noexcept;
+// Defined in context.hpp: tell the context's sink a texture id is dead.
+void context_release_texture(Context* ctx, std::uint32_t id) noexcept;
 
 class Widget {
 public:
@@ -125,6 +127,14 @@ protected:
     // Called by Context once per widget when it enters a context.
     virtual void attached(Context&) {}
 
+    // Texture-owning widgets call this from their destructor (and before
+    // dropping an id): the context's sink frees the texture. Silent when the
+    // widget is detached or its context is already gone. Zeroes `id`.
+    void release_texture(std::uint32_t& id) noexcept {
+        if (id && ctx && !ctx_alive_.expired()) context_release_texture(ctx, id);
+        id = 0;
+    }
+
 public:
     virtual const char* widget_type() const { return "Widget"; }
 
@@ -178,6 +188,14 @@ public:
     void collect_tree(std::vector<TexUpload>& out) {
         collect_uploads(out);
         for (auto& c : children) c->collect_tree(out);
+    }
+
+    // The sink lost its textures (context loss, sink swap): mark every
+    // texture this widget owns dirty so the next collect re-uploads it.
+    virtual void invalidate_uploads() {}
+    void invalidate_tree() {
+        invalidate_uploads();
+        for (auto& c : children) c->invalidate_tree();
     }
 
     // --- state ---

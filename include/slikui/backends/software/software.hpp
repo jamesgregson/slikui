@@ -123,6 +123,11 @@ public:
                                      (up.format == TexFormat::Rgba8 ? 4 : 1));
     }
 
+    void release(std::uint32_t id) override { textures_.erase(id); }
+
+    // Number of textures currently held (tests, leak checks).
+    std::size_t texture_count() const { return textures_.size(); }
+
     void render(const DrawList& list, Vec2 framebuffer_size) override {
         (void)framebuffer_size;
         clips_.assign(1, Rect{0, 0, float(target_->width()), float(target_->height())});

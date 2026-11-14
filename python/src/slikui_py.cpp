@@ -35,9 +35,11 @@
 #include <slikui/text/system_fonts.hpp>
 #include <slikui/version.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <type_traits>
 #include <string>
 #include <utility>
 
@@ -303,7 +305,37 @@ struct PyRenderSink : IRenderSink {
     void render(const DrawList& list, Vec2 framebuffer_size) override {
         NB_OVERRIDE_PURE(render, list, framebuffer_size);
     }
+
+    // Optional override. Runs from widget destructors (noexcept paths), so a
+    // Python exception is reported as unraisable instead of propagating.
+    void release(std::uint32_t id) override {
+        try {
+            release_py(id);
+        } catch (nb::python_error& e) {
+            e.discard_as_unraisable("slikui.RenderSink.release");
+        } catch (...) {
+        }
+    }
+
+private:
+    void release_py(std::uint32_t id) { NB_OVERRIDE(release, id); }
 };
+
+// DrawList.as_array() views std::vector<DrawCmd> as a numpy structured array
+// whose dtype (slikui/_py/drawcmd.py) is built from these offsets. Pin the
+// field types so a layout change fails here, not as garbage in Python.
+static_assert(std::is_standard_layout_v<DrawCmd>);
+static_assert(sizeof(DrawCmd::Type) == 1);
+static_assert(sizeof(Rect) == 16 && alignof(Rect) == 4);
+static_assert(sizeof(Color) == 4 && alignof(Color) == 1);
+static_assert(sizeof(bool) == 1);
+static_assert(sizeof(std::uint32_t) == 4);
+static_assert(offsetof(DrawCmd, type) == 0);
+static_assert(sizeof(DrawCmd) == 56, "update DRAWCMD_DTYPE if DrawCmd changes");
+
+// GpuBatcher.build() views its vectors as (N, 20) float32 / (M, 7) int32.
+static_assert(std::is_standard_layout_v<GpuInstance> && offsetof(GpuInstance, rect) == 0);
+static_assert(std::is_standard_layout_v<GpuBatch> && offsetof(GpuBatch, first) == 0);
 
 // PyWidget — trampoline so Python classes can implement the Widget contract
 // (measure/paint/on_event/...). See docs/python-custom-widgets.md.
@@ -735,12 +767,22 @@ NB_MODULE(_slikui, m) {
         .def_prop_ro("width", [](const TexUpload& t) { return t.width; })
         .def_prop_ro("height", [](const TexUpload& t) { return t.height; })
         .def_prop_ro("format", [](const TexUpload& t) { return t.format; })
-        .def_prop_ro("pixels",
-                     [](const TexUpload& t) {
-                         return nb::bytes((const char*)t.pixels,
-                                          std::size_t(t.width) * std::size_t(t.height) *
-                                              (t.format == TexFormat::Rgba8 ? 4 : 1));
-                     });
+        // Zero-copy, read-only view: (H, W) uint8 for Alpha8, (H, W, 4) for
+        // Rgba8. Valid only during upload() — copy it (np.array / GL upload)
+        // before returning. bytes(up.pixels) still works.
+        .def_prop_ro(
+            "pixels",
+            [](nb::handle self) {
+                const auto& t = nb::cast<const TexUpload&>(self);
+                static const std::uint8_t empty = 0;
+                const std::uint8_t* p = t.pixels ? t.pixels : &empty;
+                std::size_t h = t.pixels ? std::size_t(t.height) : 0;
+                std::size_t w = t.pixels ? std::size_t(t.width) : 0;
+                std::size_t shape[3] = {h, w, 4};
+                return nb::ndarray<nb::numpy, const std::uint8_t>(
+                    p, t.format == TexFormat::Rgba8 ? 3 : 2, shape, self);
+            },
+            nb::sig("def pixels(self) -> NDArray[numpy.uint8]"));
 
     nb::enum_<DrawCmd::Type>(m, "DrawCmdType")
         .value("Rect", DrawCmd::Type::Rect)
@@ -778,6 +820,25 @@ NB_MODULE(_slikui, m) {
         .def("push_clip", &DrawList::push_clip, nb::arg("rect"))
         .def("pop_clip", &DrawList::pop_clip)
         .def("clear", &DrawList::clear)
+        // Zero-copy, read-only (N,) structured array over the command storage
+        // (dtype slikui.DRAWCMD_DTYPE). The fast path for sinks: no per-
+        // command Python objects. Inside RenderSink.render() it is valid for
+        // that call only — copy it to keep it.
+        .def(
+            "as_array",
+            [](nb::handle self) {
+                const auto& l = nb::cast<const DrawList&>(self);
+                static const std::uint8_t empty = 0;
+                std::size_t n = l.size();
+                const std::uint8_t* p =
+                    n ? reinterpret_cast<const std::uint8_t*>(l.commands().data()) : &empty;
+                std::size_t shape[2] = {n, sizeof(DrawCmd)};
+                nb::object raw =
+                    nb::cast(nb::ndarray<nb::numpy, const std::uint8_t, nb::ndim<2>>(p, 2, shape, self));
+                nb::object dtype = nb::module_::import_("slikui._py.drawcmd").attr("DRAWCMD_DTYPE");
+                return raw.attr("view")(dtype).attr("reshape")(n);
+            },
+            nb::sig("def as_array(self) -> NDArray[numpy.void]"))
         .def_prop_ro("commands", [](const DrawList& l) { return l.commands(); })
         .def_prop_ro("size", [](const DrawList& l) { return l.size(); })
         .def("__len__", [](const DrawList& l) { return l.size(); })
@@ -804,7 +865,69 @@ NB_MODULE(_slikui, m) {
     nb::class_<IRenderSink>(m, "IRenderSink"); // abstract base, never constructed directly
 
     nb::class_<PyRenderSink, IRenderSink>(m, "RenderSink")
-        .def(nb::init<>());
+        .def(nb::init<>())
+        // Default no-op; override to free a texture whose widget died.
+        .def("release", [](PyRenderSink&, std::uint32_t) {}, nb::arg("tex_id"));
+
+    // ------------------------------------------------------------------ //
+    // GpuBatcher — DrawList -> instanced-draw arrays for GPU sinks.
+    // ------------------------------------------------------------------ //
+
+    nb::enum_<GpuKind>(m, "GpuKind")
+        .value("Rect", GpuKind::Rect)
+        .value("Glyph", GpuKind::Glyph)
+        .value("Image", GpuKind::Image)
+        .value("Line", GpuKind::Line);
+
+    nb::class_<GpuBatcher>(m, "GpuBatcher",
+                           "Turns a DrawList into GPU-ready arrays: one 20-float instance per "
+                           "drawable command and scissor/texture batches. See "
+                           "docs/guide/backends.md.")
+        .def(nb::init<>())
+        .def(
+            "build",
+            [](nb::handle self, const DrawList& list, Vec2 frame, float scale) {
+                auto& b = nb::cast<GpuBatcher&>(self);
+                b.build(list, frame, scale);
+                static float empty_f = 0;
+                static std::int32_t empty_i = 0;
+                const auto& in = b.instances();
+                const auto& bt = b.batches();
+                std::size_t ishape[2] = {in.size(), 20};
+                std::size_t bshape[2] = {bt.size(), 7};
+                auto inst = nb::ndarray<nb::numpy, const float, nb::ndim<2>>(
+                    in.empty() ? &empty_f : &in[0].rect[0], 2, ishape, self);
+                auto bat = nb::ndarray<nb::numpy, const std::int32_t, nb::ndim<2>>(
+                    bt.empty() ? &empty_i : &bt[0].first, 2, bshape, self);
+                return nb::make_tuple(inst, bat);
+            },
+            nb::arg("list"), nb::arg("frame"), nb::arg("scale") = 1.f,
+            nb::sig("def build(self, list: DrawList, frame: Vec2, scale: float = 1.0) -> "
+                    "tuple[Annotated[NDArray[numpy.float32], dict(shape=(None, 20))], "
+                    "Annotated[NDArray[numpy.int32], dict(shape=(None, 7))]]"),
+            "Rebuild for one frame. Returns read-only zero-copy views (instances (N, 20) "
+            "float32, batches (M, 7) int32: first, count, tex_id, scissor x, y, w, h). "
+            "They stay valid until the next build() on this batcher.")
+        .def_prop_ro("framebuffer_width", &GpuBatcher::framebuffer_width)
+        .def_prop_ro("framebuffer_height", &GpuBatcher::framebuffer_height)
+        .def_prop_ro("scale", &GpuBatcher::scale);
+
+    m.attr("GPU_VERTEX_SHADER") = kGpuVertexShader;
+    m.attr("GPU_FRAGMENT_SHADER") = kGpuFragmentShader;
+
+    m.def("_drawcmd_layout", [] {
+        nb::dict d;
+        d["type"] = offsetof(DrawCmd, type);
+        d["rect"] = offsetof(DrawCmd, rect);
+        d["radius"] = offsetof(DrawCmd, radius);
+        d["thickness"] = offsetof(DrawCmd, thickness);
+        d["hollow"] = offsetof(DrawCmd, hollow);
+        d["color"] = offsetof(DrawCmd, color);
+        d["tex_id"] = offsetof(DrawCmd, tex_id);
+        d["uv"] = offsetof(DrawCmd, uv);
+        d["itemsize"] = sizeof(DrawCmd);
+        return d;
+    });
 
     // ------------------------------------------------------------------ //
     // Software backend (CPU rasterizer)
@@ -844,7 +967,8 @@ NB_MODULE(_slikui, m) {
         .def("set_target", &software::Sink::set_target, nb::arg("target"),
              nb::keep_alive<0, 1>())
         .def("set_scale", &software::Sink::set_scale, nb::arg("scale"))
-        .def_prop_ro("scale", &software::Sink::scale);
+        .def_prop_ro("scale", &software::Sink::scale)
+        .def_prop_ro("texture_count", &software::Sink::texture_count);
 
     // ------------------------------------------------------------------ //
     // Context
@@ -892,6 +1016,10 @@ NB_MODULE(_slikui, m) {
                      [](Context& c, const Theme& t) { c.theme() = t; },
                      nb::rv_policy::reference_internal)
         .def("next_texture_id", &Context::next_texture_id)
+        .def("release_texture", &Context::release_texture, nb::arg("tex_id"))
+        // The sink lost its textures (GL context recreated): re-upload the
+        // font atlas and every live widget texture on the next render().
+        .def("invalidate_textures", &Context::invalidate_textures)
         .def("find", [](Context& c, const std::string& widget_id) -> Widget* {
                  return c.find(widget_id);
              },

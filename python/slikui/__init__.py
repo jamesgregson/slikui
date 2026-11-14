@@ -97,8 +97,10 @@ from slikui._slikui import (  # noqa: F401 — re-exported
     use_theme,
 )
 from slikui._py import builder
-from slikui._py.app import App
+from slikui._py.app import App, GlApp
 from slikui._py.renderer import CanvasSink
+from slikui._py.drawcmd import DRAWCMD_DTYPE
+from slikui._py.gl import GLSink, read_framebuffer
 from slikui._py.events import (
     focus_lost,
     frame_resize,
@@ -114,6 +116,12 @@ from slikui._py.events import (
     text_input_str,
 )
 from slikui._py.pixels import save_image, to_rgba
+from slikui._slikui import (  # noqa: F401 — GPU batching for your own sink
+    GPU_FRAGMENT_SHADER,
+    GPU_VERTEX_SHADER,
+    GpuBatcher,
+    GpuKind,
+)
 from slikui._slikui import (  # noqa: F401 — input enums
     Event,
     EventType,
@@ -137,6 +145,13 @@ __all__ = [
     "Button",
     "ButtonVariant",
     "CanvasSink",
+    "GLSink",
+    "GlApp",
+    "GPU_FRAGMENT_SHADER",
+    "GPU_VERTEX_SHADER",
+    "GpuBatcher",
+    "GpuKind",
+    "DRAWCMD_DTYPE",
     "Checkbox",
     "Color",
     "ColorEdit",

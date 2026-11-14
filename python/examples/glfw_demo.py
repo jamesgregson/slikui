@@ -3,17 +3,18 @@
 
 The Python twin of examples/04_glfw_opengl: a lit cube/sphere/torus over a
 procedural sky, with a slikui controls panel. The difference is who owns the
-window: here GLFW and OpenGL are driven from Python (glfw + PyOpenGL), while
-every UI pixel is rasterized on the CPU by slikui's software backend and
-blitted as one texture:
+window: here GLFW and OpenGL are driven from Python (glfw + PyOpenGL):
 
     scene pass  — plain GL (sky + grid + shape)
-    UI pass     — ctx.render(clear=False) into a uint32 Target, alpha keeps
-                  whatever slikui painted (0 where untouched), uploaded as one
-                  texture and blended over the scene
+    UI pass     — slikui.GlApp.render(clear=False): GLSink draws the UI
+                  straight over the scene (a few instanced draws per frame)
     input       — GLFW callbacks → slikui.Event for UI hits, camera ops else
 
-Run:  python examples/glfw_demo.py     (deps: glfw, PyOpenGL, numpy)
+With --software the UI pass is the CPU path instead: ctx.render(clear=False)
+into a uint32 Target cleared to transparent, uploaded as one texture every
+frame and blended (premultiplied) over the scene.
+
+Run:  python examples/glfw_demo.py [--software]   (deps: glfw, PyOpenGL, numpy)
 """
 
 import math
@@ -614,12 +615,23 @@ def draw_scene(g, state, fw, fh):
     GL.glBindVertexArray(0)
 
 
+def draw_ui_gl(app):
+    """Draw the UI on the GPU, over the scene (GLSink sets its own state)."""
+    app.render(clear=False)
+
+
 def draw_ui(g, app, tex_size):
-    """Rasterize the UI on the CPU and blend it over the scene."""
+    """--software: rasterize the UI on the CPU and blend it over the scene."""
+    # Start from transparent every frame, or translucent panels accumulate
+    # alpha frame over frame until they are opaque.
+    app.target.clear(slikui.Color(0, 0, 0, 0))
     pix = app.render(clear=False)  # zero-copy (H, W) uint32; alpha 0 where bare
     h, w = pix.shape
     GL.glEnable(GL.GL_BLEND)
-    GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+    # Blending into a transparent target leaves premultiplied color
+    # (rgb = src * a), so composite with ONE, not SRC_ALPHA (that would
+    # multiply by alpha twice and darken translucent UI).
+    GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)
     GL.glDisable(GL.GL_DEPTH_TEST)
     GL.glActiveTexture(GL.GL_TEXTURE0)
     GL.glBindTexture(GL.GL_TEXTURE_2D, g.ui_tex)
@@ -656,7 +668,13 @@ BUTTON_MAP = {  # GLFW: L=0 R=1 M=2 — slikui: L=0 M=1 R=2
 }
 
 
-def main():
+def main(argv=None):
+    import argparse
+
+    ap = argparse.ArgumentParser(description="slikui cube viewer (python)")
+    ap.add_argument("--software", action="store_true",
+                    help="CPU-rasterized UI blitted as a texture (the old path)")
+    args = ap.parse_args(argv)
     slikui.set_leak_warnings(False)  # teardown-order noise, not a real leak
     if not glfw.init():
         raise SystemExit("glfw.init failed")
@@ -676,7 +694,12 @@ def main():
 
     g = setup_gl()
     state = State()
-    app = slikui.App(960, 640)
+    if args.software:
+        app = slikui.App(960, 640)
+    else:
+        fw, _ = glfw.get_framebuffer_size(win)
+        ww, _ = glfw.get_window_size(win)
+        app = slikui.GlApp(960, 640, scale=fw / ww if ww > 0 else 1.0)
     panel = build_ui(app, state)
 
     # --- input routing state (slikui owns UI hits, the app owns the camera) ---
@@ -737,13 +760,16 @@ def main():
         glfw.poll_events()
         fw, fh = glfw.get_framebuffer_size(win)
         ww, wh = glfw.get_window_size(win)
-        if (fw, fh) != (app.target.width, app.target.height):
-            app.target.resize(fw, fh)  # reallocates the CPU framebuffer
-
         ui_scale = fw / ww if ww > 0 else 1.0
-        app.ctx.theme.scale = ui_scale
-        app.sink.set_scale(ui_scale)
-        app.ctx.set_frame_size(float(ww), float(wh))  # LOGICAL: layout in points
+        if args.software:
+            if (fw, fh) != (app.target.width, app.target.height):
+                app.target.resize(fw, fh)  # reallocates the CPU framebuffer
+            app.ctx.theme.scale = ui_scale
+            app.sink.set_scale(ui_scale)
+            app.ctx.set_frame_size(float(ww), float(wh))  # LOGICAL: layout in points
+        else:
+            app.set_scale(ui_scale)
+            app.resize(ww, wh)  # LOGICAL: layout in points
 
         dt = min(time.perf_counter() - last, 0.05)
         last, now = time.perf_counter(), now + dt
@@ -752,11 +778,16 @@ def main():
         app.tick(now, dt)
 
         draw_scene(g, state, fw, fh)
-        draw_ui(g, app, tex_size)
+        if args.software:
+            draw_ui(g, app, tex_size)
+        else:
+            draw_ui_gl(app)
         glfw.swap_buffers(win)
 
+    # GlApp frees its GL objects here, so close while the context is alive;
+    # both flavours release UI callbacks while the interpreter is alive.
+    app.close()
     glfw.destroy_window(win)
-    app.close()  # release UI callbacks while the interpreter is alive
     glfw.terminate()
 
 
