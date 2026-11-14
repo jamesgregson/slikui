@@ -27,6 +27,27 @@
   `read_framebuffer()`.
 - Python: **`slikui.ModernGLSink`** — the same sink over a
   `moderngl.Context` (~0.36 ms/frame on the gallery).
+- **GLFW input without the window**: `backends/glfw/glfw_input.hpp` —
+  event builders (`mouse_button_event`, `cursor_pos_event`, `key_event`,
+  ...), `map_button`, `GlfwInput` (installs slikui's callbacks on YOUR
+  `GLFWwindow*`, chaining to existing ones and restoring them on
+  destruction, without touching the user pointer) and `attach_services`
+  (clipboard + cursors). `GlfwWindow` is now window creation on top of it
+  (same API, plus `input()`). Python twin: `slikui.glfw_input` /
+  `slikui.GlfwInput`.
+- **SDL3 backend** (`backends/sdl/`, SDL 3.2+), same layering as GLFW:
+  `sdl_input.hpp` — `translate()` (SDL_Event → slikui events), `SdlInput`
+  (one window's events, text input, queue/dispatch), `attach_services`;
+  `sdl_window.hpp` — `SdlWindow` (window + GL 3.3 context + input).
+  Python: `slikui.sdl_input` / `slikui.SdlInput` (PySDL3). New
+  `examples/06_sdl_opengl`, `python/examples/sdl_demo.py`; tests
+  `slikui_sdl_input` (SDL's real event queue, dummy video driver) and
+  `slikui_sdl_gl_parity`.
+- **`Context::wants_mouse(pos)` / `wants_keyboard()`** for hosts that share
+  input with their own scene, and `Widget::mouse_transparent()` (true for
+  `Column`, `Row`, `Spacer`; overridable, also from Python).
+  `python/examples/glfw_demo.py` uses them instead of its own panel test,
+  so its hint box now counts as UI.
 - `tests/gl_parity.cpp` (ctest `slikui_gl_parity`, built when GLFW is
   found; skips without a display): `OpenglSink` vs software sink offscreen,
   2/255 per channel.
@@ -54,6 +75,16 @@
   past its atlas cell — faint dots from the neighbouring glyph above some
   letters ("Ġ", "Ċ"). Text now matches the GPU sinks to 2/255. Text pixels
   at glyph edges shift slightly in software output.
+- **GLFW mouse buttons: right and middle were swapped.** GLFW numbers them
+  LEFT=0, RIGHT=1, MIDDLE=2; slikui uses MouseLeft=0, MouseMiddle=1,
+  MouseRight=2. `GlfwWindow` passed GLFW's number through unmapped, as did
+  the Python `--window` host and `python/examples/showcase.py` — a right
+  click arrived as a middle click and vice versa, so context menus opened
+  on middle-click and never on right-click. `python/examples/glfw_demo.py` was already correct.
+- `GlfwWindow` dropped the modifier state of mouse presses/releases
+  (Shift-click arrived without Shift).
+- `python/examples/showcase.py` only forwarded a handful of keys and only
+  vertical scroll; it now uses `GlfwInput` like the other hosts.
 - Images inside a `Dialog` are now uploaded (dialogs were skipped when
   collecting texture uploads, so they drew nothing).
 - A texture widget moved to another `Context` re-uploads its pixels under

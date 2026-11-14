@@ -73,11 +73,13 @@ def test_ui_builds_headless():
     assert (state.yaw, state.pitch, state.distance) == (0.6, 0.5, 4.6)
 
 
-def test_over_ui_uses_popup_bounds():
+def test_over_ui_routes_by_wants_mouse():
     app = slikui.App(400, 300)
     state = demo.State()
     panel = demo.build_ui(app, state)
     app.tick(0.0, 1 / 60)
     b = panel.bounds
-    assert demo.over_ui(app, panel, b.x + 5, b.y + 5)
-    assert not demo.over_ui(app, panel, 5, 5)
+    assert demo.over_ui(app, b.x + 5, b.y + 5)          # controls panel
+    assert not demo.over_ui(app, 5, 5)                   # empty layout: camera
+    hint = app.ctx.find("hint").bounds
+    assert demo.over_ui(app, hint.x + 3, hint.y + 3)     # hint panel too

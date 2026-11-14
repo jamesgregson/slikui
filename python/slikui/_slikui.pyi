@@ -826,6 +826,16 @@ class Context:
 
     def clear_tree(self) -> None: ...
 
+    def wants_mouse(self, x: float, y: float) -> bool:
+        """
+        Host routing: should a pointer event at (x, y) go to the UI? True during a UI press/drag, with a modal dialog open, or over any popup, dialog or widget that is not mouse_transparent (Column/Row/Spacer let the pointer through to your scene).
+        """
+
+    def wants_keyboard(self) -> bool:
+        """
+        Host routing: should key events go to the UI? (a widget has focus, or a modal dialog is open)
+        """
+
     @property
     def has_popups(self) -> bool: ...
 
@@ -903,6 +913,11 @@ class Widget:
     def stretch_cross(self) -> bool: ...
 
     def expands_main(self) -> bool: ...
+
+    def mouse_transparent(self) -> bool:
+        """
+        True for pure layout that paints nothing: Context.wants_mouse lets the pointer through it to the host's scene. Override to return True in a custom widget that only arranges children.
+        """
 
     def focusable(self) -> bool: ...
 

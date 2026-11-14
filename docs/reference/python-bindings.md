@@ -158,6 +158,38 @@ software sink, before that path's texture upload
   `Target.pixels()` layout (tests, screenshots).
 - `--window` examples use `GlApp`; add `--software` for the CPU path.
 
+**Input from your GLFW window** (`slikui.glfw_input`, pyGLFW; `import
+slikui` never imports glfw):
+
+```python
+inp = slikui.GlfwInput(win, app)   # chains to callbacks you set earlier
+slikui.glfw_input.attach_services(app.ctx, win)   # clipboard + cursors
+...
+glfw.poll_events()                 # events reach app.handle() as they arrive
+...
+inp.close()                        # restore your callbacks (window alive)
+```
+
+`GlfwInput(win)` without a target queues events (`inp.take()`) for hosts
+that route them (UI vs scene). Or skip it and call the builders from your
+own callbacks: `slikui.glfw_input.mouse_button_event(win, button, action,
+mods)`, `cursor_pos_event`, `scroll_event`, `key_event`, `char_event`,
+`focus_event`, `framebuffer_size_event` — `python/examples/glfw_demo.py`
+does this. Always map buttons through them (or `map_button`): GLFW's
+RIGHT=1/MIDDLE=2 are slikui's MouseMiddle=1/MouseRight=2 swapped.
+
+**Input from your SDL3 window** (`slikui.sdl_input`, PySDL3; `import slikui`
+never imports sdl3): `inp = slikui.SdlInput(window, app)`, then
+`inp.process(ev)` for each polled event (returns False for events slikui
+doesn't use). `translate(ev)` is the stateless builder;
+`attach_services(ctx)` wires clipboard and cursors. Full host:
+`python/examples/sdl_demo.py`.
+
+**Routing between UI and scene**: `app.ctx.wants_mouse(x, y)` and
+`app.ctx.wants_keyboard()` say whether an event belongs to the UI (layout
+widgets — Column, Row, Spacer — let the pointer through; a custom widget
+can return True from `mouse_transparent()` to do the same).
+
 **moderngl hosts**: `slikui.ModernGLSink(mgl_ctx, scale=...)` is the same
 sink over a `moderngl.Context` (`pip install moderngl`) — lower per-call
 overhead than PyOpenGL (~0.36 ms/frame on the gallery vs ~0.6 ms). It draws

@@ -127,6 +127,15 @@ protected:
     // Called by Context once per widget when it enters a context.
     virtual void attached(Context&) {}
 
+public:
+    // True for pure layout widgets that paint nothing (Column, Row, Spacer):
+    // the pointer "falls through" them to the host's scene in
+    // Context::wants_mouse. A subclass of one of those that paints must
+    // return false again (Toolbar, MenuBar do).
+    virtual bool mouse_transparent() const { return false; }
+
+protected:
+
     // Texture-owning widgets call this from their destructor (and before
     // dropping an id): the context's sink frees the texture. Silent when the
     // widget is detached or its context is already gone. Zeroes `id`.

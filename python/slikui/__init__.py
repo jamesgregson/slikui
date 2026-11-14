@@ -102,6 +102,10 @@ from slikui._py.renderer import CanvasSink
 from slikui._py.drawcmd import DRAWCMD_DTYPE
 from slikui._py.gl import GLSink, read_framebuffer
 from slikui._py.moderngl_sink import ModernGLSink
+from slikui import glfw_input  # noqa: F401 — imports glfw lazily
+from slikui.glfw_input import GlfwInput
+from slikui import sdl_input  # noqa: F401 — imports sdl3 lazily
+from slikui.sdl_input import SdlInput
 from slikui._py.events import (
     focus_lost,
     frame_resize,
@@ -148,6 +152,7 @@ __all__ = [
     "CanvasSink",
     "GLSink",
     "GlApp",
+    "GlfwInput",
     "GPU_FRAGMENT_SHADER",
     "GPU_VERTEX_SHADER",
     "GpuBatcher",
@@ -165,6 +170,7 @@ __all__ = [
     "Cursor",
     "Dialog",
     "Divider",
+    "DrawCmdType",
     "DragValue",
     "Dropdown",
     "Event",
@@ -195,6 +201,7 @@ __all__ = [
     "PropertyGrid",
     "Radio",
     "Rect",
+    "SdlInput",
     "RenderSink",
     "Row",
     "ScrollArea",
@@ -239,7 +246,10 @@ __all__ = [
     "mouse_move",
     "mouse_press",
     "mouse_release",
+    "glfw_input",
+    "read_framebuffer",
     "save_image",
+    "sdl_input",
     "scroll",
     "set_leak_warnings",
     "set_root",

@@ -19,10 +19,12 @@ Two backends ship out of the box and are the reference implementations:
   targets, or blitted into any engine. `sink.set_scale()` renders logical
   coordinates at any pixel density.
 - **`slikui::opengl::OpenglSink`** — GL 3.3 core renderer using your **system
-  OpenGL headers** (no vendored loader). Optional
-  `slikui::glfw::GlfwWindow` wraps window creation and event translation.
-  Both self-gate on `__has_include`, so they compile to nothing when the
-  headers are absent.
+  OpenGL headers** (no vendored loader).
+
+Window/input layers are separate and optional: GLFW (`backends/glfw/`) and
+SDL3 (`backends/sdl/`), each split into input translation for a window you
+own and a ready-made window. All self-gate on `__has_include`, so they
+compile to nothing when the headers are absent.
 
 Anything else — Vulkan, Metal, SDL_Renderer, a raylib batch — implements the
 same two methods. A minimal sink is ~100–400 lines; the software sink is the
@@ -95,18 +97,113 @@ Guarantees you can rely on:
 The window layer converts native events into `slikui::Event` and calls
 `Context::handle` — one vocabulary regardless of platform:
 
-| slikui event | GLFW source |
-|--------------|-------------|
-| `MouseMove` | cursor-pos callback (`pos`, `delta`) |
-| `MousePress`/`MouseRelease` | mouse-button callback (`button`, `pos`) |
-| `Scroll` | scroll callback (`scroll`) |
-| `KeyPress`/`KeyRelease` | key callback (`key` via `map_key`, `mods`) |
-| `TextInput` | char callback (`codepoint`, Unicode scalar) |
-| `FocusLost` | window-focus callback (focus out) |
-| `FrameResize` | framebuffer-size callback (`pos` = **pixel** size; Context converts to logical) |
+| slikui event | GLFW source | builder (`slikui::glfw::`) |
+|--------------|-------------|----------------------------|
+| `MouseMove` | cursor-pos callback (`pos`, `delta`, held `mods`) | `cursor_pos_event` |
+| `MousePress`/`MouseRelease` | mouse-button callback (`button` via `map_button`, `pos`, `mods`) | `mouse_button_event` |
+| `Scroll` | scroll callback (`scroll`, held `mods`) | `scroll_event` |
+| `KeyPress`/`KeyRelease` | key callback (`key` via `map_key`, `mods`, `repeat`) | `key_event` |
+| `TextInput` | char callback (`codepoint`, Unicode scalar) | `char_event` |
+| `FocusLost` | window-focus callback (focus out) | `focus_event` |
+| `FrameResize` | framebuffer-size callback (`pos` = **pixel** size; Context converts to logical) | `framebuffer_size_event` |
 
-Mouse positions are framebuffer pixels (not window coordinates), so divide by
-the content scale on HiDPI before filling `pos`.
+Mouse positions are **logical points** — GLFW's cursor coordinates (window
+space) pass through unchanged, matching the layout space Context works in.
+Only `FrameResize` carries framebuffer pixels.
+
+Buttons need mapping: GLFW numbers them LEFT=0, **RIGHT=1, MIDDLE=2**;
+slikui uses `MouseLeft=0`, **`MouseMiddle=1`, `MouseRight=2`**.
+`map_button` does it (extra buttons pass through).
+
+### Using your own GLFW window
+
+`slikui/backends/glfw/glfw_input.hpp` works on any `GLFWwindow*` — it never
+creates a window or touches GL. Pick the level that fits your app:
+
+```cpp
+#include <slikui/backends/glfw/glfw_input.hpp>
+
+// (a) You own the callbacks: forward what the UI should see.
+glfwSetMouseButtonCallback(win, [](GLFWwindow* w, int b, int a, int m) {
+    if (ui_under_cursor(w)) ctx().handle(slikui::glfw::mouse_button_event(w, b, a, m));
+    else camera_button(w, b, a, m);
+});
+
+// (b) GlfwInput installs slikui's callbacks, CHAINING to the ones you set
+//     before it (yours run first) and restoring them in its destructor. It
+//     does not use the window user pointer.
+slikui::glfw::GlfwInput input(win);        // after your own glfwSet*Callback
+slikui::glfw::attach_services(ctx, win);   // clipboard + cursor shapes
+while (!glfwWindowShouldClose(win)) {
+    glfwPollEvents();
+    input.dispatch(ctx);                   // or route input.events() yourself
+    ...
+}
+```
+
+`GlfwWindow` (`glfw_window.hpp`) is the ready-made option: it creates a
+GL 3.3 core window and owns a `GlfwInput` (`win.input()`). One `GlfwInput`
+per window; destroy it before the window (or call `release_window()`).
+
+Python has the same three levels in `slikui.glfw_input` (pyGLFW):
+`mouse_button_event(...)` and friends, `slikui.GlfwInput(win, app)` (chains,
+`close()` restores; no target = queue, `take()`), and
+`attach_services(ctx, win)`.
+
+### SDL3
+
+`slikui/backends/sdl/` mirrors the GLFW layers for SDL 3.2+. SDL delivers
+input through its event queue rather than callbacks, so there is nothing to
+install or chain — you hand slikui the events you poll:
+
+```cpp
+#include <slikui/backends/sdl/sdl_input.hpp>
+
+slikui::sdl::SdlInput input(window);         // filters by window id, starts text input
+slikui::sdl::attach_services(ctx);           // clipboard + cursor shapes (global in SDL)
+SDL_Event ev;
+while (SDL_PollEvent(&ev)) {
+    if (!input.process(ev)) my_app(ev);      // quit, gamepads, other windows, ...
+}
+input.dispatch(ctx);                         // or route input.events() yourself
+```
+
+- `translate(const SDL_Event&, std::vector<Event>&)` is the stateless level
+  (one SDL event can yield several: TEXT_INPUT is UTF-8, one `TextInput` per
+  codepoint).
+- `SdlWindow` (`sdl_window.hpp`) creates a resizable HiDPI window with a GL
+  3.3 core context and owns an `SdlInput`; `dispatch(ctx)` pumps and
+  translates, `on_event` gets what slikui doesn't use.
+- **Buttons** are 1-based in SDL (LEFT=1, MIDDLE=2, RIGHT=3); `map_button`
+  converts. **Keys** map by keycode, so shortcuts follow the user's layout
+  (AZERTY Ctrl+Z is the key labelled Z). GLFW maps by physical position, so
+  the two differ on non-US layouts.
+- Python: `slikui.sdl_input` (PySDL3) — `translate(ev)`, `slikui.SdlInput(win,
+  target)` with `process(ev)` / `take()`, `attach_services(ctx)`;
+  `python/examples/sdl_demo.py`. PySDL3 downloads SDL binaries unless
+  `SDL_DOWNLOAD_BINARIES=0 SDL_FIND_BINARIES=1 SDL_DISABLE_METADATA=1` (use a
+  system SDL3).
+
+### Sharing input with your scene
+
+Hosts that draw their own scene under the UI ask the Context where each
+event belongs, instead of hit-testing panels themselves:
+
+```cpp
+using T = slikui::Event::Type;
+bool pointer = e.type == T::MouseMove || e.type == T::MousePress ||
+               e.type == T::MouseRelease || e.type == T::Scroll;
+bool to_ui = pointer ? ctx.wants_mouse(e.pos) : ctx.wants_keyboard();
+```
+
+`wants_mouse(pos)` is true during a UI press or drag (so the release comes
+back to the UI), with a modal dialog open, or over any popup, dialog or
+widget that is not `mouse_transparent()`. Pure layout — `Column`, `Row`,
+`Spacer` — is transparent, so a full-window layout with a docked panel lets
+the pointer through everywhere except the panel. Custom layout-only widgets
+override `mouse_transparent()` to return true (Python too).
+`wants_keyboard()` is true when a widget has focus or a modal is open.
+`examples/06_sdl_opengl` and `python/examples/glfw_demo.py` route this way.
 
 ## A minimal new sink (sketch)
 

@@ -762,17 +762,6 @@ out vec4 frag;
 void main(){ frag = texture(u_tex, v_uv); }
 """
 
-KEY_MAP = {
-    256: slikui.Key.Escape, 257: slikui.Key.Enter, 258: slikui.Key.Tab,
-    259: slikui.Key.Backspace, 261: slikui.Key.Delete, 32: slikui.Key.Space,
-    262: slikui.Key.Right, 263: slikui.Key.Left, 264: slikui.Key.Down,
-    265: slikui.Key.Up, 268: slikui.Key.Home, 269: slikui.Key.End,
-    266: slikui.Key.PageUp, 267: slikui.Key.PageDown,
-}
-BUTTON_MAP = {0: slikui.MouseButton.MouseLeft, 1: slikui.MouseButton.MouseMiddle,
-              2: slikui.MouseButton.MouseRight}
-
-
 def run_interactive():
     import glfw
     from OpenGL import GL
@@ -837,36 +826,10 @@ def run_interactive():
     build_ui(app, ui)
     ui.demo.say("showcase started — click around, watch the log")
 
-    def on_button(_w, button, action, _mods):
-        x, y = glfw.get_cursor_pos(win)
-        if action == glfw.PRESS:
-            if button in BUTTON_MAP:
-                app.handle(slikui.mouse_press((x, y), BUTTON_MAP[button]))
-        elif action == glfw.RELEASE:
-            if button in BUTTON_MAP:
-                app.handle(slikui.mouse_release((x, y), BUTTON_MAP[button]))
-
-    def on_cursor(_w, x, y):
-        app.handle(slikui.mouse_move((x, y)))
-
-    def on_scroll(_w, _xoff, yoff):
-        x, y = glfw.get_cursor_pos(win)
-        app.handle(slikui.scroll((x, y), (0.0, yoff)))
-
-    def on_key(_w, key, _sc, action, mods):
-        if key in KEY_MAP and action in (glfw.PRESS, glfw.RELEASE):
-            e = (slikui.key_press(KEY_MAP[key], mods) if action == glfw.PRESS
-                 else slikui.key_release(KEY_MAP[key], mods))
-            app.handle(e)
-
-    def on_char(_w, cp):
-        app.handle(slikui.text_input(chr(cp)))
-
-    glfw.set_mouse_button_callback(win, on_button)
-    glfw.set_cursor_pos_callback(win, on_cursor)
-    glfw.set_scroll_callback(win, on_scroll)
-    glfw.set_key_callback(win, on_key)
-    glfw.set_char_callback(win, on_char)
+    # GLFW callbacks -> slikui events (all keys, both scroll axes, mapped
+    # mouse buttons), plus clipboard and cursor shapes.
+    input_ = slikui.GlfwInput(win, app)
+    slikui.glfw_input.attach_services(app.ctx, win)
 
     last, now = __import__("time").perf_counter(), 0.0
     while not glfw.window_should_close(win):
@@ -907,6 +870,7 @@ def run_interactive():
         GL.glDisable(GL.GL_BLEND)
         glfw.swap_buffers(win)
 
+    input_.close()
     glfw.destroy_window(win)
     app.close()  # release UI callbacks while the interpreter is alive
     glfw.terminate()

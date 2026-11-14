@@ -379,6 +379,35 @@ public:
         for (auto& d : dialogs_) d.widget->invalidate_tree();
     }
 
+    // --- host routing ---
+    //
+    // For hosts that share input between the UI and their own scene (a 3D
+    // viewport behind a panel): send a pointer event to the UI when
+    // wants_mouse(pos), else to the scene; keys when wants_keyboard().
+
+    // True when the UI should get a pointer event at `pos` (logical px): a
+    // drag or press is in progress in the UI (so its release must come back
+    // here), a modal dialog is open, or a popup, dialog or any widget that
+    // is not mouse_transparent() lies under `pos`. Pure layout (Column, Row,
+    // Spacer) lets the pointer through to the scene.
+    bool wants_mouse(Vec2 pos) {
+        if (mouse_capture_ || topmost_modal()) return true;
+        for (Widget* t : press_target_)
+            if (t) return true;
+        for (auto& d : dialogs_)
+            if (hit_test_in(*d.widget, pos)) return true;
+        for (auto& p : popups_)
+            if (hit_test_in(*p.widget, pos)) return true;
+        if (!root_) return false;
+        for (Widget* w = hit_test_in(*root_, pos); w; w = w->parent)
+            if (!w->mouse_transparent()) return true;
+        return false;
+    }
+
+    // True when the UI should get key events: a widget has keyboard focus
+    // (text field, slider, ...) or a modal dialog is open.
+    bool wants_keyboard() const { return focused_ != nullptr || topmost_modal() != nullptr; }
+
     // --- mouse capture ---
 
     // While captured, all mouse move/press/release events go to `w`, even

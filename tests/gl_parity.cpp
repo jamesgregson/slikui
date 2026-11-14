@@ -13,7 +13,14 @@
 #include "slikui/text/default_font.hpp"
 #include "slikui/widgets/all.hpp"
 
+// The GL context comes from GLFW, or from slikui's SdlWindow when built
+// with SLIKUI_PARITY_SDL (ctest slikui_sdl_gl_parity) — same checks, so
+// both backends' contexts are covered.
+#ifdef SLIKUI_PARITY_SDL
+#include "slikui/backends/sdl/sdl_window.hpp"
+#else
 #include <GLFW/glfw3.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -236,6 +243,14 @@ int main(int argc, char** argv) {
     for (int i = 1; i + 1 < argc; ++i)
         if (std::strcmp(argv[i], "--dump") == 0) dump = argv[i + 1];
 
+#ifdef SLIKUI_PARITY_SDL
+    sdl::SdlWindow win(64, 64, "slikui gl parity (SDL)", SDL_WINDOW_HIDDEN);
+    if (!win.ok()) {
+        std::printf("SKIP no SDL GL 3.3 core context: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 0;
+    }
+#else
     if (!glfwInit()) {
         std::printf("SKIP no display / glfwInit failed\n");
         return 0;
@@ -252,6 +267,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     glfwMakeContextCurrent(win);
+#endif
     std::printf("GL: %s\n", (const char*)glGetString(GL_RENDERER));
 
     const Spec specs[] = {
@@ -264,7 +280,11 @@ int main(int argc, char** argv) {
     for (const Spec& spec : specs)
         for (float scale : {1.f, 2.f}) ok = run(spec, scale, dump) && ok;
 
+#ifdef SLIKUI_PARITY_SDL
+    // SdlWindow cleans up its window + context; SDL_Quit is the app's.
+#else
     glfwDestroyWindow(win);
     glfwTerminate();
+#endif
     return ok ? 0 : 1;
 }

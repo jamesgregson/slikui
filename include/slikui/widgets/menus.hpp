@@ -416,6 +416,7 @@ public:
     }
 
     const char* widget_type() const override { return "MenuBar"; }
+    bool mouse_transparent() const override { return false; } // paints a bar
 
     // Implementation detail, public only so Widget::add<MenuButton> can
     // instantiate (nested-private classes are inaccessible in the template).

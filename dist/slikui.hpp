@@ -635,6 +635,7 @@ private:
 //
 //   1. upload(): create/replace a texture (font atlas, images)
 //   2. render(): execute a DrawList for this frame
+//   3. release(): optional — a texture id will never be drawn again
 //
 // slikui ships two sinks: SoftwareSink (raw uint32_t pixels) and, with an
 // OpenGL context, OpenglSink. Anything else — Vulkan, Metal, SDL_Renderer —
@@ -660,7 +661,325 @@ public:
     virtual ~IRenderSink() = default;
     virtual void upload(const TexUpload&) = 0;
     virtual void render(const DrawList&, Vec2 framebuffer_size) = 0;
+
+    // The widget that owned texture `id` was destroyed: free its storage.
+    // Ids are never reused, so a sink that ignores this only leaks memory.
+    // May be called outside render() — e.g. from Context::clear_tree() — so
+    // a GPU sink without a current context should defer the delete to its
+    // next render(). Never called from ~Context (the sink frees everything
+    // it still holds when it is itself destroyed).
+    virtual void release(std::uint32_t /*id*/) {}
 };
+
+} // namespace slikui
+
+
+// ============================================================================
+// slikui/render/batcher.hpp
+// ============================================================================
+// slikui/render/batcher.hpp — GpuBatcher: DrawList -> GPU-ready arrays.
+//
+// API-agnostic (no GL/Vulkan/Metal headers). Turns a frame's DrawList into
+//
+//   instances  one GpuInstance per drawable command (20 floats), meant to be
+//              drawn as an instanced 4-vertex triangle strip;
+//   batches    runs of instances sharing one scissor rect and one texture.
+//
+// so a GPU sink is: upload `instances` once, then per batch set the scissor,
+// bind the texture, draw `count` instances from `first`. OpenglSink uses it,
+// and the Python bindings expose it zero-copy (slikui.GpuBatcher), so a
+// Python sink costs one buffer upload + one draw call per batch rather than
+// per command.
+//
+// The reference GLSL 330 shaders (kGpuVertexShader / kGpuFragmentShader)
+// reproduce the software rasterizer's coverage math: SDF rounded rects and
+// borders, capsule lines, bilinear Alpha8 glyphs, Rgba8 images.
+//
+// Coordinates: instances stay in LOGICAL px (the shader multiplies by
+// u_scale); scissor rects are FRAMEBUFFER px with a bottom-left origin
+// (ready for glScissor), using the same pixel-inclusion rule as the
+// software sink (pixel X is inside when ceil(x0) <= X < ceil(x1)).
+
+// (already included above: slikui/render/draw_list.hpp)
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <vector>
+
+namespace slikui {
+
+// Shape kinds (GpuInstance::shape[0]).
+enum class GpuKind : int { Rect = 0, Glyph = 1, Image = 2, Line = 3 };
+
+// One drawable command. Attribute order = vertex shader locations 0..4.
+struct GpuInstance {
+    float rect[4];  // x, y, w, h — quad bounds, logical px (Line: capsule bbox)
+    float color[4]; // r, g, b, a in 0..1, straight alpha
+    float uv[4];    // u0, v0, u1, v1 in TEXELS (shader divides by textureSize)
+    float shape[4]; // kind, radius, border width (0 = fill), line half-thickness
+    float line[4];  // Line endpoints a.x, a.y, b.x, b.y (logical px)
+};
+static_assert(sizeof(GpuInstance) == 20 * sizeof(float));
+
+// A run of instances drawn with one scissor + one texture.
+struct GpuBatch {
+    std::int32_t first;   // first instance
+    std::int32_t count;   // instance count (> 0)
+    std::int32_t tex_id;  // slikui texture id to bind; 0 = none needed
+    std::int32_t scissor[4]; // x, y, w, h in framebuffer px, bottom-left origin
+};
+static_assert(sizeof(GpuBatch) == 7 * sizeof(std::int32_t));
+
+class GpuBatcher {
+public:
+    // Rebuilds instances()/batches() for one frame. `frame` is the logical
+    // frame size handed to IRenderSink::render; `scale` maps logical px to
+    // framebuffer px. The framebuffer is int(frame * scale) pixels.
+    void build(const DrawList& list, Vec2 frame, float scale) {
+        instances_.clear();
+        batches_.clear();
+        scale_ = scale > 0 ? scale : 1.f;
+        fb_w_ = int(frame.x * scale_);
+        fb_h_ = int(frame.y * scale_);
+        clips_.assign(1, Rect{0, 0, frame.x, frame.y});
+        open_batch();
+
+        for (const auto& c : list.commands()) {
+            switch (c.type) {
+            case DrawCmd::Type::ClipPush:
+                clips_.push_back(c.rect.intersect(clips_.back()));
+                open_batch();
+                break;
+            case DrawCmd::Type::ClipPop:
+                if (clips_.size() > 1) clips_.pop_back();
+                open_batch();
+                break;
+            case DrawCmd::Type::Rect: add_rect(c); break;
+            case DrawCmd::Type::Line: add_line(c); break;
+            case DrawCmd::Type::Glyph:
+            case DrawCmd::Type::Image: add_textured(c); break;
+            }
+        }
+        close_batch();
+    }
+
+    const std::vector<GpuInstance>& instances() const { return instances_; }
+    const std::vector<GpuBatch>& batches() const { return batches_; }
+    int framebuffer_width() const { return fb_w_; }
+    int framebuffer_height() const { return fb_h_; }
+    float scale() const { return scale_; }
+
+private:
+    // --- batching ---------------------------------------------------------
+
+    // Scissor for the current clip: framebuffer px, bottom-left origin.
+    void scissor_for(const Rect& r, std::int32_t out[4]) const {
+        auto px = [&](float v, int hi) {
+            return std::clamp(int(std::ceil(v * scale_)), 0, hi);
+        };
+        int x0 = px(r.x, fb_w_), x1 = px(r.x + r.w, fb_w_);
+        int y0 = px(r.y, fb_h_), y1 = px(r.y + r.h, fb_h_);
+        out[0] = x0;
+        out[1] = fb_h_ - y1;
+        out[2] = std::max(0, x1 - x0);
+        out[3] = std::max(0, y1 - y0);
+    }
+
+    // Start a batch for the current clip. An empty open batch is reused.
+    void open_batch() {
+        if (!batches_.empty() && batches_.back().count == 0) {
+            scissor_for(clips_.back(), batches_.back().scissor);
+            batches_.back().tex_id = 0;
+            batches_.back().first = std::int32_t(instances_.size());
+            return;
+        }
+        GpuBatch b{std::int32_t(instances_.size()), 0, 0, {0, 0, 0, 0}};
+        scissor_for(clips_.back(), b.scissor);
+        batches_.push_back(b);
+    }
+
+    void close_batch() {
+        if (!batches_.empty() && batches_.back().count == 0) batches_.pop_back();
+    }
+
+    bool clip_empty() const {
+        const GpuBatch& b = batches_.back();
+        return b.scissor[2] <= 0 || b.scissor[3] <= 0;
+    }
+
+    // Conservative visibility: bounds (+1 framebuffer px of AA fringe)
+    // against the current clip.
+    bool visible(const Rect& bounds) const {
+        if (clip_empty()) return false;
+        float m = 1.f / scale_;
+        const Rect& c = clips_.back();
+        return bounds.x - m < c.x + c.w && bounds.x + bounds.w + m > c.x &&
+               bounds.y - m < c.y + c.h && bounds.y + bounds.h + m > c.y;
+    }
+
+    GpuInstance& push(const Rect& r, Color col, GpuKind kind) {
+        GpuInstance in{};
+        in.rect[0] = r.x;
+        in.rect[1] = r.y;
+        in.rect[2] = r.w;
+        in.rect[3] = r.h;
+        in.color[0] = col.r / 255.f;
+        in.color[1] = col.g / 255.f;
+        in.color[2] = col.b / 255.f;
+        in.color[3] = col.a / 255.f;
+        in.shape[0] = float(int(kind));
+        instances_.push_back(in);
+        batches_.back().count++;
+        return instances_.back();
+    }
+
+    // --- commands -----------------------------------------------------------
+
+    void add_rect(const DrawCmd& c) {
+        if (c.rect.w <= 0 || c.rect.h <= 0 || c.color.a == 0) return;
+        if (!visible(c.rect)) return;
+        GpuInstance& in = push(c.rect, c.color, GpuKind::Rect);
+        in.shape[1] = std::max(c.radius, 0.f);
+        in.shape[2] = c.hollow ? std::max(c.thickness, 0.f) : 0.f;
+        // A zero-width border draws nothing (software: inner == outer).
+        if (c.hollow && in.shape[2] <= 0) {
+            instances_.pop_back();
+            batches_.back().count--;
+        }
+    }
+
+    void add_line(const DrawCmd& c) {
+        if (c.color.a == 0 || c.thickness <= 0) return;
+        float ax = c.rect.x, ay = c.rect.y;
+        float bx = ax + c.rect.w, by = ay + c.rect.h;
+        float half = c.thickness * .5f;
+        // Capsule bounds; the vertex shader adds the AA fringe.
+        Rect bb{std::min(ax, bx) - half, std::min(ay, by) - half,
+                std::fabs(bx - ax) + 2 * half, std::fabs(by - ay) + 2 * half};
+        if (!visible(bb)) return;
+        GpuInstance& in = push(bb, c.color, GpuKind::Line);
+        in.shape[3] = half;
+        in.line[0] = ax;
+        in.line[1] = ay;
+        in.line[2] = bx;
+        in.line[3] = by;
+    }
+
+    void add_textured(const DrawCmd& c) {
+        if (c.tex_id == 0 || c.rect.w <= 0 || c.rect.h <= 0) return;
+        if (c.type == DrawCmd::Type::Glyph && (c.uv.w <= 0 || c.uv.h <= 0)) return;
+        if (c.type == DrawCmd::Type::Glyph && c.color.a == 0) return;
+        if (!visible(c.rect)) return;
+        GpuBatch* b = &batches_.back();
+        if (b->tex_id != 0 && b->tex_id != std::int32_t(c.tex_id)) {
+            open_batch();
+            b = &batches_.back();
+        }
+        b->tex_id = std::int32_t(c.tex_id);
+        GpuKind kind = c.type == DrawCmd::Type::Glyph ? GpuKind::Glyph : GpuKind::Image;
+        // Images ignore cmd.color (always white in DrawList::image).
+        Color col = kind == GpuKind::Image ? Color::white() : c.color;
+        GpuInstance& in = push(c.rect, col, kind);
+        in.uv[0] = c.uv.x;
+        in.uv[1] = c.uv.y;
+        in.uv[2] = c.uv.x + c.uv.w;
+        in.uv[3] = c.uv.y + c.uv.h;
+    }
+
+    std::vector<GpuInstance> instances_;
+    std::vector<GpuBatch> batches_;
+    std::vector<Rect> clips_;
+    float scale_ = 1.f;
+    int fb_w_ = 0, fb_h_ = 0;
+};
+
+// ---------------------------------------------------------------------------
+// Reference shaders (GLSL 330 core). Per-instance attributes at locations
+// 0..4 = GpuInstance fields, divisor 1; draw GL_TRIANGLE_STRIP, 4 vertices,
+// N instances, no vertex buffer for the corners (gl_VertexID).
+// Uniforms: u_res (framebuffer px), u_scale (logical -> fb px), u_tex (unit).
+// Blend: glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE,
+// ONE_MINUS_SRC_ALPHA) — the software sink's straight-alpha "over".
+// ---------------------------------------------------------------------------
+
+inline constexpr const char* kGpuVertexShader = R"(#version 330 core
+layout(location=0) in vec4 a_rect;
+layout(location=1) in vec4 a_color;
+layout(location=2) in vec4 a_uv;
+layout(location=3) in vec4 a_shape;
+layout(location=4) in vec4 a_line;
+uniform vec2 u_res;
+uniform float u_scale;
+out vec4 v_color;
+out vec2 v_uv;
+flat out vec4 v_rect;
+flat out vec4 v_shape;
+flat out vec4 v_line;
+void main() {
+    vec2 corner = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
+    vec4 r = a_rect * u_scale;              // framebuffer px
+    int kind = int(a_shape.x + 0.5);
+    // SDF shapes need a 1px fringe for antialiasing; textured quads map UVs
+    // exactly onto their rect.
+    float pad = (kind == 0 || kind == 3) ? 1.0 : 0.0;
+    vec2 p = r.xy - vec2(pad) + corner * (r.zw + vec2(2.0 * pad));
+    gl_Position = vec4(p.x / u_res.x * 2.0 - 1.0, 1.0 - p.y / u_res.y * 2.0, 0.0, 1.0);
+    // UV extrapolates with the padding so it stays exact inside the rect.
+    vec2 t = (p - r.xy) / max(r.zw, vec2(1e-6));
+    v_uv = mix(a_uv.xy, a_uv.zw, t);
+    v_color = a_color;
+    v_rect = r;
+    v_shape = vec4(a_shape.x, a_shape.yzw * u_scale);
+    v_line = a_line * u_scale;
+}
+)";
+
+inline constexpr const char* kGpuFragmentShader = R"(#version 330 core
+in vec4 v_color;
+in vec2 v_uv;
+flat in vec4 v_rect;
+flat in vec4 v_shape;
+flat in vec4 v_line;
+uniform vec2 u_res;
+uniform sampler2D u_tex;
+out vec4 frag;
+float sd_box(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - (b - vec2(r));
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+void main() {
+    // Pixel center in top-left-origin framebuffer px (matches software).
+    vec2 px = vec2(gl_FragCoord.x, u_res.y - gl_FragCoord.y);
+    int kind = int(v_shape.x + 0.5);
+    vec4 col = v_color;
+    float cov = 1.0;
+    if (kind == 0) {
+        vec2 half_ = v_rect.zw * 0.5;
+        vec2 p = px - (v_rect.xy + half_);
+        float radius = v_shape.y;
+        float border = v_shape.z;
+        cov = clamp(0.5 - sd_box(p, half_, radius), 0.0, 1.0);
+        if (border > 0.0) {
+            vec2 inner = max(half_ - vec2(border), vec2(0.0));
+            cov *= clamp(0.5 + sd_box(p, inner, max(radius - border, 0.0)), 0.0, 1.0);
+        }
+    } else if (kind == 3) {
+        vec2 a = v_line.xy, b = v_line.zw;
+        vec2 pa = px - a, ba = b - a;
+        float len2 = dot(ba, ba);
+        float h = len2 > 0.0 ? clamp(dot(pa, ba) / len2, 0.0, 1.0) : 0.0;
+        cov = clamp(v_shape.w + 0.5 - length(pa - ba * h), 0.0, 1.0);
+    } else {
+        vec4 s = texture(u_tex, v_uv / vec2(textureSize(u_tex, 0)));
+        if (kind == 1) cov = s.r;           // Alpha8 atlas (stored as R8)
+        else col = s;                       // Rgba8 image, straight alpha
+    }
+    float a = col.a * cov;
+    if (a <= 0.0) discard;
+    frag = vec4(col.rgb, a);
+}
+)";
 
 } // namespace slikui
 
@@ -6894,6 +7213,7 @@ public:
     int atlas_height() const { return kAtlasPage; }
     bool atlas_dirty() const { return atlas_dirty_; }
     void clear_dirty() { atlas_dirty_ = false; }
+    void mark_dirty() { atlas_dirty_ = true; }
 
 private:
     static bool is_separator(std::uint32_t) { return false; } // kerning across spaces is fine
@@ -8562,6 +8882,8 @@ float theme_scale_of(const Context* ctx);
 // Defined in context.hpp: drop every Context reference (focus, hover, mouse
 // capture, press targets) to a widget that is being destroyed.
 void context_forget(Context* ctx, const Widget* w) noexcept;
+// Defined in context.hpp: tell the context's sink a texture id is dead.
+void context_release_texture(Context* ctx, std::uint32_t id) noexcept;
 
 class Widget {
 public:
@@ -8652,6 +8974,23 @@ protected:
     virtual void attached(Context&) {}
 
 public:
+    // True for pure layout widgets that paint nothing (Column, Row, Spacer):
+    // the pointer "falls through" them to the host's scene in
+    // Context::wants_mouse. A subclass of one of those that paints must
+    // return false again (Toolbar, MenuBar do).
+    virtual bool mouse_transparent() const { return false; }
+
+protected:
+
+    // Texture-owning widgets call this from their destructor (and before
+    // dropping an id): the context's sink frees the texture. Silent when the
+    // widget is detached or its context is already gone. Zeroes `id`.
+    void release_texture(std::uint32_t& id) noexcept {
+        if (id && ctx && !ctx_alive_.expired()) context_release_texture(ctx, id);
+        id = 0;
+    }
+
+public:
     virtual const char* widget_type() const { return "Widget"; }
 
     // --- destruction protocol ---
@@ -8704,6 +9043,14 @@ public:
     void collect_tree(std::vector<TexUpload>& out) {
         collect_uploads(out);
         for (auto& c : children) c->collect_tree(out);
+    }
+
+    // The sink lost its textures (context loss, sink swap): mark every
+    // texture this widget owns dirty so the next collect re-uploads it.
+    virtual void invalidate_uploads() {}
+    void invalidate_tree() {
+        invalidate_uploads();
+        for (auto& c : children) c->invalidate_tree();
     }
 
     // --- state ---
@@ -9125,6 +9472,51 @@ public:
 
     std::uint32_t next_texture_id() { return next_tex_id_++; }
 
+    // A texture id will never be drawn again (its owning widget died):
+    // forwards to IRenderSink::release so the sink can free it.
+    void release_texture(std::uint32_t id) {
+        if (sink_ && id) sink_->release(id);
+    }
+
+    // The sink lost every texture it held (GPU context lost or recreated,
+    // sink reset): re-upload the font atlas and every live widget texture
+    // on the next render().
+    void invalidate_textures() {
+        font_.mark_dirty();
+        if (root_) root_->invalidate_tree();
+        for (auto& p : popups_) p.widget->invalidate_tree();
+        for (auto& d : dialogs_) d.widget->invalidate_tree();
+    }
+
+    // --- host routing ---
+    //
+    // For hosts that share input between the UI and their own scene (a 3D
+    // viewport behind a panel): send a pointer event to the UI when
+    // wants_mouse(pos), else to the scene; keys when wants_keyboard().
+
+    // True when the UI should get a pointer event at `pos` (logical px): a
+    // drag or press is in progress in the UI (so its release must come back
+    // here), a modal dialog is open, or a popup, dialog or any widget that
+    // is not mouse_transparent() lies under `pos`. Pure layout (Column, Row,
+    // Spacer) lets the pointer through to the scene.
+    bool wants_mouse(Vec2 pos) {
+        if (mouse_capture_ || topmost_modal()) return true;
+        for (Widget* t : press_target_)
+            if (t) return true;
+        for (auto& d : dialogs_)
+            if (hit_test_in(*d.widget, pos)) return true;
+        for (auto& p : popups_)
+            if (hit_test_in(*p.widget, pos)) return true;
+        if (!root_) return false;
+        for (Widget* w = hit_test_in(*root_, pos); w; w = w->parent)
+            if (!w->mouse_transparent()) return true;
+        return false;
+    }
+
+    // True when the UI should get key events: a widget has keyboard focus
+    // (text field, slider, ...) or a modal dialog is open.
+    bool wants_keyboard() const { return focused_ != nullptr || topmost_modal() != nullptr; }
+
     // --- mouse capture ---
 
     // While captured, all mouse move/press/release events go to `w`, even
@@ -9335,6 +9727,7 @@ private:
         uploads_.clear();
         if (root_) root_->collect_tree(uploads_);
         for (auto& p : popups_) p.widget->collect_tree(uploads_);
+        for (auto& d : dialogs_) d.widget->collect_tree(uploads_);
         for (const auto& up : uploads_) sink_->upload(up);
     }
 
@@ -9539,6 +9932,12 @@ inline float theme_scale_of(const Context* ctx) {
 // Called from ~Widget (Context is complete here).
 inline void context_forget(Context* ctx, const Widget* w) noexcept {
     if (ctx) ctx->forget(w);
+}
+
+// noexcept: runs from widget destructors. A sink's release() must not throw
+// (the Python trampoline reports Python exceptions as unraisable).
+inline void context_release_texture(Context* ctx, std::uint32_t id) noexcept {
+    if (ctx) ctx->release_texture(id);
 }
 
 // Minimal text widget for tooltip popups. Lives in this header (not
@@ -9898,6 +10297,7 @@ public:
     }
 
     const char* widget_type() const override { return "Column"; }
+    bool mouse_transparent() const override { return true; }
 };
 
 // Stacks children horizontally.
@@ -9946,6 +10346,7 @@ public:
     }
 
     const char* widget_type() const override { return "Row"; }
+    bool mouse_transparent() const override { return true; }
 };
 
 // Decorated container: background, border, padding, stacking like a Column.
@@ -10011,6 +10412,7 @@ public:
     Size measure(const Constraints&) override { return {0, 0}; }
     bool expands_main() const override { return true; }
     const char* widget_type() const override { return "Spacer"; }
+    bool mouse_transparent() const override { return true; }
 };
 
 // Thin separator line.
@@ -21757,7 +22159,15 @@ public:
         return c.clamp(size_.w > 0 ? size_ : Size{float(w_), float(h_)});
     }
 
-    void attached(Context& c) override { tex_id_ = c.next_texture_id(); }
+    ~Image() override { release_texture(tex_id_); }
+
+    // A fresh id per context: mark pixels dirty so the new sink gets them.
+    void attached(Context& c) override {
+        tex_id_ = c.next_texture_id();
+        dirty_ = !pixels_.empty();
+    }
+
+    void invalidate_uploads() override { dirty_ = !pixels_.empty(); }
 
     void paint(const PaintEnv& env) const override {
         if (w_ <= 0 || h_ <= 0) return;
@@ -22215,6 +22625,7 @@ public:
     }
 
     const char* widget_type() const override { return "MenuBar"; }
+    bool mouse_transparent() const override { return false; } // paints a bar
 
     // Implementation detail, public only so Widget::add<MenuButton> can
     // instantiate (nested-private classes are inaccessible in the template).
@@ -22508,6 +22919,7 @@ public:
     }
 
     const char* widget_type() const override { return "Toolbar"; }
+    bool mouse_transparent() const override { return false; } // paints a bar
 
     class LabelCell : public Column {
     public:
@@ -23138,7 +23550,15 @@ public:
     float zoom() const { return zoom_; }
     Vec2 pan() const { return pan_; }
 
-    void attached(Context& c) override { tex_id_ = c.next_texture_id(); }
+    ~ImageView() override { release_texture(tex_id_); }
+
+    // A fresh id per context: mark pixels dirty so the new sink gets them.
+    void attached(Context& c) override {
+        tex_id_ = c.next_texture_id();
+        dirty_ = !pixels_.empty();
+    }
+
+    void invalidate_uploads() override { dirty_ = !pixels_.empty(); }
 
     Size measure(const Constraints& c) override { return c.clamp({200.f, 150.f}); }
     bool expands_main() const override { return true; }
@@ -23259,9 +23679,21 @@ public:
     }
     float fraction() const { return fraction_; }
 
+    ~CompareView() override {
+        release_texture(tex_a_);
+        release_texture(tex_b_);
+    }
+
+    // Fresh ids per context: mark both slots dirty so the new sink gets them.
     void attached(Context& c) override {
         tex_a_ = c.next_texture_id();
         tex_b_ = c.next_texture_id();
+        invalidate_uploads();
+    }
+
+    void invalidate_uploads() override {
+        a_.dirty = !a_.px.empty();
+        b_.dirty = !b_.px.empty();
     }
 
     Size measure(const Constraints& c) override { return c.clamp({220.f, 140.f}); }
@@ -23368,6 +23800,7 @@ private:
 // (already included above: slikui/render/sink.hpp)
 // (already included above: slikui/render/draw_list.hpp)
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <unordered_map>
@@ -23480,6 +23913,11 @@ public:
                                      (up.format == TexFormat::Rgba8 ? 4 : 1));
     }
 
+    void release(std::uint32_t id) override { textures_.erase(id); }
+
+    // Number of textures currently held (tests, leak checks).
+    std::size_t texture_count() const { return textures_.size(); }
+
     void render(const DrawList& list, Vec2 framebuffer_size) override {
         (void)framebuffer_size;
         clips_.assign(1, Rect{0, 0, float(target_->width()), float(target_->height())});
@@ -23580,12 +24018,10 @@ public:
     void draw_glyph(const DrawCmd& cmd) {
         auto* tex = find(cmd.tex_id);
         if (!tex || cmd.uv.empty()) return;
-        Rect clip = clips_.back().intersect(cmd.rect);
-        // Fully clipped: the loop below would still visit row int(clip.y)
-        // when clip.y is fractional, painting a sliver outside the clip.
-        if (clip.empty()) return;
-        for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
-            for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
+        int x0, x1, y0, y1;
+        if (!quad_pixels(cmd.rect, x0, x1, y0, y1)) return;
+        for (int y = y0; y < y1; ++y) {
+            for (int x = x0; x < x1; ++x) {
                 float fx = float(x) + .5f, fy = float(y) + .5f;
                 float u = cmd.uv.x + (fx - cmd.rect.x) / cmd.rect.w * cmd.uv.w;
                 float v = cmd.uv.y + (fy - cmd.rect.y) / cmd.rect.h * cmd.uv.h;
@@ -23601,10 +24037,10 @@ public:
     void draw_image(const DrawCmd& cmd) {
         auto* tex = find(cmd.tex_id);
         if (!tex) return;
-        Rect clip = clips_.back().intersect(cmd.rect);
-        if (clip.empty()) return; // see draw_glyph
-        for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
-            for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
+        int x0, x1, y0, y1;
+        if (!quad_pixels(cmd.rect, x0, x1, y0, y1)) return;
+        for (int y = y0; y < y1; ++y) {
+            for (int x = x0; x < x1; ++x) {
                 float u = cmd.uv.x + (float(x) + .5f - cmd.rect.x) / cmd.rect.w * cmd.uv.w;
                 float v = cmd.uv.y + (float(y) + .5f - cmd.rect.y) / cmd.rect.h * cmd.uv.h;
                 Color s = tex->fmt == TexFormat::Rgba8
@@ -23613,6 +24049,22 @@ public:
                 blend_at(x, y, s);
             }
         }
+    }
+
+    // Pixels a textured quad covers: pixel (x, y) is drawn when its CENTER
+    // lies inside `quad` (x + .5 in [quad.x, quad.right)) and its index lies
+    // inside the current clip (x in [clip.x, clip.right)), the same rule as
+    // a GPU rasterizer plus glScissor. Looping from int(quad.x) instead
+    // painted the row/column whose center is outside a fractional quad,
+    // sampling past the glyph's atlas cell (stray dots from the neighbour).
+    // Returns false when nothing is covered. Ranges are [x0, x1), [y0, y1).
+    bool quad_pixels(const Rect& quad, int& x0, int& x1, int& y0, int& y1) const {
+        const Rect& clip = clips_.back();
+        x0 = std::max(int(std::ceil(quad.x - .5f)), int(std::ceil(clip.x)));
+        x1 = std::min(int(std::ceil(quad.right() - .5f)), int(std::ceil(clip.right())));
+        y0 = std::max(int(std::ceil(quad.y - .5f)), int(std::ceil(clip.y)));
+        y1 = std::min(int(std::ceil(quad.bottom() - .5f)), int(std::ceil(clip.bottom())));
+        return x0 < x1 && y0 < y1;
     }
 
     void blend_at(int x, int y, Color c) {
@@ -23652,14 +24104,22 @@ private:
 // OpenGL.framework directly; Linux uses the glvnd/libGL dev headers with
 // GL_GLEXT_PROTOTYPES. If they're missing, install them (see #error below).
 //
-// Batches the DrawList into quads with an SDF fragment shader providing
-// rounded corners, borders and capsule lines with antialiasing.
-// Clipping maps to glScissor. Setup:
+// GpuBatcher (render/batcher.hpp) turns the DrawList into one instance per
+// command plus scissor/texture batches; this sink uploads the instances once
+// per frame and issues one instanced draw per batch. The SDF fragment shader
+// gives rounded corners, borders and capsule lines their antialiasing.
+// Setup:
 //
 //   slikui::opengl::OpenglSink sink;
 //   sink.init();                      // compiles shaders, creates VAO/VBO
 //   slikui::Context ctx(sink);
+//
+// GL state: render() sets viewport, program, VAO, texture unit 0, blending
+// (straight-alpha over) and scissor, and disables depth test, culling and
+// stencil test. It leaves them that way; reset what your next pass needs.
+// It draws into whatever framebuffer is bound.
 
+// (already included above: slikui/render/batcher.hpp)
 // (already included above: slikui/render/sink.hpp)
 
 #if defined(__APPLE__)
@@ -23677,7 +24137,7 @@ Linux: sudo apt install libgl-dev (or the libglvnd equivalent for your distro). 
 Windows: install libgl/glext headers or use the software backend."
 #endif
 
-#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <unordered_map>
@@ -23685,23 +24145,17 @@ Windows: install libgl/glext headers or use the software backend."
 
 namespace slikui::opengl {
 
-// One vertex: pos + color + uv + tex-kind + SDF params (15 floats).
-struct Vertex {
-    float pos[2];
-    float col[4];
-    float uv[2];
-    float tex;      // 0 flat, 1 alpha8 atlas, 2 rgba image
-    float center[2];
-    float half[2];
-    float params[4]; // radius, border, dir.x, dir.y
-};
-
 class OpenglSink : public IRenderSink {
 public:
+    // Needs a current GL 3.3 core context. Returns false on shader failure.
     bool init() {
-        GLuint vs = compile(GL_VERTEX_SHADER, kVertexSrc);
-        GLuint fs = compile(GL_FRAGMENT_SHADER, kFragmentSrc);
-        if (!vs || !fs) return false;
+        GLuint vs = compile(GL_VERTEX_SHADER, kGpuVertexShader);
+        GLuint fs = compile(GL_FRAGMENT_SHADER, kGpuFragmentShader);
+        if (!vs || !fs) {
+            if (vs) glDeleteShader(vs);
+            if (fs) glDeleteShader(fs);
+            return false;
+        }
         program_ = glCreateProgram();
         glAttachShader(program_, vs);
         glAttachShader(program_, fs);
@@ -23710,203 +24164,143 @@ public:
         glDeleteShader(fs);
         GLint linked = GL_FALSE;
         glGetProgramiv(program_, GL_LINK_STATUS, &linked);
-        if (!linked) return false;
+        if (!linked) {
+            glDeleteProgram(program_);
+            program_ = 0;
+            return false;
+        }
 
         glGenVertexArrays(1, &vao_);
         glBindVertexArray(vao_);
         glGenBuffers(1, &vbo_);
         glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+        // Five vec4 per-instance attributes = the GpuInstance fields.
+        for (GLuint i = 0; i < 5; ++i) {
+            glEnableVertexAttribArray(i);
+            glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, sizeof(GpuInstance),
+                                  (const void*)(std::uintptr_t)(i * 4 * sizeof(float)));
+            glVertexAttribDivisor(i, 1);
+        }
+        glBindVertexArray(0);
 
-        auto attr = [&](GLuint index, GLint size, int float_offset) {
-            glEnableVertexAttribArray(index);
-            glVertexAttribPointer(index, size, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                                  (const void*)(std::intptr_t)(float_offset * 4));
-        };
-        attr(0, 2, 0);            // pos
-        attr(1, 4, 2);            // color
-        attr(2, 2, 6);            // uv
-        attr(3, 1, 8);            // tex kind
-        attr(4, 2, 9);            // center
-        attr(5, 2, 11);           // half extents
-        attr(6, 4, 13);           // params
-
-        glUseProgram(program_);
         u_res_ = glGetUniformLocation(program_, "u_res");
         u_scale_ = glGetUniformLocation(program_, "u_scale");
         u_tex_ = glGetUniformLocation(program_, "u_tex");
         return true;
     }
 
+    // Frees every GL object. Needs the same context current as init().
+    void shutdown() {
+        flush_deletes();
+        // GL defers deleting a program that is still current: unbind ours.
+        GLint current = 0;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &current);
+        if (program_ && GLuint(current) == program_) glUseProgram(0);
+        for (auto& [id, t] : textures_)
+            if (t) glDeleteTextures(1, &t);
+        textures_.clear();
+        if (vbo_) glDeleteBuffers(1, &vbo_);
+        if (vao_) glDeleteVertexArrays(1, &vao_);
+        if (program_) glDeleteProgram(program_);
+        vbo_ = vao_ = program_ = 0;
+        vbo_capacity_ = 0;
+    }
+
     // Logical px -> framebuffer px (HiDPI). DrawList coordinates are logical.
     void set_scale(float s) { scale_ = s; }
+    float scale() const { return scale_; }
 
     void upload(const TexUpload& up) override {
-        GLuint tex = 0;
-        auto& info = textures_[up.id];
-        if (info.tex == 0) glGenTextures(1, &tex);
-        else tex = info.tex;
-        info.tex = tex;
-        info.w = up.width;
-        info.h = up.height;
-
+        GLuint& tex = textures_[up.id];
+        if (tex == 0) glGenTextures(1, &tex);
         glBindTexture(GL_TEXTURE_2D, tex);
-        GLint internal = up.format == TexFormat::Rgba8 ? GL_RGBA8 : GL_R8;
-        GLenum fmt = up.format == TexFormat::Rgba8 ? GL_RGBA : GL_RED;
-        glTexImage2D(GL_TEXTURE_2D, 0, internal, up.width, up.height, 0, fmt,
-                     GL_UNSIGNED_BYTE, up.pixels);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // R8 rows are tightly packed
+        bool rgba = up.format == TexFormat::Rgba8;
+        glTexImage2D(GL_TEXTURE_2D, 0, rgba ? GL_RGBA8 : GL_R8, up.width, up.height, 0,
+                     rgba ? GL_RGBA : GL_RED, GL_UNSIGNED_BYTE, up.pixels);
+        // Same sampling as the software sink: bilinear glyph coverage,
+        // nearest-neighbour images.
+        GLint filter = rgba ? GL_NEAREST : GL_LINEAR;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
+    // May run without a current GL context (Context::clear_tree at
+    // shutdown), so the delete waits for the next render() or shutdown().
+    void release(std::uint32_t id) override {
+        auto it = textures_.find(id);
+        if (it == textures_.end()) return;
+        if (it->second) pending_delete_.push_back(it->second);
+        textures_.erase(it);
+    }
+
     void render(const DrawList& list, Vec2 framebuffer_size) override {
         if (!program_) return;
-        px_ = {framebuffer_size.x * scale_, framebuffer_size.y * scale_};
-        glViewport(0, 0, int(px_.x), int(px_.y));
+        flush_deletes();
+        batcher_.build(list, framebuffer_size, scale_);
+        int w = batcher_.framebuffer_width(), h = batcher_.framebuffer_height();
+        if (w <= 0 || h <= 0) return;
+
+        glViewport(0, 0, w, h);
         glUseProgram(program_);
-        glUniform1f(u_scale_, scale_);
-        glUniform2f(u_res_, px_.x, px_.y);
-        glUniform1i(u_tex_, 0); // sampler reads unit 0
+        glUniform2f(u_res_, float(w), float(h));
+        glUniform1f(u_scale_, batcher_.scale());
+        glUniform1i(u_tex_, 0);
         glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE,
+                            GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_STENCIL_TEST);
+        glEnable(GL_SCISSOR_TEST);
+        glActiveTexture(GL_TEXTURE0);
         glBindVertexArray(vao_);
-        bound_tex_ = 0; // nothing bound yet for this frame
 
-        clip_stack_.clear();
-        clip_stack_.push_back({0, 0, px_.x, px_.y});
-        apply_scissor(clip_stack_.back());
+        const auto& inst = batcher_.instances();
+        if (inst.empty()) return;
+        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+        GLsizeiptr bytes = GLsizeiptr(inst.size() * sizeof(GpuInstance));
+        if (bytes > vbo_capacity_) vbo_capacity_ = bytes + bytes / 2;
+        // Grow or orphan: fresh storage each frame, so the driver never
+        // stalls on last frame's draws.
+        glBufferData(GL_ARRAY_BUFFER, vbo_capacity_, nullptr, GL_STREAM_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, inst.data());
 
-        for (const auto& cmd : list.commands()) {
-            switch (cmd.type) {
-            case DrawCmd::Type::ClipPush:
-                flush();
-                clip_stack_.push_back(cmd.rect.intersect(clip_stack_.back()));
-                apply_scissor(clip_stack_.back());
-                break;
-            case DrawCmd::Type::ClipPop:
-                flush();
-                if (clip_stack_.size() > 1) clip_stack_.pop_back();
-                apply_scissor(clip_stack_.back());
-                break;
-            default:
-                push(cmd);
-                break;
+        GLuint bound = 0;
+        for (const GpuBatch& b : batcher_.batches()) {
+            if (b.scissor[2] <= 0 || b.scissor[3] <= 0) continue;
+            if (b.tex_id) {
+                auto it = textures_.find(std::uint32_t(b.tex_id));
+                if (it == textures_.end()) continue; // never uploaded
+                if (it->second != bound) {
+                    glBindTexture(GL_TEXTURE_2D, it->second);
+                    bound = it->second;
+                }
             }
+            glScissor(b.scissor[0], b.scissor[1], b.scissor[2], b.scissor[3]);
+            draw_instances(b.first, b.count);
         }
-        flush();
+        glBindVertexArray(0);
     }
+
+    const GpuBatcher& batcher() const { return batcher_; }
 
 private:
-    struct TextureInfo {
-        GLuint tex = 0;
-        int w = 0, h = 0;
-    };
-
-    void apply_scissor(const Rect& r) {
-        glScissor(int(r.x * scale_), int(px_.y - r.bottom() * scale_),
-                  int(r.w * scale_), int(r.h * scale_));
-        glEnable(GL_SCISSOR_TEST);
+    // GL 3.3 has no base-instance draw: re-point the attributes at `first`.
+    void draw_instances(GLint first, GLsizei count) {
+        for (GLuint i = 0; i < 5; ++i)
+            glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, sizeof(GpuInstance),
+                                  (const void*)(std::uintptr_t)(std::size_t(first) * sizeof(GpuInstance) +
+                                                                i * 4 * sizeof(float)));
+        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, count);
     }
 
-    void push(const DrawCmd& cmd) {
-        switch (cmd.type) {
-        case DrawCmd::Type::Rect:
-            quad(cmd.rect, cmd.color, cmd.radius, cmd.hollow ? cmd.thickness : 0.f,
-                 {}, {}, 0.f, nullptr);
-            break;
-        case DrawCmd::Type::Line: {
-            Vec2 a{cmd.rect.x, cmd.rect.y};
-            Vec2 b{cmd.rect.x + cmd.rect.w, cmd.rect.y + cmd.rect.h};
-            Vec2 d{b.x - a.x, b.y - a.y};
-            float len = d.length();
-            if (len <= 0) break;
-            d = d * (1.f / len);
-            // Bounding box padded by the thickness: axis-aligned lines have
-            // zero-area endpoint rects, which would rasterize nothing.
-            Rect bb{std::fmin(a.x, b.x) - cmd.thickness, std::fmin(a.y, b.y) - cmd.thickness,
-                    std::fabs(b.x - a.x) + 2 * cmd.thickness, std::fabs(b.y - a.y) + 2 * cmd.thickness};
-            quad(bb, cmd.color, std::fmax(cmd.thickness * .5f, 0.01f), 0.f,
-                 {len * .5f, cmd.thickness * .5f}, {(a.x + b.x) * .5f, (a.y + b.y) * .5f},
-                 cmd.thickness * .5f, &d);
-            break;
-        }
-        case DrawCmd::Type::Glyph:
-        case DrawCmd::Type::Image: {
-            auto it = textures_.find(cmd.tex_id);
-            if (it == textures_.end() || it->second.tex == 0) break;
-            float tw = float(it->second.w), th = float(it->second.h);
-            if (tw <= 0 || th <= 0) break;
-            // Bind the command's texture before batching it. Without this the
-            // sampler kept whatever upload() left bound — glyphs silently
-            // sampled the most recently uploaded texture (broken mosaics).
-            if (it->second.tex != bound_tex_) {
-                flush();
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, it->second.tex);
-                bound_tex_ = it->second.tex;
-            }
-            int kind = cmd.type == DrawCmd::Type::Glyph ? 1 : 2;
-            Vec2 uv0{cmd.uv.x / tw, cmd.uv.y / th};
-            Vec2 uv1{(cmd.uv.x + cmd.uv.w) / tw, (cmd.uv.y + cmd.uv.h) / th};
-            textured_quad(cmd.rect, cmd.color, uv0, uv1, kind);
-            break;
-        }
-        default:
-            break;
-        }
-    }
-
-    // Filled/rounded rect, border ring, or capsule (when dir != null).
-    void quad(const Rect& r, Color c, float radius, float border,
-              Vec2 half, Vec2 center, float end_radius, const Vec2* dir = nullptr) {
-        float dx = 0, dy = 0;
-        if (dir) {
-            dx = dir->x;
-            dy = dir->y;
-            radius = end_radius;
-        } else {
-            center = r.center();
-            half = {r.w * .5f, r.h * .5f};
-        }
-        float pr = radius, pb = border;
-        auto vert = [&](float px, float py, float u, float v) {
-            Vertex vt{{px, py},
-                      {c.r / 255.f, c.g / 255.f, c.b / 255.f, c.a / 255.f},
-                      {u, v}, 0.f, {center.x, center.y}, {half.x, half.y},
-                      {pr, pb, dx, dy}};
-            verts_.push_back(vt);
-        };
-        vert(r.x, r.y, 0, 0);
-        vert(r.right(), r.y, 1, 0);
-        vert(r.x, r.bottom(), 0, 1);
-        vert(r.right(), r.y, 1, 0);
-        vert(r.right(), r.bottom(), 1, 1);
-        vert(r.x, r.bottom(), 0, 1);
-    }
-
-    void textured_quad(const Rect& r, Color c, Vec2 uv0, Vec2 uv1, int kind) {
-        auto vert = [&](float px, float py, float u, float v) {
-            Vertex vt{{px, py},
-                      {c.r / 255.f, c.g / 255.f, c.b / 255.f, c.a / 255.f},
-                      {u, v}, float(kind), {0, 0}, {0, 0}, {0, 0, 0, 0}};
-            verts_.push_back(vt);
-        };
-        vert(r.x, r.y, uv0.x, uv0.y);
-        vert(r.right(), r.y, uv1.x, uv0.y);
-        vert(r.x, r.bottom(), uv0.x, uv1.y);
-        vert(r.right(), r.y, uv1.x, uv0.y);
-        vert(r.right(), r.bottom(), uv1.x, uv1.y);
-        vert(r.x, r.bottom(), uv0.x, uv1.y);
-    }
-
-    void flush() {
-        if (verts_.empty()) return;
-        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts_.size() * sizeof(Vertex)),
-                     verts_.data(), GL_DYNAMIC_DRAW);
-        glDrawArrays(GL_TRIANGLES, 0, GLsizei(verts_.size()));
-        verts_.clear();
+    void flush_deletes() {
+        if (pending_delete_.empty()) return;
+        glDeleteTextures(GLsizei(pending_delete_.size()), pending_delete_.data());
+        pending_delete_.clear();
     }
 
     GLuint compile(GLenum type, const char* src) {
@@ -23921,7 +24315,7 @@ private:
         GLint ok = GL_FALSE;
         glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
         if (!ok) {
-            char log[512];
+            char log[1024];
             log[0] = 0;
             glGetShaderInfoLog(s, sizeof(log), nullptr, log);
             std::fprintf(stderr, "slikui: shader compile failed: %s\n", log);
@@ -23931,107 +24325,47 @@ private:
         return s;
     }
 
-    static constexpr const char* kVertexSrc = R"(#version 330 core
-layout(location=0) in vec2 a_pos;
-layout(location=1) in vec4 a_col;
-layout(location=2) in vec2 a_uv;
-layout(location=3) in float a_tex;
-layout(location=4) in vec2 a_center;
-layout(location=5) in vec2 a_half;
-layout(location=6) in vec4 a_params; // radius, border, dir.x, dir.y
-uniform vec2 u_res;
-uniform float u_scale;
-out vec4 v_col; out vec2 v_uv; out float v_tex;
-out vec2 v_center; out vec2 v_half; out vec4 v_params; out vec2 v_pos;
-void main() {
-    v_col = a_col; v_uv = a_uv; v_tex = a_tex;
-    vec2 sp = a_pos * u_scale;
-    v_pos = sp;
-    v_center = a_center * u_scale;
-    v_half = a_half * u_scale;
-    v_params = vec4(a_params.x * u_scale, a_params.y * u_scale, a_params.zw);
-    vec2 ndc = vec2(sp.x / u_res.x * 2.0 - 1.0, 1.0 - sp.y / u_res.y * 2.0);
-    gl_Position = vec4(ndc, 0.0, 1.0);
-}
-)";
-
-    static constexpr const char* kFragmentSrc = R"(#version 330 core
-in vec4 v_col; in vec2 v_uv; in float v_tex;
-in vec2 v_center; in vec2 v_half; in vec4 v_params; in vec2 v_pos;
-uniform sampler2D u_tex;
-out vec4 frag;
-float sd_box(vec2 p, vec2 b, float r) {
-    vec2 q = abs(p) - (b - vec2(r));
-    vec2 d = max(q, 0.0);
-    return length(d) + min(max(q.x, q.y), 0.0) - r;
-}
-void main() {
-    float alpha = 1.0;
-    vec4 col = v_col;
-    float radius = v_params.x;
-    float border = v_params.y;
-    vec2 dir = v_params.zw;
-    vec2 p = v_pos - v_center;
-    if (dir.x != 0.0 || dir.y != 0.0) {
-        // capsule: rotate into line space
-        vec2 d = normalize(dir);
-        p = vec2(dot(p, d), dot(p, vec2(-d.y, d.x)));
-        float by = v_half.y;
-        vec2 q = abs(p) - vec2(max(v_half.x - by, 0.0), 0.0);
-        float dd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - by;
-        alpha *= clamp(0.5 - dd, 0.0, 1.0);
-    } else if (v_tex < 0.5) {
-        // rounded (or square, radius 0) rect with optional border band.
-        // Textured quads skip the SDF: their center/half are unused.
-        float d = sd_box(p, v_half, radius);
-        alpha *= clamp(0.5 - d, 0.0, 1.0);
-        if (border > 0.0) {
-            vec2 inner = max(v_half - vec2(border), vec2(0.0));
-            float di = sd_box(p, inner, max(radius - border, 0.0));
-            alpha *= clamp(0.5 + di, 0.0, 1.0);
-        }
-    }
-    if (v_tex > 0.5) {
-        vec4 s = texture(u_tex, v_uv);
-        if (v_tex < 1.5) alpha *= s.r;        // alpha8 atlas (glyphs)
-        else col = v_col * s;                 // rgba image
-    }
-    frag = vec4(col.rgb, col.a * alpha);
-}
-)";
-
+    GpuBatcher batcher_;
     GLuint program_ = 0, vao_ = 0, vbo_ = 0;
+    GLsizeiptr vbo_capacity_ = 0;
     GLint u_res_ = -1, u_scale_ = -1, u_tex_ = -1;
     float scale_ = 1.f;
-    Vec2 px_{}; // framebuffer px = logical * scale
-    std::unordered_map<std::uint32_t, TextureInfo> textures_;
-    std::vector<Vertex> verts_;
-    std::vector<Rect> clip_stack_;
-    GLuint bound_tex_ = 0; // texture currently bound on unit 0
+    std::unordered_map<std::uint32_t, GLuint> textures_;
+    std::vector<GLuint> pending_delete_; // released ids, deleted in render()
 };
 
 } // namespace slikui::opengl
 
 
 // ============================================================================
-// slikui/backends/glfw/glfw_window.hpp
+// slikui/backends/glfw/glfw_input.hpp
 // ============================================================================
-// slikui/backends/glfw/glfw_window.hpp — GLFW window + event translation.
+// slikui/backends/glfw/glfw_input.hpp — GLFW event translation for YOUR window.
 //
-// Optional backend: compiles only when <GLFW/glfw3.h> is available.
-// Pairs with OpenglSink:
+// Optional backend: compiles only when <GLFW/glfw3.h> is available. Nothing
+// here creates a window or touches GL. Three levels, pick one:
 //
-//   slikui::glfw::GlfwWindow win(1280, 800, "slikui demo");
-//   slikui::opengl::OpenglSink sink;   // system OpenGL (see opengl.hpp)
-//   sink.init();
-//   slikui::Context ctx(sink);
-//   while (!win.should_close()) {
-//       win.dispatch(ctx);              // poll + translate events
-//       ctx.set_frame_size(win.frame_size());
-//       ctx.tick({time, dt});
-//       ctx.render();
-//       win.swap();
-//   }
+// 1. Event builders: you own every GLFW callback and forward what you want.
+//
+//      glfwSetMouseButtonCallback(win, [](GLFWwindow* w, int b, int a, int m) {
+//          if (!my_scene_wants_it(w)) app_ctx().handle(slikui::glfw::mouse_button_event(w, b, a, m));
+//      });
+//
+// 2. GlfwInput: installs the callbacks on an existing window, CHAINING to any
+//    you installed before it (yours still run, first), and queues events.
+//    It does not use the window user pointer, so that stays yours.
+//
+//      slikui::glfw::GlfwInput input(window);      // after your own callbacks
+//      ...
+//      glfwPollEvents();
+//      input.dispatch(ctx);                          // or input.events()
+//
+// 3. GlfwWindow (glfw_window.hpp): creates the window and owns a GlfwInput.
+//
+// attach_services(ctx, window) wires the system clipboard and cursor shapes.
+//
+// Coordinates: positions are GLFW cursor coordinates (window points, the
+// logical space Context lays out in); FrameResize carries framebuffer pixels.
 
 #if defined(__has_include)
 #  if __has_include(<GLFW/glfw3.h>)
@@ -24051,9 +24385,15 @@ void main() {
 
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
+#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace slikui::glfw {
+
+// --- mapping -------------------------------------------------------------------
 
 inline Key map_key(int glfw_key) {
     switch (glfw_key) {
@@ -24140,6 +24480,17 @@ inline std::uint32_t map_mods(int glfw_mods) {
     return m;
 }
 
+// GLFW numbers buttons LEFT=0, RIGHT=1, MIDDLE=2; slikui uses MouseLeft=0,
+// MouseMiddle=1, MouseRight=2. Extra buttons (GLFW 3..7) pass through.
+inline int map_button(int glfw_button) {
+    switch (glfw_button) {
+    case GLFW_MOUSE_BUTTON_LEFT: return MouseLeft;
+    case GLFW_MOUSE_BUTTON_RIGHT: return MouseRight;
+    case GLFW_MOUSE_BUTTON_MIDDLE: return MouseMiddle;
+    default: return glfw_button;
+    }
+}
+
 // Modifier state for events whose GLFW callback carries none (cursor move,
 // scroll): read it from the key state so Shift-drag and Ctrl-wheel work.
 inline std::uint32_t current_mods(GLFWwindow* w) {
@@ -24153,6 +24504,288 @@ inline std::uint32_t current_mods(GLFWwindow* w) {
     if (down(GLFW_KEY_LEFT_SUPER, GLFW_KEY_RIGHT_SUPER)) m |= ModSuper;
     return m;
 }
+
+// --- event builders: one per GLFW callback signature ---------------------------
+//
+// Each takes the callback's own arguments and returns the slikui Event to
+// pass to Context::handle. The window argument (where present) is only
+// queried for cursor position / held modifiers.
+
+inline Event mouse_button_event(GLFWwindow* w, int button, int action, int mods) {
+    double x = 0, y = 0;
+    glfwGetCursorPos(w, &x, &y);
+    Event e{};
+    e.type = action == GLFW_PRESS ? Event::Type::MousePress : Event::Type::MouseRelease;
+    e.pos = {float(x), float(y)};
+    e.button = map_button(button);
+    e.mods = map_mods(mods);
+    return e;
+}
+
+// `last` is the previous cursor position (for delta); updated in place.
+inline Event cursor_pos_event(GLFWwindow* w, double x, double y, Vec2& last) {
+    Event e{};
+    e.type = Event::Type::MouseMove;
+    e.pos = {float(x), float(y)};
+    e.delta = {e.pos.x - last.x, e.pos.y - last.y};
+    e.mods = current_mods(w);
+    last = e.pos;
+    return e;
+}
+
+inline Event scroll_event(GLFWwindow* w, double dx, double dy) {
+    double x = 0, y = 0;
+    glfwGetCursorPos(w, &x, &y); // needed for hit-testing the wheel target
+    Event e{};
+    e.type = Event::Type::Scroll;
+    e.pos = {float(x), float(y)};
+    e.scroll = {float(dx), float(dy)};
+    e.mods = current_mods(w);
+    return e;
+}
+
+inline Event key_event(int key, int /*scancode*/, int action, int mods) {
+    Event e{};
+    // GLFW_REPEAT is a press (auto-repeat), not a release.
+    e.type = action == GLFW_RELEASE ? Event::Type::KeyRelease : Event::Type::KeyPress;
+    e.repeat = action == GLFW_REPEAT;
+    e.key = map_key(key);
+    e.mods = map_mods(mods);
+    return e;
+}
+
+inline Event char_event(unsigned int codepoint) {
+    Event e{};
+    e.type = Event::Type::TextInput;
+    e.codepoint = codepoint;
+    return e;
+}
+
+// Framebuffer size in PIXELS (glfwSetFramebufferSizeCallback).
+inline Event framebuffer_size_event(int width, int height) {
+    Event e{};
+    e.type = Event::Type::FrameResize;
+    e.pos = {float(width), float(height)};
+    return e;
+}
+
+// Focus out becomes FocusLost (drags, hover, held keys cancel); focus in
+// has no slikui event.
+inline std::optional<Event> focus_event(int focused) {
+    if (focused) return std::nullopt;
+    Event e{};
+    e.type = Event::Type::FocusLost;
+    return e;
+}
+
+// --- host services ------------------------------------------------------------------
+
+// System clipboard + cursor shapes for `window`. Call once per Context.
+inline void attach_services(Context& ctx, GLFWwindow* window) {
+    ctx.set_clipboard_source([] {
+        const char* s = glfwGetClipboardString(nullptr);
+        return s ? std::string(s) : std::string{};
+    });
+    ctx.set_clipboard_sink([](std::string text) {
+        glfwSetClipboardString(nullptr, text.c_str());
+    });
+    // Cursor shapes → GLFW standard cursors (created lazily, shared, never
+    // destroyed: glfwTerminate frees them).
+    struct Cursors {
+        GLFWcursor* map[7] = {};
+        GLFWcursor* get(int shape, int slot) {
+            if (!map[slot]) map[slot] = glfwCreateStandardCursor(shape);
+            return map[slot];
+        }
+    };
+    static Cursors cursors;
+    ctx.set_cursor_host([window](slikui::Cursor c) {
+        int shape = GLFW_ARROW_CURSOR, slot = 0;
+        switch (c) {
+        case slikui::Cursor::IBeam: shape = GLFW_IBEAM_CURSOR; slot = 1; break;
+        case slikui::Cursor::Hand: shape = GLFW_HAND_CURSOR; slot = 2; break;
+        case slikui::Cursor::Grab: shape = GLFW_HAND_CURSOR; slot = 3; break;
+        case slikui::Cursor::Crosshair: shape = GLFW_CROSSHAIR_CURSOR; slot = 4; break;
+        case slikui::Cursor::ResizeH: shape = GLFW_HRESIZE_CURSOR; slot = 5; break;
+        case slikui::Cursor::ResizeV: shape = GLFW_VRESIZE_CURSOR; slot = 6; break;
+        default: break;
+        }
+        glfwSetCursor(window, slot == 0 ? nullptr : cursors.get(shape, slot));
+    });
+}
+
+// --- GlfwInput: callbacks on an existing window ---------------------------------------
+
+class GlfwInput {
+public:
+    // Installs slikui's callbacks on `window`, chaining to whatever callbacks
+    // were installed before (they run first, unchanged). Construct it AFTER
+    // installing your own; callbacks you install later replace slikui's
+    // (call the matching builder yourself, or re-create GlfwInput).
+    explicit GlfwInput(GLFWwindow* window) : window_(window) {
+        registry().push_back(this);
+        double x = 0, y = 0;
+        glfwGetCursorPos(window_, &x, &y);
+        last_mouse_ = {float(x), float(y)};
+        prev_.fb = glfwSetFramebufferSizeCallback(window_, &on_fb);
+        prev_.focus = glfwSetWindowFocusCallback(window_, &on_focus);
+        prev_.button = glfwSetMouseButtonCallback(window_, &on_button);
+        prev_.cursor = glfwSetCursorPosCallback(window_, &on_cursor);
+        prev_.scroll = glfwSetScrollCallback(window_, &on_scroll);
+        prev_.key = glfwSetKeyCallback(window_, &on_key);
+        prev_.chr = glfwSetCharCallback(window_, &on_char);
+    }
+
+    // Restores the callbacks that were installed before this GlfwInput.
+    ~GlfwInput() {
+        if (window_) {
+            glfwSetFramebufferSizeCallback(window_, prev_.fb);
+            glfwSetWindowFocusCallback(window_, prev_.focus);
+            glfwSetMouseButtonCallback(window_, prev_.button);
+            glfwSetCursorPosCallback(window_, prev_.cursor);
+            glfwSetScrollCallback(window_, prev_.scroll);
+            glfwSetKeyCallback(window_, prev_.key);
+            glfwSetCharCallback(window_, prev_.chr);
+        }
+        auto& r = registry();
+        r.erase(std::remove(r.begin(), r.end(), this), r.end());
+    }
+
+    GlfwInput(const GlfwInput&) = delete;
+    GlfwInput& operator=(const GlfwInput&) = delete;
+
+    // Hand every queued event to `ctx` (call after glfwPollEvents).
+    void dispatch(Context& ctx) {
+        // Swap first: a handler may pump events (modal loops) re-entrantly.
+        std::vector<Event> batch;
+        batch.swap(events_);
+        for (const auto& e : batch) ctx.handle(e);
+    }
+
+    // Queued events, for hosts that route them themselves (e.g. send mouse
+    // events to the scene unless the UI is under the cursor). Clear it after.
+    std::vector<Event>& events() { return events_; }
+
+    GLFWwindow* window() const { return window_; }
+
+    // Detach without restoring callbacks — for when the window is already
+    // destroyed (GLFW would be called with a dead handle otherwise).
+    void release_window() { window_ = nullptr; }
+
+private:
+    struct Prev {
+        GLFWframebuffersizefun fb = nullptr;
+        GLFWwindowfocusfun focus = nullptr;
+        GLFWmousebuttonfun button = nullptr;
+        GLFWcursorposfun cursor = nullptr;
+        GLFWscrollfun scroll = nullptr;
+        GLFWkeyfun key = nullptr;
+        GLFWcharfun chr = nullptr;
+    };
+
+    // window -> GlfwInput, without claiming the window user pointer.
+    static std::vector<GlfwInput*>& registry() {
+        static std::vector<GlfwInput*> r;
+        return r;
+    }
+    static GlfwInput* of(GLFWwindow* w) {
+        for (auto* in : registry())
+            if (in->window_ == w) return in;
+        return nullptr;
+    }
+
+    static void on_fb(GLFWwindow* w, int width, int height) {
+        GlfwInput* in = of(w);
+        if (!in) return;
+        if (in->prev_.fb) in->prev_.fb(w, width, height);
+        in->events_.push_back(framebuffer_size_event(width, height));
+    }
+    static void on_focus(GLFWwindow* w, int focused) {
+        GlfwInput* in = of(w);
+        if (!in) return;
+        if (in->prev_.focus) in->prev_.focus(w, focused);
+        if (auto e = focus_event(focused)) in->events_.push_back(*e);
+    }
+    static void on_button(GLFWwindow* w, int button, int action, int mods) {
+        GlfwInput* in = of(w);
+        if (!in) return;
+        if (in->prev_.button) in->prev_.button(w, button, action, mods);
+        in->events_.push_back(mouse_button_event(w, button, action, mods));
+    }
+    static void on_cursor(GLFWwindow* w, double x, double y) {
+        GlfwInput* in = of(w);
+        if (!in) return;
+        if (in->prev_.cursor) in->prev_.cursor(w, x, y);
+        in->events_.push_back(cursor_pos_event(w, x, y, in->last_mouse_));
+    }
+    static void on_scroll(GLFWwindow* w, double dx, double dy) {
+        GlfwInput* in = of(w);
+        if (!in) return;
+        if (in->prev_.scroll) in->prev_.scroll(w, dx, dy);
+        in->events_.push_back(scroll_event(w, dx, dy));
+    }
+    static void on_key(GLFWwindow* w, int key, int scancode, int action, int mods) {
+        GlfwInput* in = of(w);
+        if (!in) return;
+        if (in->prev_.key) in->prev_.key(w, key, scancode, action, mods);
+        in->events_.push_back(key_event(key, scancode, action, mods));
+    }
+    static void on_char(GLFWwindow* w, unsigned int cp) {
+        GlfwInput* in = of(w);
+        if (!in) return;
+        if (in->prev_.chr) in->prev_.chr(w, cp);
+        in->events_.push_back(char_event(cp));
+    }
+
+    GLFWwindow* window_;
+    Prev prev_;
+    Vec2 last_mouse_{};
+    std::vector<Event> events_;
+};
+
+} // namespace slikui::glfw
+
+#else
+
+// GLFW not installed: slikui still builds; only this wrapper is unavailable.
+namespace slikui::glfw {
+// Intentionally empty.
+}
+
+#endif // SLIKUI_HAS_GLFW
+
+
+// ============================================================================
+// slikui/backends/glfw/glfw_window.hpp
+// ============================================================================
+// slikui/backends/glfw/glfw_window.hpp — a ready-made GLFW window for slikui.
+//
+// Optional backend: compiles only when <GLFW/glfw3.h> is available. Creates
+// a GL 3.3 core window and owns a GlfwInput for it. Already have a window
+// (your engine, your own GLFW setup)? Use glfw_input.hpp directly: event
+// builders, GlfwInput on your GLFWwindow*, attach_services. Pairs with
+// OpenglSink:
+//
+//   slikui::glfw::GlfwWindow win(1280, 800, "slikui demo");
+//   slikui::opengl::OpenglSink sink;   // system OpenGL (see opengl.hpp)
+//   sink.init();
+//   slikui::Context ctx(sink);
+//   win.attach(ctx);                    // clipboard + cursor shapes
+//   while (!win.should_close()) {
+//       win.dispatch(ctx);              // poll + translate events
+//       ctx.set_frame_size(win.point_size());
+//       ctx.tick({time, dt});
+//       ctx.render();
+//       win.swap();
+//   }
+
+// (already included above: slikui/backends/glfw/glfw_input.hpp)
+
+#ifdef SLIKUI_HAS_GLFW
+
+#include <optional>
+
+namespace slikui::glfw {
 
 class GlfwWindow {
 public:
@@ -24175,90 +24808,30 @@ public:
         }
         // Explicit: don't rely on glfwCreateWindow's implicit context-current.
         glfwMakeContextCurrent(window_);
-        glfwSetWindowUserPointer(window_, this);
-        glfwSetFramebufferSizeCallback(window_, [](GLFWwindow* w, int width, int height) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            self->frame_ = {float(width), float(height)}; // keep cached size current
-            Event e{};
-            e.type = Event::Type::FrameResize;
-            e.pos = {float(width), float(height)};
-            self->push(e);
-        });
-        glfwSetWindowFocusCallback(window_, [](GLFWwindow* w, int focused) {
-            if (!focused) {
-                auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-                Event e{};
-                e.type = Event::Type::FocusLost;
-                self->push(e);
-            }
-        });
-        glfwSetMouseButtonCallback(window_, [](GLFWwindow* w, int button, int action, int) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            double x = 0, y = 0;
-            glfwGetCursorPos(w, &x, &y);
-            Event e{};
-            e.type = action == GLFW_PRESS ? Event::Type::MousePress : Event::Type::MouseRelease;
-            e.pos = {float(x), float(y)};
-            e.button = button;
-            self->push(e);
-        });
-        glfwSetCursorPosCallback(window_, [](GLFWwindow* w, double x, double y) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            Event e{};
-            e.type = Event::Type::MouseMove;
-            e.delta = {float(x) - self->last_mouse_.x, float(y) - self->last_mouse_.y};
-            e.pos = {float(x), float(y)};
-            e.mods = current_mods(w);
-            self->last_mouse_ = e.pos;
-            self->push(e);
-        });
-        glfwSetScrollCallback(window_, [](GLFWwindow* w, double dx, double dy) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            double x = 0, y = 0;
-            glfwGetCursorPos(w, &x, &y); // needed for hit-testing the wheel target
-            Event e{};
-            e.type = Event::Type::Scroll;
-            e.pos = {float(x), float(y)};
-            e.scroll = {float(dx), float(dy)};
-            e.mods = current_mods(w);
-            self->push(e);
-        });
-        glfwSetKeyCallback(window_, [](GLFWwindow* w, int key, int, int action, int mods) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            Event e{};
-            // GLFW_REPEAT is a press (auto-repeat), not a release.
-            e.type = action == GLFW_RELEASE ? Event::Type::KeyRelease : Event::Type::KeyPress;
-            e.repeat = action == GLFW_REPEAT;
-            e.key = map_key(key);
-            e.mods = map_mods(mods);
-            self->push(e);
-        });
-        glfwSetCharCallback(window_, [](GLFWwindow* w, unsigned int cp) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            Event e{};
-            e.type = Event::Type::TextInput;
-            e.codepoint = cp;
-            self->push(e);
-        });
-
-        int fbw = width, fbh = height;
-        glfwGetFramebufferSize(window_, &fbw, &fbh);
-        frame_ = {float(fbw), float(fbh)};
+        input_.emplace(window_);
     }
 
     ~GlfwWindow() {
+        input_.reset(); // restore callbacks while the window is still alive
         if (window_) glfwDestroyWindow(window_);
         // glfwTerminate is intentionally left to the app (single window typical).
     }
 
+    GlfwWindow(const GlfwWindow&) = delete;
+    GlfwWindow& operator=(const GlfwWindow&) = delete;
+
     bool ok() const { return !failed_ && window_; }
     bool should_close() const { return glfwWindowShouldClose(window_); }
 
+    // Poll GLFW, then hand every translated event to `ctx`.
     void dispatch(Context& ctx) {
         glfwPollEvents();
-        for (const auto& e : events_) ctx.handle(e);
-        events_.clear();
+        if (input_) input_->dispatch(ctx);
     }
+
+    // The event translator, for hosts that route events themselves:
+    //   glfwPollEvents(); for (auto& e : win.input().events()) ...; clear().
+    GlfwInput& input() { return *input_; }
 
     Vec2 frame_size() const {
         int w = 0, h = 0;
@@ -24276,7 +24849,7 @@ public:
         glfwGetWindowSize(window_, &w, &h);
         return {float(w), float(h)};
     }
-    // Logical px per framebuffer px for this window (HiDPI-aware, always
+    // Framebuffer px per logical point for this window (HiDPI-aware, always
     // current — queried from GLFW, never cached).
     float ui_scale() const {
         int fw = 0, fh = 0, ww = 0, wh = 0;
@@ -24289,67 +24862,467 @@ public:
 
     GLFWwindow* handle() { return window_; }
 
-    // Wire host services that live on the window (system clipboard). Call
-    // once after creating the Context.
-    void attach(Context& ctx) {
-        ctx.set_clipboard_source([] {
-            const char* s = glfwGetClipboardString(nullptr);
-            return s ? std::string(s) : std::string{};
-        });
-        ctx.set_clipboard_sink([](std::string text) {
-            glfwSetClipboardString(nullptr, text.c_str());
-        });
-        // Cursor shapes → GLFW standard cursors (created lazily, cached).
-        struct Cursors {
-            GLFWcursor* map[7] = {};
-            GLFWcursor* get(int shape, int slot) {
-                if (!map[slot]) map[slot] = glfwCreateStandardCursor(shape);
-                return map[slot];
-            }
-        };
-        static Cursors cursors;
-        ctx.set_cursor_host([this](slikui::Cursor c) {
-            int shape = GLFW_ARROW_CURSOR, slot = 0;
-            switch (c) {
-            case slikui::Cursor::IBeam: shape = GLFW_IBEAM_CURSOR; slot = 1; break;
-            case slikui::Cursor::Hand: shape = GLFW_HAND_CURSOR; slot = 2; break;
-            case slikui::Cursor::Grab: shape = GLFW_HAND_CURSOR; slot = 3; break;
-            case slikui::Cursor::Crosshair:
-                shape = GLFW_CROSSHAIR_CURSOR;
-                slot = 4;
-                break;
-            case slikui::Cursor::ResizeH: shape = GLFW_HRESIZE_CURSOR; slot = 5; break;
-            case slikui::Cursor::ResizeV: shape = GLFW_VRESIZE_CURSOR; slot = 6; break;
-            default: break;
-            }
-            if (slot == 0) {
-                glfwSetCursor(window_, nullptr); // default arrow
-                return;
-            }
-            glfwSetCursor(window_, cursors.get(shape, slot));
-        });
-    }
+    // Wire host services that live on the window (system clipboard, cursor
+    // shapes). Call once after creating the Context.
+    void attach(Context& ctx) { attach_services(ctx, window_); }
 
 private:
-    void push(const Event& e) { events_.push_back(e); }
-
     GLFWwindow* window_ = nullptr;
     bool failed_ = false;
-    Vec2 frame_{};
-    Vec2 last_mouse_{};
-    std::vector<Event> events_;
+    std::optional<GlfwInput> input_;
 };
 
 } // namespace slikui::glfw
 
+#endif // SLIKUI_HAS_GLFW
+
+
+// ============================================================================
+// slikui/backends/sdl/sdl_input.hpp
+// ============================================================================
+// slikui/backends/sdl/sdl_input.hpp — SDL3 event translation for YOUR window.
+//
+// Optional backend: compiles only when <SDL3/SDL.h> is available. Nothing
+// here creates a window or touches GL. SDL hands events to the app through
+// its queue (SDL_PollEvent) rather than callbacks, so the levels are:
+//
+// 1. translate(): one SDL_Event -> 0..n slikui events. You own the loop and
+//    forward what the UI should see.
+//
+//      SDL_Event ev;
+//      std::vector<slikui::Event> out;
+//      while (SDL_PollEvent(&ev)) {
+//          out.clear();
+//          slikui::sdl::translate(ev, out);
+//          bool pointer = ev.type >= SDL_EVENT_MOUSE_MOTION && ev.type <= SDL_EVENT_MOUSE_WHEEL;
+//          if (out.empty() || (pointer && !ctx.wants_mouse(out[0].pos))) my_scene(ev);
+//          else for (auto& e : out) ctx.handle(e);
+//      }
+//
+// 2. SdlInput: bound to one window — filters by window id, enables SDL text
+//    input on it, and queues events.
+//
+//      slikui::sdl::SdlInput input(window);
+//      while (SDL_PollEvent(&ev)) { input.process(ev); my_app(ev); }
+//      input.dispatch(ctx);                          // or input.events()
+//
+// 3. SdlWindow (sdl_window.hpp): creates the window + GL context and owns an
+//    SdlInput.
+//
+// attach_services(ctx, window) wires the system clipboard and cursor shapes.
+//
+// Coordinates: SDL3 reports mouse positions in window coordinates (points),
+// the logical space Context lays out in; FrameResize carries framebuffer
+// pixels. Keys map by KEYCODE (layout-aware: Ctrl+Z follows the user's
+// keyboard layout), not by physical position.
+
+#if defined(__has_include)
+#  if __has_include(<SDL3/SDL.h>)
+#    define SLIKUI_HAS_SDL3 1
+#  endif
+#endif
+
+#ifdef SLIKUI_HAS_SDL3
+
+// (already included above: slikui/context.hpp)
+// (already included above: slikui/core/utf8.hpp)
+
+#include <SDL3/SDL.h>
+
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace slikui::sdl {
+
+// --- mapping -------------------------------------------------------------------
+
+inline Key map_key(SDL_Keycode k) {
+    switch (k) {
+    case SDLK_RETURN:
+    case SDLK_KP_ENTER: return Key::Enter;
+    case SDLK_TAB: return Key::Tab;
+    case SDLK_BACKSPACE: return Key::Backspace;
+    case SDLK_DELETE: return Key::Delete;
+    case SDLK_ESCAPE: return Key::Escape;
+    case SDLK_SPACE: return Key::Space;
+    case SDLK_APOSTROPHE: return Key::Apostrophe;
+    case SDLK_COMMA: return Key::Comma;
+    case SDLK_MINUS: return Key::Minus;
+    case SDLK_PERIOD: return Key::Period;
+    case SDLK_SLASH: return Key::Slash;
+    case SDLK_LEFT: return Key::Left;
+    case SDLK_RIGHT: return Key::Right;
+    case SDLK_UP: return Key::Up;
+    case SDLK_DOWN: return Key::Down;
+    case SDLK_HOME: return Key::Home;
+    case SDLK_END: return Key::End;
+    case SDLK_PAGEUP: return Key::PageUp;
+    case SDLK_PAGEDOWN: return Key::PageDown;
+    case SDLK_INSERT: return Key::Insert;
+    case SDLK_CAPSLOCK: return Key::CapsLock;
+    case SDLK_F1: return Key::F1;
+    case SDLK_F2: return Key::F2;
+    case SDLK_F3: return Key::F3;
+    case SDLK_F4: return Key::F4;
+    case SDLK_F5: return Key::F5;
+    case SDLK_F6: return Key::F6;
+    case SDLK_F7: return Key::F7;
+    case SDLK_F8: return Key::F8;
+    case SDLK_F9: return Key::F9;
+    case SDLK_F10: return Key::F10;
+    case SDLK_F11: return Key::F11;
+    case SDLK_F12: return Key::F12;
+    default: break;
+    }
+    // SDL3 keycodes for letters/digits are their (lowercase) characters.
+    if (k >= SDLK_A && k <= SDLK_Z) return Key(int(Key::A) + int(k - SDLK_A));
+    if (k >= SDLK_0 && k <= SDLK_9) return Key(int(Key::Num0) + int(k - SDLK_0));
+    return Key::Unknown;
+}
+
+inline std::uint32_t map_mods(SDL_Keymod m) {
+    std::uint32_t out = ModNone;
+    if (m & SDL_KMOD_SHIFT) out |= ModShift;
+    if (m & SDL_KMOD_CTRL) out |= ModCtrl;
+    if (m & SDL_KMOD_ALT) out |= ModAlt;
+    if (m & SDL_KMOD_GUI) out |= ModSuper; // Cmd / Windows key
+    return out;
+}
+
+// SDL numbers buttons from 1: LEFT=1, MIDDLE=2, RIGHT=3 (X1=4, X2=5).
+// slikui: MouseLeft=0, MouseMiddle=1, MouseRight=2; extra buttons -> 3, 4.
+inline int map_button(Uint8 sdl_button) {
+    switch (sdl_button) {
+    case SDL_BUTTON_LEFT: return MouseLeft;
+    case SDL_BUTTON_MIDDLE: return MouseMiddle;
+    case SDL_BUTTON_RIGHT: return MouseRight;
+    default: return int(sdl_button) - 1;
+    }
+}
+
+// --- translation ------------------------------------------------------------------
+
+// The SDL window an event belongs to (0 for global events such as QUIT).
+inline SDL_WindowID event_window(const SDL_Event& e) {
+    switch (e.type) {
+    case SDL_EVENT_MOUSE_MOTION: return e.motion.windowID;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP: return e.button.windowID;
+    case SDL_EVENT_MOUSE_WHEEL: return e.wheel.windowID;
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP: return e.key.windowID;
+    case SDL_EVENT_TEXT_INPUT: return e.text.windowID;
+    default:
+        if (e.type >= SDL_EVENT_WINDOW_FIRST && e.type <= SDL_EVENT_WINDOW_LAST)
+            return e.window.windowID;
+        return 0;
+    }
+}
+
+// Appends the slikui events for `e` to `out` (TEXT_INPUT can yield several:
+// one per codepoint). Returns false when slikui has no use for `e` — the
+// caller's to handle (quit, gamepads, unmapped keys, ...).
+inline bool translate(const SDL_Event& e, std::vector<Event>& out) {
+    Event s{};
+    switch (e.type) {
+    case SDL_EVENT_MOUSE_MOTION:
+        s.type = Event::Type::MouseMove;
+        s.pos = {e.motion.x, e.motion.y};
+        s.delta = {e.motion.xrel, e.motion.yrel};
+        s.mods = map_mods(SDL_GetModState());
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        s.type = e.button.down ? Event::Type::MousePress : Event::Type::MouseRelease;
+        s.pos = {e.button.x, e.button.y};
+        s.button = map_button(e.button.button);
+        s.mods = map_mods(SDL_GetModState());
+        break;
+    case SDL_EVENT_MOUSE_WHEEL: {
+        float flip = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.f : 1.f;
+        s.type = Event::Type::Scroll;
+        s.pos = {e.wheel.mouse_x, e.wheel.mouse_y};
+        s.scroll = {e.wheel.x * flip, e.wheel.y * flip};
+        s.mods = map_mods(SDL_GetModState());
+        break;
+    }
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP:
+        s.key = map_key(e.key.key);
+        if (s.key == Key::Unknown) return false;
+        s.type = e.key.down ? Event::Type::KeyPress : Event::Type::KeyRelease;
+        s.repeat = e.key.down && e.key.repeat;
+        s.mods = map_mods(e.key.mod);
+        break;
+    case SDL_EVENT_TEXT_INPUT: {
+        if (!e.text.text) return false;
+        std::string_view text(e.text.text);
+        bool any = false;
+        for (size_t i = 0; i < text.size();) {
+            Event t{};
+            t.type = Event::Type::TextInput;
+            t.codepoint = utf8_next(text, i);
+            out.push_back(t);
+            any = true;
+        }
+        return any;
+    }
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        s.type = Event::Type::FrameResize;
+        s.pos = {float(e.window.data1), float(e.window.data2)};
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        s.type = Event::Type::FocusLost;
+        break;
+    default:
+        return false;
+    }
+    out.push_back(s);
+    return true;
+}
+
+// --- host services ------------------------------------------------------------------
+
+// System clipboard + cursor shapes. SDL's clipboard and cursor are global,
+// so no window is needed. Call once per Context.
+inline void attach_services(Context& ctx) {
+    ctx.set_clipboard_source([] {
+        char* s = SDL_GetClipboardText(); // never null; "" when empty
+        std::string out = s ? std::string(s) : std::string{};
+        SDL_free(s);
+        return out;
+    });
+    ctx.set_clipboard_sink([](std::string text) { SDL_SetClipboardText(text.c_str()); });
+    // Cursor shapes → SDL system cursors (created lazily, shared, never
+    // destroyed: SDL_Quit frees them).
+    struct Cursors {
+        SDL_Cursor* map[7] = {};
+        SDL_Cursor* get(SDL_SystemCursor shape, int slot) {
+            if (!map[slot]) map[slot] = SDL_CreateSystemCursor(shape);
+            return map[slot];
+        }
+    };
+    static Cursors cursors;
+    ctx.set_cursor_host([](slikui::Cursor c) {
+        SDL_SystemCursor shape = SDL_SYSTEM_CURSOR_DEFAULT;
+        int slot = 0;
+        switch (c) {
+        case slikui::Cursor::IBeam: shape = SDL_SYSTEM_CURSOR_TEXT; slot = 1; break;
+        case slikui::Cursor::Hand: shape = SDL_SYSTEM_CURSOR_POINTER; slot = 2; break;
+        case slikui::Cursor::Grab: shape = SDL_SYSTEM_CURSOR_MOVE; slot = 3; break;
+        case slikui::Cursor::Crosshair: shape = SDL_SYSTEM_CURSOR_CROSSHAIR; slot = 4; break;
+        case slikui::Cursor::ResizeH: shape = SDL_SYSTEM_CURSOR_EW_RESIZE; slot = 5; break;
+        case slikui::Cursor::ResizeV: shape = SDL_SYSTEM_CURSOR_NS_RESIZE; slot = 6; break;
+        default: break;
+        }
+        SDL_SetCursor(slot == 0 ? SDL_GetDefaultCursor() : cursors.get(shape, slot));
+    });
+}
+
+// --- SdlInput: one window's events ------------------------------------------------------
+
+class SdlInput {
+public:
+    // Starts SDL text input on `window` (SDL3 sends TEXT_INPUT only while it
+    // is active) and stops it again on destruction.
+    explicit SdlInput(SDL_Window* window)
+        : window_(window), id_(SDL_GetWindowID(window)) {
+        SDL_StartTextInput(window_);
+    }
+    ~SdlInput() {
+        if (window_) SDL_StopTextInput(window_);
+    }
+
+    SdlInput(const SdlInput&) = delete;
+    SdlInput& operator=(const SdlInput&) = delete;
+
+    // Translate one polled event if it belongs to this window. Returns
+    // whether slikui used it (false: another window's, or not UI input).
+    bool process(const SDL_Event& e) {
+        SDL_WindowID w = event_window(e);
+        if (w != 0 && w != id_) return false;
+        return translate(e, events_);
+    }
+
+    // Hand every queued event to `ctx`.
+    void dispatch(Context& ctx) {
+        std::vector<Event> batch;
+        batch.swap(events_); // a handler may pump events re-entrantly
+        for (const auto& e : batch) ctx.handle(e);
+    }
+
+    // Queued events, for hosts that route them themselves. Clear it after.
+    std::vector<Event>& events() { return events_; }
+
+    SDL_Window* window() const { return window_; }
+    SDL_WindowID window_id() const { return id_; }
+
+    // Detach without touching SDL — for when the window is already gone.
+    void release_window() { window_ = nullptr; }
+
+private:
+    SDL_Window* window_;
+    SDL_WindowID id_;
+    std::vector<Event> events_;
+};
+
+} // namespace slikui::sdl
+
 #else
 
-// GLFW not installed: slikui still builds; only this wrapper is unavailable.
-namespace slikui::glfw {
+// SDL3 not installed: slikui still builds; only this wrapper is unavailable.
+namespace slikui::sdl {
 // Intentionally empty.
 }
 
-#endif // SLIKUI_HAS_GLFW
+#endif // SLIKUI_HAS_SDL3
+
+
+// ============================================================================
+// slikui/backends/sdl/sdl_window.hpp
+// ============================================================================
+// slikui/backends/sdl/sdl_window.hpp — a ready-made SDL3 window for slikui.
+//
+// Optional backend: compiles only when <SDL3/SDL.h> is available. Creates a
+// resizable, HiDPI-aware window with a GL 3.3 core context and owns an
+// SdlInput for it. Already have a window (your engine, your own SDL setup)?
+// Use sdl_input.hpp directly. Pairs with OpenglSink:
+//
+//   slikui::sdl::SdlWindow win(1280, 800, "slikui demo");
+//   slikui::opengl::OpenglSink sink;   // system OpenGL (see opengl.hpp)
+//   sink.init();
+//   slikui::Context ctx(sink);
+//   win.attach(ctx);                    // clipboard + cursor shapes
+//   while (!win.should_close()) {
+//       win.dispatch(ctx);              // pump + translate events
+//       sink.set_scale(win.ui_scale());
+//       ctx.set_frame_size(win.point_size());
+//       ctx.tick({time, dt});
+//       ctx.render();
+//       win.swap();
+//   }
+//
+// SdlWindow calls SDL_Init(SDL_INIT_VIDEO) if video isn't initialized yet;
+// SDL_Quit stays with the app.
+
+// (already included above: slikui/backends/sdl/sdl_input.hpp)
+
+#ifdef SLIKUI_HAS_SDL3
+
+#include <functional>
+#include <optional>
+
+namespace slikui::sdl {
+
+class SdlWindow {
+public:
+    // `extra_flags` are OR'd into SDL_CreateWindow's (e.g. SDL_WINDOW_HIDDEN
+    // for offscreen rendering, SDL_WINDOW_FULLSCREEN).
+    SdlWindow(int width, int height, const char* title, SDL_WindowFlags extra_flags = 0) {
+        if (!(SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) && !SDL_Init(SDL_INIT_VIDEO)) {
+            failed_ = true;
+            return;
+        }
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+#ifdef __APPLE__
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+#endif
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+        window_ = SDL_CreateWindow(title, width, height,
+                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                                       SDL_WINDOW_HIGH_PIXEL_DENSITY | extra_flags);
+        if (!window_) {
+            failed_ = true;
+            return;
+        }
+        gl_ = SDL_GL_CreateContext(window_);
+        if (!gl_) {
+            failed_ = true;
+            return;
+        }
+        SDL_GL_MakeCurrent(window_, gl_);
+        SDL_GL_SetSwapInterval(1); // vsync where available
+        input_.emplace(window_);
+    }
+
+    ~SdlWindow() {
+        input_.reset(); // stop text input while the window is alive
+        if (gl_) SDL_GL_DestroyContext(gl_);
+        if (window_) SDL_DestroyWindow(window_);
+    }
+
+    SdlWindow(const SdlWindow&) = delete;
+    SdlWindow& operator=(const SdlWindow&) = delete;
+
+    bool ok() const { return !failed_ && window_ && gl_; }
+
+    // Set by dispatch() on SDL_EVENT_QUIT or this window's close request.
+    bool should_close() const { return close_; }
+    void set_should_close(bool v) { close_ = v; }
+
+    // Pump SDL, translate this window's events and hand them to `ctx`.
+    // Events slikui has no use for go to on_event (if set) instead.
+    void dispatch(Context& ctx) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT ||
+                (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+                 e.window.windowID == input_->window_id()))
+                close_ = true;
+            if (!input_->process(e) && on_event) on_event(e);
+        }
+        input_->dispatch(ctx);
+    }
+
+    // Receives every polled event slikui did not use (quit, gamepads, other
+    // windows, unmapped keys).
+    std::function<void(const SDL_Event&)> on_event;
+
+    SdlInput& input() { return *input_; }
+
+    Vec2 frame_size() const {
+        int w = 0, h = 0;
+        SDL_GetWindowSizeInPixels(window_, &w, &h);
+        return {float(w), float(h)};
+    }
+
+    Vec2 point_size() const {
+        int w = 0, h = 0;
+        SDL_GetWindowSize(window_, &w, &h);
+        return {float(w), float(h)};
+    }
+
+    // Framebuffer px per logical point (HiDPI-aware, always current).
+    float ui_scale() const {
+        float d = SDL_GetWindowPixelDensity(window_);
+        return d > 0 ? d : 1.f;
+    }
+
+    void set_min_size(int w, int h) { SDL_SetWindowMinimumSize(window_, w, h); }
+
+    void swap() { SDL_GL_SwapWindow(window_); }
+
+    SDL_Window* handle() { return window_; }
+    SDL_GLContext gl_context() { return gl_; }
+
+    // Wire host services (system clipboard, cursor shapes). Call once after
+    // creating the Context.
+    void attach(Context& ctx) { attach_services(ctx); }
+
+private:
+    SDL_Window* window_ = nullptr;
+    SDL_GLContext gl_ = nullptr;
+    bool failed_ = false;
+    bool close_ = false;
+    std::optional<SdlInput> input_;
+};
+
+} // namespace slikui::sdl
+
+#endif // SLIKUI_HAS_SDL3
 
 
 // ============================================================================
@@ -24367,6 +25340,7 @@ namespace slikui::glfw {
 // (already included above: slikui/core/time.hpp)
 // (already included above: slikui/core/utf8.hpp)
 // (already included above: slikui/layout/layout.hpp)
+// (already included above: slikui/render/batcher.hpp)
 // (already included above: slikui/render/draw_list.hpp)
 // (already included above: slikui/render/sink.hpp)
 // (already included above: slikui/style/anim.hpp)

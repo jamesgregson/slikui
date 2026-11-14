@@ -380,6 +380,7 @@ struct PyWidget : slikui::Widget {
     bool stretch_cross() const override { NB_OVERRIDE(stretch_cross); }
 
     bool expands_main() const override { NB_OVERRIDE(expands_main); }
+    bool mouse_transparent() const override { NB_OVERRIDE(mouse_transparent); }
 
     bool focusable() const override { NB_OVERRIDE(focusable); }
 
@@ -1081,6 +1082,16 @@ NB_MODULE(_slikui, m) {
              nb::arg("sink"), nb::rv_policy::reference)
         .def("close_popups", &Context::close_popups)
         .def("clear_tree", &Context::clear_tree)
+        .def("wants_mouse",
+             [](Context& c, float x, float y) { return c.wants_mouse({x, y}); },
+             nb::arg("x"), nb::arg("y"),
+             "Host routing: should a pointer event at (x, y) go to the UI? True "
+             "during a UI press/drag, with a modal dialog open, or over any popup, "
+             "dialog or widget that is not mouse_transparent (Column/Row/Spacer let "
+             "the pointer through to your scene).")
+        .def("wants_keyboard", &Context::wants_keyboard,
+             "Host routing: should key events go to the UI? (a widget has focus, "
+             "or a modal dialog is open)")
         .def_prop_ro("has_popups", &Context::has_popups)
         .def_prop_ro("popup_count", &Context::popup_count)
         .def("popup",
@@ -1193,6 +1204,10 @@ NB_MODULE(_slikui, m) {
              "Use this clock, not wall time, for animation.")
         .def("stretch_cross", [](Widget& w) { return w.stretch_cross(); })
         .def("expands_main", [](Widget& w) { return w.expands_main(); })
+        .def("mouse_transparent", [](Widget& w) { return w.mouse_transparent(); },
+             "True for pure layout that paints nothing: Context.wants_mouse lets "
+             "the pointer through it to the host's scene. Override to return True "
+             "in a custom widget that only arranges children.")
         .def("focusable", [](Widget& w) { return w.focusable(); })
         .def("widget_type",
              [](Widget& w) { return std::string(w.widget_type()); })

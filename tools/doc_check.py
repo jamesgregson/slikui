@@ -44,7 +44,7 @@ CPP_EXTRAS = {
     "Constraints", "Size", "Rect", "Vec2", "Padding", "CrossMode", "Cursor",
     "Icon", "Key", "Mod", "ModCtrl", "ModShift", "ModAlt", "ModSuper",
     "IRenderSink", "DrawList", "DrawCmd", "TexUpload", "PaintEnv", "Anim",
-    "software", "opengl", "glfw", "text",
+    "software", "opengl", "glfw", "sdl", "text",
     "theme_presets", "apply_preset", "use_theme", "find_system_font",
     "shortcut_label",
 }

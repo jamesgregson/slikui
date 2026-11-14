@@ -479,12 +479,12 @@ def apply_sky(state, i):
     state.sky_zenith, state.sky_horizon, state.ground = list(z), list(h), list(g)
 
 
-def over_ui(app, panel, x, y):
-    """True when a point (logical) is over the panel or any open popup."""
-    if panel.bounds.contains(slikui.Vec2(x, y)):
-        return True
-    return any(app.ctx.popup(i).bounds.contains(slikui.Vec2(x, y))
-               for i in range(app.ctx.popup_count))
+def over_ui(app, x, y):
+    """True when the UI should get a pointer event at (x, y) (logical): over
+    the controls or hint panel, an open popup, or during a UI drag. The
+    full-window Row/Column/Spacer layout lets the pointer through to the
+    camera (Context.wants_mouse)."""
+    return app.ctx.wants_mouse(x, y)
 
 
 # ---------------------------------------------------------------------------
@@ -651,23 +651,6 @@ def draw_ui(g, app, tex_size):
     GL.glBindVertexArray(0)
 
 
-# GLFW keys we forward to slikui (popup navigation, Escape, ...).
-KEY_MAP = {
-    glfw.KEY_ESCAPE: slikui.Key.Escape, glfw.KEY_ENTER: slikui.Key.Enter,
-    glfw.KEY_TAB: slikui.Key.Tab, glfw.KEY_BACKSPACE: slikui.Key.Backspace,
-    glfw.KEY_DELETE: slikui.Key.Delete, glfw.KEY_SPACE: slikui.Key.Space,
-    glfw.KEY_LEFT: slikui.Key.Left, glfw.KEY_RIGHT: slikui.Key.Right,
-    glfw.KEY_UP: slikui.Key.Up, glfw.KEY_DOWN: slikui.Key.Down,
-    glfw.KEY_HOME: slikui.Key.Home, glfw.KEY_END: slikui.Key.End,
-    glfw.KEY_PAGE_UP: slikui.Key.PageUp, glfw.KEY_PAGE_DOWN: slikui.Key.PageDown,
-}
-BUTTON_MAP = {  # GLFW: L=0 R=1 M=2 — slikui: L=0 M=1 R=2
-    glfw.MOUSE_BUTTON_LEFT: slikui.MouseButton.MouseLeft,
-    glfw.MOUSE_BUTTON_MIDDLE: slikui.MouseButton.MouseMiddle,
-    glfw.MOUSE_BUTTON_RIGHT: slikui.MouseButton.MouseRight,
-}
-
-
 def main(argv=None):
     import argparse
 
@@ -700,7 +683,7 @@ def main(argv=None):
         fw, _ = glfw.get_framebuffer_size(win)
         ww, _ = glfw.get_window_size(win)
         app = slikui.GlApp(960, 640, scale=fw / ww if ww > 0 else 1.0)
-    panel = build_ui(app, state)
+    build_ui(app, state)
 
     # --- input routing state (slikui owns UI hits, the app owns the camera) ---
     ctl = {"dragging": False, "last": (0.0, 0.0)}
@@ -708,45 +691,49 @@ def main(argv=None):
     def pt():
         return glfw.get_cursor_pos(win)
 
-    def on_button(_w, button, action, _mods):
+    # This host owns its GLFW callbacks and routes each event: UI hits go to
+    # slikui through the slikui.glfw_input event builders (which also map
+    # GLFW's L/R/M button order to slikui's), everything else drives the
+    # camera. Hosts that don't need routing can use slikui.GlfwInput instead.
+    gi = slikui.glfw_input
+
+    def on_button(w, button, action, mods):
         x, y = pt()
-        ui = over_ui(app, panel, x, y)
+        ui = over_ui(app, x, y)
         if action == glfw.PRESS:
             if ui:
-                if button in BUTTON_MAP:
-                    app.handle(slikui.mouse_press((x, y), BUTTON_MAP[button]))
+                app.handle(gi.mouse_button_event(w, button, action, mods))
             elif button == glfw.MOUSE_BUTTON_LEFT:
                 ctl["dragging"], ctl["last"] = True, (x, y)
         elif action == glfw.RELEASE:
             if ctl["dragging"]:  # a drag owns the mouse until it ends
                 ctl["dragging"] = False
-            elif button in BUTTON_MAP:
+            else:
                 # Always deliver releases that slikui saw a press for (e.g. a
                 # slider press that slid off the panel) — slikui ignores
                 # releases it did not pair.
-                app.handle(slikui.mouse_release((x, y), BUTTON_MAP[button]))
+                app.handle(gi.mouse_button_event(w, button, action, mods))
 
-    def on_cursor(_w, x, y):
+    def on_cursor(w, x, y):
         if ctl["dragging"]:
             lx, ly = ctl["last"]
             state.yaw -= (x - lx) * 0.008
             state.pitch = max(-1.45, min(1.45, state.pitch + (y - ly) * 0.008))
             ctl["last"] = (x, y)
         else:
-            app.handle(slikui.mouse_move((x, y)))
+            app.handle(gi.cursor_pos_event(w, x, y))
 
-    def on_scroll(_w, xoff, yoff):
+    def on_scroll(w, xoff, yoff):
         x, y = pt()
-        if over_ui(app, panel, x, y):
-            app.handle(slikui.scroll((x, y), (xoff, yoff)))
+        if over_ui(app, x, y):
+            app.handle(gi.scroll_event(w, xoff, yoff))
         else:
             state.distance = max(K_MIN_DIST,
                                  min(K_MAX_DIST, state.distance * (1.0 - 0.12 * yoff)))
 
-    def on_key(_w, key, _sc, action, mods):
-        if key in KEY_MAP and action in (glfw.PRESS, glfw.RELEASE):
-            e = slikui.key_press(KEY_MAP[key], mods) if action == glfw.PRESS \
-                else slikui.key_release(KEY_MAP[key], mods)
+    def on_key(_w, key, scancode, action, mods):
+        e = gi.key_event(key, scancode, action, mods)
+        if e is not None:
             app.handle(e)
 
     glfw.set_mouse_button_callback(win, on_button)

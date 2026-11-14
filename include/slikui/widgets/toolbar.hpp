@@ -186,6 +186,7 @@ public:
     }
 
     const char* widget_type() const override { return "Toolbar"; }
+    bool mouse_transparent() const override { return false; } // paints a bar
 
     class LabelCell : public Column {
     public:

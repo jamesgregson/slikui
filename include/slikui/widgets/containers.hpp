@@ -103,6 +103,7 @@ public:
     }
 
     const char* widget_type() const override { return "Column"; }
+    bool mouse_transparent() const override { return true; }
 };
 
 // Stacks children horizontally.
@@ -151,6 +152,7 @@ public:
     }
 
     const char* widget_type() const override { return "Row"; }
+    bool mouse_transparent() const override { return true; }
 };
 
 // Decorated container: background, border, padding, stacking like a Column.
@@ -216,6 +218,7 @@ public:
     Size measure(const Constraints&) override { return {0, 0}; }
     bool expands_main() const override { return true; }
     const char* widget_type() const override { return "Spacer"; }
+    bool mouse_transparent() const override { return true; }
 };
 
 // Thin separator line.

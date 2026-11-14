@@ -32,29 +32,6 @@ out vec4 frag;
 void main(){ frag = texture(u_tex, v_uv); }
 """
 
-# GLFW key-name → slikui.Key, built lazily from glfw's constants (glfw is an
-# optional dependency): every slikui.Key name maps to KEY_<NAME>, with these
-# spellings differing.
-_GLFW_KEY_NAMES = {"PageUp": "PAGE_UP", "PageDown": "PAGE_DOWN",
-                   "CapsLock": "CAPS_LOCK", **{f"Num{d}": str(d) for d in range(10)}}
-
-
-def _key_map(glfw):
-    out = {}
-    for name in dir(slikui.Key):
-        if name.startswith("_") or name == "Unknown":
-            continue
-        code = getattr(glfw, "KEY_" + _GLFW_KEY_NAMES.get(name, name.upper()), None)
-        if isinstance(code, int):
-            out[code] = getattr(slikui.Key, name)
-    out[glfw.KEY_KP_ENTER] = slikui.Key.Enter
-    return out
-
-
-_BUTTON_MAP = {0: slikui.MouseButton.MouseLeft,
-               1: slikui.MouseButton.MouseMiddle,
-               2: slikui.MouseButton.MouseRight}
-
 # "gl" (GlApp, default) or "software" (App + texture blit); main_entry's
 # --software flag sets it before calling an example's interactive().
 RENDERER = "gl"
@@ -190,87 +167,11 @@ def _software_host(GL, build_program, lw, lh, build):
 
 def _loop(glfw, win, app, prepare, draw):
     """Input callbacks + the frame loop, shared by both renderers."""
-
-    def on_button(_w, button, action, _mods):
-        x, y = glfw.get_cursor_pos(win)
-        if button not in _BUTTON_MAP:
-            return
-        if action == glfw.PRESS:
-            app.handle(slikui.mouse_press((x, y), _BUTTON_MAP[button]))
-        elif action == glfw.RELEASE:
-            app.handle(slikui.mouse_release((x, y), _BUTTON_MAP[button]))
-
-    def held_mods():
-        # GLFW's move/scroll callbacks carry no modifiers: read key state so
-        # Shift-drag and Ctrl-wheel work.
-        mask = 0
-        for keys_, bit in (((glfw.KEY_LEFT_SHIFT, glfw.KEY_RIGHT_SHIFT), slikui.Mod.ModShift),
-                           ((glfw.KEY_LEFT_CONTROL, glfw.KEY_RIGHT_CONTROL), slikui.Mod.ModCtrl),
-                           ((glfw.KEY_LEFT_ALT, glfw.KEY_RIGHT_ALT), slikui.Mod.ModAlt),
-                           ((glfw.KEY_LEFT_SUPER, glfw.KEY_RIGHT_SUPER), slikui.Mod.ModSuper)):
-            if any(glfw.get_key(win, k) == glfw.PRESS for k in keys_):
-                mask |= int(bit)
-        return mask
-
-    def on_cursor(_w, x, y):
-        e = slikui.mouse_move((x, y))
-        e.mods = held_mods()
-        app.handle(e)
-
-    def on_scroll(_w, xoff, yoff):
-        x, y = glfw.get_cursor_pos(win)
-        e = slikui.scroll((x, y), (xoff, yoff))
-        e.mods = held_mods()
-        app.handle(e)
-
-    keys = _key_map(glfw)
-
-    def on_key(_w, key, _sc, action, mods):
-        if key not in keys:
-            return
-        if action in (glfw.PRESS, glfw.REPEAT):  # REPEAT = auto-repeat press
-            app.handle(slikui.key_press(keys[key], mods,
-                                        repeat=action == glfw.REPEAT))
-        elif action == glfw.RELEASE:
-            app.handle(slikui.key_release(keys[key], mods))
-
-    def on_focus(_w, focused):
-        if not focused:  # drags, hover and held keys cancel
-            app.handle(slikui.focus_lost())
-
-    # Cursor shapes widgets request (set_cursor) and the system clipboard.
-    shapes = {slikui.Cursor.Arrow: glfw.ARROW_CURSOR,
-              slikui.Cursor.IBeam: glfw.IBEAM_CURSOR,
-              slikui.Cursor.Hand: glfw.HAND_CURSOR,
-              slikui.Cursor.Grab: glfw.HAND_CURSOR,
-              slikui.Cursor.Crosshair: glfw.CROSSHAIR_CURSOR,
-              slikui.Cursor.ResizeH: glfw.HRESIZE_CURSOR,
-              slikui.Cursor.ResizeV: glfw.VRESIZE_CURSOR}
-    cursors = {}
-
-    def on_cursor_shape(shape):
-        kind = shapes.get(shape, glfw.ARROW_CURSOR)
-        if kind not in cursors:
-            cursors[kind] = glfw.create_standard_cursor(kind)
-        glfw.set_cursor(win, cursors[kind])
-
-    app.ctx.set_cursor_host(on_cursor_shape)
-    def clipboard_text():
-        raw = glfw.get_clipboard_string(win)  # bytes, or None when empty
-        return raw.decode("utf-8", "replace") if raw else ""
-
-    app.ctx.set_clipboard_source(clipboard_text)
-    app.ctx.set_clipboard_sink(lambda text: glfw.set_clipboard_string(win, text))
-
-    def on_char(_w, cp):
-        app.handle(slikui.text_input(chr(cp)))
-
-    glfw.set_mouse_button_callback(win, on_button)
-    glfw.set_cursor_pos_callback(win, on_cursor)
-    glfw.set_scroll_callback(win, on_scroll)
-    glfw.set_key_callback(win, on_key)
-    glfw.set_char_callback(win, on_char)
-    glfw.set_window_focus_callback(win, on_focus)
+    # slikui.GlfwInput translates GLFW callbacks into slikui events and hands
+    # them to the app as they arrive; attach_services wires clipboard and
+    # cursor shapes. The same two calls work on any GLFW window you create.
+    input_ = slikui.GlfwInput(win, app)
+    slikui.glfw_input.attach_services(app.ctx, win)
 
     import time as _time
     last = _time.perf_counter()
@@ -288,3 +189,4 @@ def _loop(glfw, win, app, prepare, draw):
         app.tick(now, dt)
         draw(fw, fh)
         glfw.swap_buffers(win)
+    input_.close()

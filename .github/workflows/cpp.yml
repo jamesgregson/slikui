@@ -74,27 +74,38 @@ jobs:
       # glfw_window.hpp compile its real body instead of self-gating to empty.
       - name: install dev headers
         run: sudo apt-get update && sudo apt-get install -y libgl-dev libglfw3-dev
+      # SDL3 headers only (the backend is header-only on our side): the
+      # oldest release slikui's SDL backend targets.
+      - name: SDL3 headers
+        run: git clone --depth 1 --branch release-3.2.0 https://github.com/libsdl-org/SDL.git /tmp/SDL3
       - name: standalone header check
         run: ./tools/check_headers.sh
         env:
           CXX: g++
+          CXXFLAGS: -I/tmp/SDL3/include
 
   # Compile-only smoke for the windowing/GL backends: they self-gate on
   # __has_include(<GLFW/glfw3.h>), so without dev headers installed they
   # silently compile to nothing and rot. Install them and force the check.
   gl-backends:
-    name: GL/GLFW backends compile (linux)
+    name: GL/GLFW/SDL backends compile (linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: install dev headers
         run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libgl1-mesa-dev
+      - name: SDL3 headers
+        run: git clone --depth 1 --branch release-3.2.0 https://github.com/libsdl-org/SDL.git /tmp/SDL3
       - name: syntax-check backend headers
         shell: bash
         run: |
           cat > /tmp/backends.cpp <<'EOF'
           #include <slikui/backends/glfw/glfw_window.hpp>
           #include <slikui/backends/opengl/opengl.hpp>
+          #include <slikui/backends/sdl/sdl_window.hpp>
+          #if !defined(SLIKUI_HAS_GLFW) || !defined(SLIKUI_HAS_SDL3)
+          #error backend headers self-gated to empty: dev headers not found
+          #endif
           int main() { return 0; }
           EOF
-          clang++ -std=c++20 -Iinclude -fsyntax-only /tmp/backends.cpp
+          clang++ -std=c++20 -Iinclude -I/tmp/SDL3/include -fsyntax-only /tmp/backends.cpp

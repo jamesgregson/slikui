@@ -16,7 +16,8 @@ include/slikui/
 └── backends/
     ├── software/    CPU rasterizer over raw uint32_t pixels
     ├── opengl/      GL 3.3 core renderer (system headers, no loader)
-    └── glfw/        optional window + event translation (guarded by __has_include)
+    ├── glfw/        optional GLFW input translation + window (guarded by __has_include)
+    └── sdl/         optional SDL3 input translation + window (guarded by __has_include)
 ```
 
 Dependency direction is strictly downward: widgets depend on render/text/style,

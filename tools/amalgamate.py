@@ -46,7 +46,10 @@ ORDER = [
     "slikui/context.hpp",
     "slikui/backends/software/software.hpp",
     "slikui/backends/opengl/opengl.hpp",
+    "slikui/backends/glfw/glfw_input.hpp",
     "slikui/backends/glfw/glfw_window.hpp",
+    "slikui/backends/sdl/sdl_input.hpp",
+    "slikui/backends/sdl/sdl_window.hpp",
     "slikui/slikui.hpp",
 ]
 
