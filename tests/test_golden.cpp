@@ -181,3 +181,39 @@ TEST(golden_glyph_never_samples_its_atlas_neighbor) {
         CHECK(clean);
     }
 }
+
+TEST(golden_textured_quad_covers_pixel_centers_only) {
+    // A glyph/image quad paints exactly the pixels whose CENTER is inside
+    // it (the GPU rule). Looping from int(x) used to paint the row/column
+    // whose center lies outside a fractional quad, sampling past the glyph's
+    // atlas cell (faint dots from the neighbouring glyph above some letters).
+    slikui::software::Target target(16, 16);
+    slikui::software::Sink sink(target);
+    std::uint8_t ink[4 * 4];
+    for (auto& a : ink) a = 255;
+    sink.upload({7, 4, 4, slikui::TexFormat::Alpha8, ink});
+
+    slikui::Color bg{0, 0, 0, 255};
+    struct Case { float x, y; int x0, x1, y0, y1; }; // expected [x0,x1) x [y0,y1)
+    const Case cases[] = {
+        {2.0f, 3.0f, 2, 6, 3, 7},   // whole pixels
+        {2.3f, 3.6f, 2, 6, 4, 8},   // centers 2.5 >= 2.3; 3.5 < 3.6 excluded
+        {2.5f, 3.5f, 2, 6, 3, 7},   // center exactly on the edge: included
+        {2.7f, 3.4f, 3, 7, 3, 7},   // 2.5 < 2.7 excluded; 6.5 < 6.7 included
+    };
+    for (const Case& c : cases) {
+        for (int y = 0; y < 16; ++y)
+            for (int x = 0; x < 16; ++x) target.at(x, y) = bg.to_abgr();
+        slikui::DrawList list;
+        list.glyph({c.x, c.y, 4, 4}, 7, {0, 0, 4, 4}, {255, 255, 255, 255});
+        sink.render(list, {16, 16});
+        bool exact = true;
+        for (int y = 0; y < 16; ++y)
+            for (int x = 0; x < 16; ++x) {
+                bool inside = x >= c.x0 && x < c.x1 && y >= c.y0 && y < c.y1;
+                bool inked = slikui::Color::from_abgr(target.at(x, y)) != bg;
+                if (inside != inked) exact = false;
+            }
+        CHECK(exact);
+    }
+}

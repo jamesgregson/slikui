@@ -3,8 +3,7 @@
 // Renders into an offscreen FBO through a hidden GLFW window and compares
 // against the CPU rasterizer. GPU float blending/sampling is not bit-exact
 // with the software sink's integer math, so the check is a per-channel
-// tolerance (see the specs in main for the limits, and why the widget scene
-// has a pixel budget). Exits 0 with "SKIP" when no GL context can be created
+// tolerance of 2/255 per channel. Exits 0 with "SKIP" when no GL context can be created
 // (headless CI).
 //
 //   slikui_gl_parity [--dump DIR]   # DIR: write gl/sw/diff PPMs for a look
@@ -30,7 +29,6 @@ using namespace slikui;
 namespace {
 
 constexpr int kEdgeError = 2;          // "matches" threshold, per channel
-constexpr double kEdgeBudget = 0.02;   // widgets: fraction allowed above it
 
 std::vector<std::uint8_t> checker(int w, int h) {
     std::vector<std::uint8_t> px(std::size_t(w) * h * 4);
@@ -114,14 +112,13 @@ void widgets_scene(IRenderSink& sink, Vec2 fr) {
 // Shapes only, straight into the sink: fractional SDF geometry, radii,
 // borders, angled lines, nested clips, an Rgba8 image. No glyphs.
 //
-// Kept off three software-sink quirks where GL is the correct one (they
+// Kept off two software-sink quirks where GL is the correct one (they
 // would dominate the diff): (1) radius-0 fills at fractional positions are
-// hard-edged from int(x), (2) glyph/image quads cover pixels from int(x)
-// even when the pixel center is outside the quad, (3) a rounded rect is
+// hard-edged from int(x), with no per-pixel clip test; (2) a rounded rect is
 // intersected with the clip BEFORE its SDF, so clipping re-rounds it. Here:
-// radius-0 fills, images and clips sit on whole pixels, clipped rounded
-// rects keep their corners inside the clip, and lines stay off the clip's
-// right/bottom edge (the software line grid paints one pixel past it).
+// radius-0 fills and clips sit on whole pixels, clipped rounded rects keep
+// their corners inside the clip, and lines stay off the clip's right/bottom
+// edge (the software line grid paints one pixel past it).
 void shapes_scene(IRenderSink& sink, Vec2 fr) {
     static const std::vector<std::uint8_t> img = checker(16, 12);
     sink.upload(TexUpload{42, 16, 12, TexFormat::Rgba8, img.data()});
@@ -147,7 +144,10 @@ void shapes_scene(IRenderSink& sink, Vec2 fr) {
     l.pop_clip();
     l.pop_clip();
     l.image({120, 110, 64, 48}, 42, {0, 0, 16, 12});
-    l.image({190, 110, 16, 12}, 42, {0, 0, 16, 12});
+    // Fractional placement exercises the pixel-center rule. (Kept off exact
+    // texel boundaries, where nearest sampling of GPU-interpolated UVs vs
+    // the CPU's exact ones is a coin toss — e.g. y = 110.5 at 2x.)
+    l.image({190.3f, 110.3f, 16, 12}, 42, {0, 0, 16, 12});
     sink.render(l, fr);
 }
 
@@ -255,15 +255,10 @@ int main(int argc, char** argv) {
     std::printf("GL: %s\n", (const char*)glGetString(GL_RENDERER));
 
     const Spec specs[] = {
-        // GL's own math: must match the CPU rasterizer to 2/255.
+        // GL's own math must match the CPU rasterizer to 2/255, text and
+        // images included (both rasterize texel quads by pixel center).
         {"shapes", shapes_scene, 260, 170, kEdgeError, 0.0},
-        // Text: the software sink's glyph quads start at int(x)/int(y), so
-        // a fractional glyph also paints the row/column whose pixel center
-        // is outside the quad, sampling the neighbouring atlas glyph (stray
-        // dots above some letters). GL rasterizes pixel centers only. With
-        // that one rule changed in software.hpp the frames match to 2/255;
-        // until then, budget those pixels.
-        {"widgets", widgets_scene, 260, 360, 255, kEdgeBudget},
+        {"widgets", widgets_scene, 260, 360, kEdgeError, 0.0},
     };
     bool ok = true;
     for (const Spec& spec : specs)

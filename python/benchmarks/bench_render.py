@@ -12,6 +12,7 @@ tree has settled. Sinks:
     py-array     Python RenderSink reading `list.as_array()` (zero-copy view)
     gl           slikui.GLSink (PyOpenGL) into an offscreen FBO, glFinish()
                  included — needs glfw + PyOpenGL + a display
+    mgl          slikui.ModernGLSink, same setup — needs moderngl
 
 Run:  python python/benchmarks/bench_render.py [--frames N] [--scale S]
 """
@@ -86,6 +87,15 @@ def _make(kind, w, h, scale):
             return None
         sink = slikui.GLSink(scale=scale).init()
         keep.append(sink)
+    elif kind == "mgl":
+        try:
+            import moderngl
+        except ImportError:
+            return None
+        if not _gl_context(pw, ph):
+            return None
+        sink = slikui.ModernGLSink(moderngl.create_context(), scale=scale).init()
+        keep.append(sink)
     else:
         raise ValueError(kind)
     ctx = Context(sink)
@@ -145,13 +155,13 @@ def bench(kind, frames, scale):
             ctx.tick((i + 3) / 60, 1 / 60)
             t0 = time.perf_counter()
             ctx.render()
-            if kind == "gl":
+            if kind in ("gl", "mgl"):
                 _GL["finish"]()  # count the GPU work, not just submission
             times.append((time.perf_counter() - t0) * 1e3)
         return times
     finally:
         ctx.clear_tree()
-        if kind == "gl":
+        if kind in ("gl", "mgl"):
             sink.shutdown()
 
 
@@ -171,7 +181,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--frames", type=int, default=30)
     ap.add_argument("--scale", type=float, default=1.0)
-    ap.add_argument("--sinks", default="cpp,canvas,py-iter,py-array,gl")
+    ap.add_argument("--sinks", default="cpp,canvas,py-iter,py-array,gl,mgl")
     args = ap.parse_args(argv)
 
     w, h = gallery.SIZE

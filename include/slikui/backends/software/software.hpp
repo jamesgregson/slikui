@@ -11,6 +11,7 @@
 #include "slikui/render/sink.hpp"
 #include "slikui/render/draw_list.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <unordered_map>
@@ -228,12 +229,10 @@ public:
     void draw_glyph(const DrawCmd& cmd) {
         auto* tex = find(cmd.tex_id);
         if (!tex || cmd.uv.empty()) return;
-        Rect clip = clips_.back().intersect(cmd.rect);
-        // Fully clipped: the loop below would still visit row int(clip.y)
-        // when clip.y is fractional, painting a sliver outside the clip.
-        if (clip.empty()) return;
-        for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
-            for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
+        int x0, x1, y0, y1;
+        if (!quad_pixels(cmd.rect, x0, x1, y0, y1)) return;
+        for (int y = y0; y < y1; ++y) {
+            for (int x = x0; x < x1; ++x) {
                 float fx = float(x) + .5f, fy = float(y) + .5f;
                 float u = cmd.uv.x + (fx - cmd.rect.x) / cmd.rect.w * cmd.uv.w;
                 float v = cmd.uv.y + (fy - cmd.rect.y) / cmd.rect.h * cmd.uv.h;
@@ -249,10 +248,10 @@ public:
     void draw_image(const DrawCmd& cmd) {
         auto* tex = find(cmd.tex_id);
         if (!tex) return;
-        Rect clip = clips_.back().intersect(cmd.rect);
-        if (clip.empty()) return; // see draw_glyph
-        for (int y = int(clip.y); y < int(std::ceil(clip.bottom())); ++y) {
-            for (int x = int(clip.x); x < int(std::ceil(clip.right())); ++x) {
+        int x0, x1, y0, y1;
+        if (!quad_pixels(cmd.rect, x0, x1, y0, y1)) return;
+        for (int y = y0; y < y1; ++y) {
+            for (int x = x0; x < x1; ++x) {
                 float u = cmd.uv.x + (float(x) + .5f - cmd.rect.x) / cmd.rect.w * cmd.uv.w;
                 float v = cmd.uv.y + (float(y) + .5f - cmd.rect.y) / cmd.rect.h * cmd.uv.h;
                 Color s = tex->fmt == TexFormat::Rgba8
@@ -261,6 +260,22 @@ public:
                 blend_at(x, y, s);
             }
         }
+    }
+
+    // Pixels a textured quad covers: pixel (x, y) is drawn when its CENTER
+    // lies inside `quad` (x + .5 in [quad.x, quad.right)) and its index lies
+    // inside the current clip (x in [clip.x, clip.right)), the same rule as
+    // a GPU rasterizer plus glScissor. Looping from int(quad.x) instead
+    // painted the row/column whose center is outside a fractional quad,
+    // sampling past the glyph's atlas cell (stray dots from the neighbour).
+    // Returns false when nothing is covered. Ranges are [x0, x1), [y0, y1).
+    bool quad_pixels(const Rect& quad, int& x0, int& x1, int& y0, int& y1) const {
+        const Rect& clip = clips_.back();
+        x0 = std::max(int(std::ceil(quad.x - .5f)), int(std::ceil(clip.x)));
+        x1 = std::min(int(std::ceil(quad.right() - .5f)), int(std::ceil(clip.right())));
+        y0 = std::max(int(std::ceil(quad.y - .5f)), int(std::ceil(clip.y)));
+        y1 = std::min(int(std::ceil(quad.bottom() - .5f)), int(std::ceil(clip.bottom())));
+        return x0 < x1 && y0 < y1;
     }
 
     void blend_at(int x, int y, Color c) {

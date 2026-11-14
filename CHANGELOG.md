@@ -25,8 +25,11 @@
   software sink (~55 ms for `CanvasSink`). Also `slikui.GpuBatcher`,
   `GpuKind`, `GPU_VERTEX_SHADER` / `GPU_FRAGMENT_SHADER`,
   `read_framebuffer()`.
+- Python: **`slikui.ModernGLSink`** — the same sink over a
+  `moderngl.Context` (~0.36 ms/frame on the gallery).
 - `tests/gl_parity.cpp` (ctest `slikui_gl_parity`, built when GLFW is
-  found; skips without a display): `OpenglSink` vs software sink offscreen.
+  found; skips without a display): `OpenglSink` vs software sink offscreen,
+  2/255 per channel.
 - `python/benchmarks/bench_render.py`: ms/frame per sink on the gallery.
 
 ### Changed
@@ -45,6 +48,12 @@
 
 ### Fixes
 
+- **Software sink (and `CanvasSink`): glyph/image quads cover pixels by
+  center.** They looped from `int(x)`/`int(y)`, so a fractionally placed
+  glyph also painted the row/column whose center lies outside it, sampling
+  past its atlas cell — faint dots from the neighbouring glyph above some
+  letters ("Ġ", "Ċ"). Text now matches the GPU sinks to 2/255. Text pixels
+  at glyph edges shift slightly in software output.
 - Images inside a `Dialog` are now uploaded (dialogs were skipped when
   collecting texture uploads, so they drew nothing).
 - A texture widget moved to another `Context` re-uploads its pixels under

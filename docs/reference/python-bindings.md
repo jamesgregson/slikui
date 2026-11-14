@@ -158,10 +158,25 @@ software sink, before that path's texture upload
   `Target.pixels()` layout (tests, screenshots).
 - `--window` examples use `GlApp`; add `--software` for the CPU path.
 
+**moderngl hosts**: `slikui.ModernGLSink(mgl_ctx, scale=...)` is the same
+sink over a `moderngl.Context` (`pip install moderngl`) — lower per-call
+overhead than PyOpenGL (~0.36 ms/frame on the gallery vs ~0.6 ms). It draws
+into `mgl_ctx.fbo` and leaves `enable_only(BLEND)` in effect; wrap the call
+in `mgl_ctx.scope(...)` to keep your own state.
+
+```python
+sink = slikui.ModernGLSink(mgl, scale=fb_w / win_w).init()
+ctx = slikui.Context(sink)
+...
+ctx.render(False)          # over your scene, into mgl.fbo
+...
+ctx.clear_tree(); sink.shutdown()
+```
+
 `slikui.GpuBatcher().build(list, frame, scale)` returns the arrays
 zero-copy — `(N, 20)` float32 instances and `(M, 7)` int32 batches — with
-`slikui.GPU_VERTEX_SHADER` / `GPU_FRAGMENT_SHADER`, for other APIs
-(moderngl, wgpu, Vulkan via Python). See [Render backends](../guide/backends.md).
+`slikui.GPU_VERTEX_SHADER` / `GPU_FRAGMENT_SHADER`, for other APIs (wgpu,
+Vulkan via Python, ...). See [Render backends](../guide/backends.md).
 
 ## Custom widgets in Python
 

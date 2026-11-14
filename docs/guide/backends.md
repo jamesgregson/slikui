@@ -153,11 +153,12 @@ ONE_MINUS_SRC_ALPHA)` — the software sink's straight-alpha "over".
 
 The shaders reproduce the software rasterizer's coverage (SDF rounded
 rects/borders, capsule lines, bilinear Alpha8, nearest Rgba8):
-`tests/gl_parity.cpp` renders through `OpenglSink` offscreen and requires
-shapes to match the software sink to 2/255. Text differs at glyph edges
-because the software sink's glyph/image loops start at `int(x)`, painting
-pixels whose centers lie outside the quad (it can show faint dots from the
-neighbouring atlas glyph); GPUs rasterize pixel centers only.
+`tests/gl_parity.cpp` renders shapes and a full widget tree through
+`OpenglSink` offscreen and requires them to match the software sink to
+2/255 per channel. Both sinks cover a glyph/image quad by **pixel center**:
+pixel (x, y) is drawn when (x + .5, y + .5) lies inside the quad and its
+index lies inside the clip (the glScissor rule) — a CPU sink should do the
+same, or fractional glyphs pick up a row of their atlas neighbour.
 
 ## Reference notes from the GL sink
 

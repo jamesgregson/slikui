@@ -101,6 +101,7 @@ from slikui._py.app import App, GlApp
 from slikui._py.renderer import CanvasSink
 from slikui._py.drawcmd import DRAWCMD_DTYPE
 from slikui._py.gl import GLSink, read_framebuffer
+from slikui._py.moderngl_sink import ModernGLSink
 from slikui._py.events import (
     focus_lost,
     frame_resize,
@@ -181,6 +182,7 @@ __all__ = [
     "ListView",
     "LogView",
     "Menu",
+    "ModernGLSink",
     "MenuBar",
     "MessageBox",
     "Mod",
