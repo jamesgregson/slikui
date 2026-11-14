@@ -1,10 +1,10 @@
-"""06 — Keyboard: focus, shortcuts, and a game driven by keys.
+"""06 - Keyboard: focus, shortcuts, and a game driven by keys.
 
-* Focus tour — Tab / Shift+Tab cycle the focusable widgets (each draws its
+* Focus tour - Tab / Shift+Tab cycle the focusable widgets (each draws its
   own focus ring from FocusGained/FocusLost), arrows act on the focused one,
   Escape clears focus, Ctrl+R is a global shortcut (``ctx.add_shortcut``)
   that resets everything.
-* Snake — a whole game in one widget: arrows/WASD steer, Space pauses,
+* Snake - a whole game in one widget: arrows/WASD steer, Space pauses,
   R restarts; the game loop runs in ``tick`` and pauses itself on
   FocusLost. Click to focus; the wheel changes speed.
 
@@ -191,8 +191,8 @@ def build(app):
 
     # --- page 1: focus tour
     tour = root.add(slikui.Column, gap=8)
-    tour.add(slikui.Label, "Tab / Shift+Tab move focus · arrows change the "
-                           "focused chip · Esc clears").set_color(muted)
+    tour.add(slikui.Label, "Tab / Shift+Tab move focus | arrows change the "
+                           "focused chip | Esc clears").set_color(muted)
     row = tour.add(slikui.Row, gap=10)
     field = row.add(slikui.TextField, placeholder="type here")
     chips = []
@@ -224,7 +224,7 @@ def build(app):
     score = page.add(slikui.Label, "score 0")
     snake = page.add(Snake)
     snake.on_score = lambda s: score.set_text(f"score {s}")
-    page.add(slikui.Label, "arrows/WASD steer · Space pause · R restart · "
+    page.add(slikui.Label, "arrows/WASD steer | Space pause | R restart | "
                            "wheel = speed").set_color(muted)
 
     pages = [tour, page]
@@ -268,7 +268,7 @@ def smoke(app, state, session, log):
     s = state.snake
     s.request_focus()
     head0 = s.body[0]
-    session.advance(20)  # 1/3 s at 6 steps/s → 2 steps right
+    session.advance(20)  # 1/3 s at 6 steps/s -> 2 steps right
     c.ok(s.body[0][0] > head0[0], "the snake moves right")
     _support.tap(app, K.Left)
     c.ok(s.next_dir == (1, 0), "no reversing into itself")

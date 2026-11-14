@@ -6,7 +6,7 @@ through C++ ownership (tree -> std::function -> lambda -> wrapper ->
 keep_alive -> context wrapper), which the GC cannot traverse: nanobind's
 keep_alive records are invisible to tp_traverse. Left alone, the cycle
 survives until interpreter finalization, when nanobind can no longer release
-Python objects — and reports leaks at exit.
+Python objects - and reports leaks at exit.
 
 The fix is deterministic teardown: `App.close()` destroys the C++ tree
 (releasing every callback it holds) while the interpreter is healthy; it is
@@ -32,7 +32,7 @@ def build():  # function scope: everything should be reclaimed before exit
     ui.tick(0.0, 1 / 60)
     ui.render()
 
-build()  # no explicit close/del — App.__del__ must break the cycle
+build()  # no explicit close/del - App.__del__ must break the cycle
 """
 
 
@@ -82,8 +82,8 @@ def test_custom_container_subtree_released_at_close():
     assert "nanobind: leaked" not in r.stderr, r.stderr
 
 
-# A custom widget that keeps references to its own descendants — the natural
-# way to write one — must not leak. Widget-returning methods used to add a
+# A custom widget that keeps references to its own descendants - the natural
+# way to write one - must not leak. Widget-returning methods used to add a
 # keep_alive edge (child wrapper -> host wrapper) that the GC cannot see, so
 # `self.slider = self.add(...)` closed an uncollectable cycle through the
 # host's __dict__. Each shape below leaked before; none may now.

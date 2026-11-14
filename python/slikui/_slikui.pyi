@@ -1,4 +1,4 @@
-"""slikui Python bindings — thin layer over the C++20 UI library."""
+"""slikui Python bindings - thin layer over the C++20 UI library."""
 
 from collections.abc import Callable, Sequence
 import enum
@@ -439,7 +439,7 @@ class MouseButton(enum.IntEnum):
 
 class EventType(enum.IntEnum):
     """
-    Event kinds. Context-synthesized (never sent by hosts): Click, DoubleClick, MouseEnter, MouseLeave, FocusGained; FocusLost is both host→Context (app lost focus) and Context→widget (this widget lost focus).
+    Event kinds. Context-synthesized (never sent by hosts): Click, DoubleClick, MouseEnter, MouseLeave, FocusGained; FocusLost is both host->Context (app lost focus) and Context->widget (this widget lost focus).
     """
 
     MouseMove = 0
@@ -578,7 +578,7 @@ class TexUpload:
     def format(self) -> TexFormat: ...
 
     @property
-    def pixels(self) -> bytes: ...
+    def pixels(self) -> NDArray[numpy.uint8]: ...
 
 class DrawCmdType(enum.Enum):
     Rect = 0
@@ -639,6 +639,8 @@ class DrawList:
 
     def clear(self) -> None: ...
 
+    def as_array(self) -> NDArray[numpy.void]: ...
+
     @property
     def commands(self) -> list[DrawCmd]: ...
 
@@ -663,6 +665,42 @@ class IRenderSink:
 
 class RenderSink(IRenderSink):
     def __init__(self) -> None: ...
+
+    def release(self, tex_id: int) -> None: ...
+
+class GpuKind(enum.Enum):
+    Rect = 0
+
+    Glyph = 1
+
+    Image = 2
+
+    Line = 3
+
+class GpuBatcher:
+    """
+    Turns a DrawList into GPU-ready arrays: one 20-float instance per drawable command and scissor/texture batches. See docs/guide/backends.md.
+    """
+
+    def __init__(self) -> None: ...
+
+    def build(self, list: DrawList, frame: Vec2, scale: float = 1.0) -> tuple[Annotated[NDArray[numpy.float32], dict(shape=(None, 20))], Annotated[NDArray[numpy.int32], dict(shape=(None, 7))]]:
+        """
+        Rebuild for one frame. Returns read-only zero-copy views (instances (N, 20) float32, batches (M, 7) int32: first, count, tex_id, scissor x, y, w, h). They stay valid until the next build() on this batcher.
+        """
+
+    @property
+    def framebuffer_width(self) -> int: ...
+
+    @property
+    def framebuffer_height(self) -> int: ...
+
+    @property
+    def scale(self) -> float: ...
+
+GPU_VERTEX_SHADER: str = ...
+
+GPU_FRAGMENT_SHADER: str = ...
 
 class Target:
     @overload
@@ -692,6 +730,9 @@ class Sink(IRenderSink):
 
     @property
     def scale(self) -> float: ...
+
+    @property
+    def texture_count(self) -> int: ...
 
 class Context:
     def __init__(self, sink: IRenderSink) -> None: ...
@@ -728,6 +769,10 @@ class Context:
 
     def next_texture_id(self) -> int: ...
 
+    def release_texture(self, tex_id: int) -> None: ...
+
+    def invalidate_textures(self) -> None: ...
+
     def find(self, id: str) -> Widget: ...
 
     def handle(self, event: Event) -> None: ...
@@ -747,7 +792,7 @@ class Context:
 
     def capture_mouse(self, widget: Widget) -> None:
         """
-        Route every mouse event to `widget` until release_mouse — call on MousePress so a drag survives the pointer leaving it.
+        Route every mouse event to `widget` until release_mouse - call on MousePress so a drag survives the pointer leaving it.
         """
 
     def release_mouse(self, widget: Widget) -> None: ...
@@ -780,6 +825,16 @@ class Context:
     def close_popups(self) -> None: ...
 
     def clear_tree(self) -> None: ...
+
+    def wants_mouse(self, x: float, y: float) -> bool:
+        """
+        Host routing: should a pointer event at (x, y) go to the UI? True during a UI press/drag, with a modal dialog open, or over any popup, dialog or widget that is not mouse_transparent (Column/Row/Spacer let the pointer through to your scene).
+        """
+
+    def wants_keyboard(self) -> bool:
+        """
+        Host routing: should key events go to the UI? (a widget has focus, or a modal dialog is open)
+        """
 
     @property
     def has_popups(self) -> bool: ...
@@ -819,7 +874,7 @@ class Widget:
 
     def measure(self, constraints: Constraints) -> Size:
         """
-        Override: intrinsic size under `constraints`; return constraints.clamp(Size(w, h)). Layout runs in Context.tick(), not render() — bounds are zero until the first tick.
+        Override: intrinsic size under `constraints`; return constraints.clamp(Size(w, h)). Layout runs in Context.tick(), not render() - bounds are zero until the first tick.
         """
 
     def arrange(self, area: Rect) -> None:
@@ -834,7 +889,7 @@ class Widget:
 
     def paint_over(self, env: PaintEnv) -> None:
         """
-        Override: drawn AFTER (on top of) the children, outside this widget's clip_rect — decorations over wrapped widgets.
+        Override: drawn AFTER (on top of) the children, outside this widget's clip_rect - decorations over wrapped widgets.
         """
 
     def clip_rect(self) -> Rect | None:
@@ -847,7 +902,7 @@ class Widget:
 
     def on_event(self, event: Event) -> bool:
         """
-        Override: return True to consume. Mouse events (MouseMove, MousePress, MouseRelease, Click, DoubleClick, Scroll) reach the widget under the pointer — or the mouse-capture widget — and bubble to ancestors until consumed; every button is delivered (check event.button). Key events go to the focused widget (falling back to the hovered one) and bubble; KeyRelease only follows a KeyPress the widget tree received. TextInput needs focus (focusable() -> True). MouseEnter/MouseLeave and FocusGained/FocusLost go to the affected widget only. Use context.capture_mouse(self) on press so a drag keeps receiving moves and the release outside your bounds.
+        Override: return True to consume. Mouse events (MouseMove, MousePress, MouseRelease, Click, DoubleClick, Scroll) reach the widget under the pointer - or the mouse-capture widget - and bubble to ancestors until consumed; every button is delivered (check event.button). Key events go to the focused widget (falling back to the hovered one) and bubble; KeyRelease only follows a KeyPress the widget tree received. TextInput needs focus (focusable() -> True). MouseEnter/MouseLeave and FocusGained/FocusLost go to the affected widget only. Use context.capture_mouse(self) on press so a drag keeps receiving moves and the release outside your bounds.
         """
 
     def tick(self, time: Time) -> None:
@@ -858,6 +913,11 @@ class Widget:
     def stretch_cross(self) -> bool: ...
 
     def expands_main(self) -> bool: ...
+
+    def mouse_transparent(self) -> bool:
+        """
+        True for pure layout that paints nothing: Context.wants_mouse lets the pointer through it to the host's scene. Override to return True in a custom widget that only arranges children.
+        """
 
     def focusable(self) -> bool: ...
 
@@ -1463,7 +1523,7 @@ class PropertyGrid(Column):
     def add_splitter(self, vertical: bool = False) -> Splitter: ...
 
     def add_property(self, label: str, label_width: float = 110.0) -> PropertyRow:
-        """Returns the row — add the editor widget into it."""
+        """Returns the row - add the editor widget into it."""
 
     def add_section(self, title: str, open: bool = False) -> PropertyGrid: ...
 
@@ -1879,7 +1939,7 @@ class Dialog(Panel):
     def __init__(self, title: str, id: str = '') -> None: ...
 
     def content(self) -> Column:
-        """The body column — add widgets here."""
+        """The body column - add widgets here."""
 
     def set_title(self, title: str) -> Dialog: ...
 
@@ -2364,10 +2424,8 @@ def theme_presets() -> list[ThemePreset]:
 
 def shortcut_label(key: Key, mods: int, context: Context | None = None) -> str:
     """
-    "Ctrl+Shift+S" ("⌘⇧S" on Apple) — for menu hints.
-
-    Pass ``context`` to spell out any symbol its font cannot draw (menus
-    do this themselves); without it the label may show missing-glyph boxes.
+    Menu hint text: "Ctrl+Shift+S", "Cmd+S", "Alt+Left" -- plain ASCII
+    on every platform. ``context`` is accepted for compatibility and unused.
     """
 
 def find_system_font() -> str:

@@ -1,6 +1,6 @@
 """Pixel helpers.
 
-slikui frames are `(H, W) uint32` in ABGR packing — 0xAABBGGRR values, i.e.
+slikui frames are `(H, W) uint32` in ABGR packing - 0xAABBGGRR values, i.e.
 little-endian byte order B, G, R, A. `to_rgba` converts to the conventional
 (H, W, 4) uint8 RGBA layout (a copy; the raw view is the zero-cost path).
 `save_image` writes a frame to any path Pillow can save (PNG, JPEG, ...).

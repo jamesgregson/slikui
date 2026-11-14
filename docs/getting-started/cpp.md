@@ -1,12 +1,12 @@
-# Getting started — C++
+# Getting started - C++
 
 Header-only: include `slikui.hpp` (multi-header, `include/` on your include
-path) or `dist/slikui.hpp` (amalgamated single file — also attached to every
+path) or `dist/slikui.hpp` (amalgamated single file - also attached to every
 GitHub Release). No linking, no code generation, C++20.
 
 ## A first window
 
-Minimal GLFW + OpenGL app — `examples/01_hello` is exactly this:
+Minimal GLFW + OpenGL app - `examples/01_hello` is exactly this:
 
 ```cpp
 #include "slikui.hpp"                             // the library
@@ -35,14 +35,14 @@ int main() {
 }
 ```
 
-![The same tree, rendered headless by the capture tool — the software backend
+![The same tree, rendered headless by the capture tool - the software backend
 consumes the identical DrawList the GL sink gets](../images/hello.png)
 
-## Headless — raw pixels
+## Headless - raw pixels
 
 The software backend needs no window or GPU: it antialiases into an owned or
 borrowed `uint32_t` framebuffer. `examples/02_raw_pixels` writes a PPM this
-way — this is also how the docs' component screenshots are produced.
+way - this is also how the docs' component screenshots are produced.
 
 ```cpp
 #include <slikui/backends/software/software.hpp>
@@ -60,14 +60,14 @@ ctx.load_font_file(slikui::find_system_font());
 
 ```
 include/slikui/
-├── core/            math (Vec2/Rect/Padding), Color, Event, Time, utf8
-├── layout/          Constraints, CrossMode, flex distribution
-├── render/          DrawList (display list), IRenderSink
-├── style/           Theme (palette + metrics), Anim (tween), easing
-├── text/            Font (stb_truetype), glyph atlas, wrap/measure
-├── widgets/         Widget base + the widget set (all.hpp = everything)
-├── context.hpp      Context: tree ownership, input, popups, frame loop
-└── backends/        software/ · opengl/ · glfw/ (self-gating on __has_include)
+|-- core/            math (Vec2/Rect/Padding), Color, Event, Time, utf8
+|-- layout/          Constraints, CrossMode, flex distribution
+|-- render/          DrawList (display list), IRenderSink
+|-- style/           Theme (palette + metrics), Anim (tween), easing
+|-- text/            Font (stb_truetype), glyph atlas, wrap/measure
+|-- widgets/         Widget base + the widget set (all.hpp = everything)
+|-- context.hpp      Context: tree ownership, input, popups, frame loop
+`-- backends/        software/ | opengl/ | glfw/ (self-gating on __has_include)
 ```
 
 Every public header compiles standalone (`tools/check_headers.sh` enforces it
@@ -76,8 +76,8 @@ they compile to nothing.
 
 ## Next
 
-- [Core concepts](../guide/core-concepts.md) — the frame loop in detail
-- [Widget index](../reference/index.md) — everything you can put on screen
-- [Building the demos](../development.md) — cmake targets, the gallery,
+- [Core concepts](../guide/core-concepts.md) - the frame loop in detail
+- [Widget index](../reference/index.md) - everything you can put on screen
+- [Building the demos](../development.md) - cmake targets, the gallery,
   the showcase
-- [Render backends](../guide/backends.md) — port to Vulkan/Metal/SDL
+- [Render backends](../guide/backends.md) - port to Vulkan/Metal/SDL

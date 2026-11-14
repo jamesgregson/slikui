@@ -1,8 +1,8 @@
-// slikui/widgets/data.hpp — Plot (+ histogram), TreeView, Table,
+// slikui/widgets/data.hpp - Plot (+ histogram), TreeView, Table,
 // PropertyGrid, Vec2Pad: the data-display family for graphics-demo panels.
 //
 // All widgets follow the house pattern: fluent setters, theme tokens, cached
-// text layouts, mouse-capture drags. Series/rows are copied by value — apps
+// text layouts, mouse-capture drags. Series/rows are copied by value - apps
 // push new data with the setters each frame or on change.
 #pragma once
 
@@ -23,7 +23,7 @@
 namespace slikui {
 
 // ---------------------------------------------------------------------------
-// Plot — line series with autoscale, grid + tick labels, optional area fill,
+// Plot - line series with autoscale, grid + tick labels, optional area fill,
 // markers, and a bars mode (= histogram for frame-time-style data).
 // ---------------------------------------------------------------------------
 class Plot : public Widget {
@@ -208,7 +208,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Vec2Pad — 2D pad with a draggable dot (light direction, UV offsets,
+// Vec2Pad - 2D pad with a draggable dot (light direction, UV offsets,
 // camera nudge). Value is in data space; default range 0..1 per axis.
 // ---------------------------------------------------------------------------
 class Vec2Pad : public Widget {
@@ -298,7 +298,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// TreeView — indented hierarchy with expand arrows and selection. Rows are a
+// TreeView - indented hierarchy with expand arrows and selection. Rows are a
 // flat (label, depth) list; expansion state lives here, descendants of a
 // collapsed row are hidden. Apps mutate rows and call set_rows again.
 // ---------------------------------------------------------------------------
@@ -463,14 +463,14 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Table — columns + header + selectable rows. Fixed column widths (0 = 90);
+// Table - columns + header + selectable rows. Fixed column widths (0 = 90);
 // cell text is clipped to its column. Non-virtualized by design for now.
 // ---------------------------------------------------------------------------
 class Table : public Widget {
 public:
     struct ColumnSpec {
         std::string title;
-        float width = 0;      // <=0 → default width
+        float width = 0;      // <=0 -> default width
         bool right_align = false;
     };
 
@@ -611,7 +611,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// PropertyGrid — the CG inspector: label|editor rows with collapsible
+// PropertyGrid - the CG inspector: label|editor rows with collapsible
 // sections. Rows keep a fixed label column and give the editor the rest.
 // ---------------------------------------------------------------------------
 class PropertyRow : public Widget {

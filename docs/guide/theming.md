@@ -1,22 +1,22 @@
 # Theming
 
-`ctx.theme()` is a plain struct widgets read on every paint — there is no
+`ctx.theme()` is a plain struct widgets read on every paint - there is no
 cached styled state to invalidate. Change it any time, including per frame.
 
 ## The Theme struct
 
 Three groups of fields:
 
-- **Palette** — `background`, `surface`, `surface_alt`, `border`, `text`,
+- **Palette** - `background`, `surface`, `surface_alt`, `border`, `text`,
   `text_dim`, `accent`, `accent_text`, `danger`, `success`, `warning`.
-- **Metrics** — `base_font_px`, `radius`, `border_width`, `gap`, font sizes,
+- **Metrics** - `base_font_px`, `radius`, `border_width`, `gap`, font sizes,
   `scale`.
-- **Derive helpers** — `hover()`, `press()`, `dimmed()` used by widgets for
+- **Derive helpers** - `hover()`, `press()`, `dimmed()` used by widgets for
   transitions.
 
 ## Built-in presets
 
-Eight presets ship with the library — each varies the palette *and* the
+Eight presets ship with the library - each varies the palette *and* the
 corner radius, so every scheme gets its own character: Dark, Light, Nord,
 Dracula, Gruvbox, Mocha (Catppuccin), Solarized, and Phosphor (green CRT
 terminal, square corners).
@@ -24,7 +24,7 @@ terminal, square corners).
 === "C++"
 
     ```cpp
-    ctx.theme() = slikui::Theme::nord();                // simplest — resets scale too
+    ctx.theme() = slikui::Theme::nord();                // simplest - resets scale too
     slikui::use_theme(ctx.theme(), slikui::Theme::mocha()); // keeps your `scale`
     slikui::apply_preset(ctx.theme(), 5);               // by index, wraps around
 
@@ -44,7 +44,7 @@ terminal, square corners).
         print(preset.name)                        # build a picker from this
     ```
 
-Each card in the strip is real output — `tools/components_capture.cpp`
+Each card in the strip is real output - `tools/components_capture.cpp`
 renders one card per built-in preset from this tree (`p` is the preset
 being rendered):
 
@@ -65,7 +65,7 @@ r2.add<slikui::Switch>().set_checked(true);
 
 ## Custom themes
 
-Anything not in the preset list is one struct away — assign the palette
+Anything not in the preset list is one struct away - assign the palette
 fields by hand. `Color::from_hex(0xRRGGBB)` builds colors; derive helpers
 give you the hover/press/dim variants widgets expect.
 
@@ -83,7 +83,7 @@ give you the hover/press/dim variants widgets expect.
     ui.ctx.theme.radius = 4.0
     ```
 
-![The preset-strip card rebuilt with exactly the two-line override above —
+![The preset-strip card rebuilt with exactly the two-line override above -
 same tree, custom accent and squarer corners](../images/themecustom.png)
 
 ## HiDPI and scaling
@@ -105,5 +105,5 @@ Layout runs in **logical points**; each sink maps them to device pixels:
 
 `theme().scale` is picked up on the next frame; glyphs re-rasterize at the
 new size automatically, so dragging a window between displays just works.
-Every screenshot on this site is rendered at 2× density through exactly this
+Every screenshot on this site is rendered at 2x density through exactly this
 path (`theme().scale` + `sink.set_scale()`), which is why glyphs stay crisp.

@@ -1,4 +1,4 @@
-// tests/test_widgets.cpp — behavior tests: callbacks, focus, input routing.
+// tests/test_widgets.cpp - behavior tests: callbacks, focus, input routing.
 #include "test.hpp"
 
 #include "slikui/backends/software/software.hpp"
@@ -120,7 +120,7 @@ TEST(slider_drag_updates_value) {
     f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, slider.bounds.right() - 10, c.y));
     f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, slider.bounds.right() - 10, c.y));
 
-    CHECK(mid > 40 && mid < 60);     // middle press ≈ 50
+    CHECK(mid > 40 && mid < 60);     // middle press ~ 50
     CHECK(slider.value() > 90);      // dragged to the right end
 }
 
@@ -405,7 +405,7 @@ TEST(image_measure_and_upload) {
     // One Rgba8 upload on the next render, then no more (dirty flag cleared).
     f.frame();
     // (Sink has no query API; the observable contract is exercised in the
-    // golden capture — here we check measure/fit behaviour instead.)
+    // golden capture - here we check measure/fit behaviour instead.)
     img.set_size(24, 24).set_fit(slikui::Image::Fit::Contain);
     f.frame();
     // Contain fit into a 24x24 frame of an 8x6 image centers it at 24x18.
@@ -501,7 +501,7 @@ TEST(tooltip_shows_after_hover_delay) {
 
 TEST(single_paint_per_widget) {
     // Regression: containers used to paint their subtree in paint() AND
-    // Widget::paint_tree recursed — every child was emitted twice (doubling
+    // Widget::paint_tree recursed - every child was emitted twice (doubling
     // alpha coverage on text).
     Fixture f;
     auto& root = f.ctx.set_root<slikui::Column>();

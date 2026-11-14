@@ -1,4 +1,4 @@
-// tests/test_menus.cpp — Phase B: popup anchoring + stack semantics, the
+// tests/test_menus.cpp - Phase B: popup anchoring + stack semantics, the
 // shortcut table, Menu/MenuItem (checkable, disabled, hints, submenus),
 // MenuBar switching, right-click context menus, IconButton/Toolbar/icons.
 #include "test.hpp"
@@ -373,7 +373,7 @@ TEST(context_menu_right_click) {
     CHECK(f.ctx.popup(0)->bounds.contains(at)); // anchored at the cursor
 
     // A child without its own menu inherits the ancestor's menu.
-    // (The label is inside the panel — same result.)
+    // (The label is inside the panel - same result.)
 
     // A child without its own menu inherits the ancestor's menu: right-click
     // the label inside the panel.
@@ -384,7 +384,7 @@ TEST(context_menu_right_click) {
     f.ctx.close_popups();
 
     // Right-click outside the panel: nothing opens.
-    f.click(10, 200, slikui::MouseRight); // below the panel — plain column
+    f.click(10, 200, slikui::MouseRight); // below the panel - plain column
     f.frame();
     CHECK(f.ctx.popup_count() == 0);
 
@@ -457,62 +457,39 @@ TEST(icon_button_and_toolbar) {
 // shortcut_label
 // ---------------------------------------------------------------------------
 TEST(shortcut_label_format) {
-#ifdef __APPLE__
-    CHECK(slikui::shortcut_label(slikui::Key::S, slikui::ModSuper) == "⌘S");
-    CHECK(slikui::shortcut_label(slikui::Key::S, slikui::ModSuper | slikui::ModShift) == "⌘⇧S");
-#else
+    // Plain ASCII on every platform.
     CHECK(slikui::shortcut_label(slikui::Key::S, slikui::ModCtrl) == "Ctrl+S");
     CHECK(slikui::shortcut_label(slikui::Key::S, slikui::ModCtrl | slikui::ModShift) == "Ctrl+Shift+S");
-#endif
+    CHECK(slikui::shortcut_label(slikui::Key::S, slikui::ModSuper) == "Cmd+S");
+    CHECK(slikui::shortcut_label(slikui::Key::Left, slikui::ModAlt) == "Alt+Left");
+    CHECK(slikui::shortcut_label(slikui::Key::Num1, slikui::ModCtrl) == "Ctrl+1");
     CHECK(slikui::shortcut_label(slikui::Key::F5, 0) == "F5");
+    for (unsigned mods = 0; mods < 16; ++mods)
+        for (int k = 1; k <= int(slikui::Key::Num9); ++k)
+            for (char c : slikui::shortcut_label(slikui::Key(k), mods))
+                CHECK((unsigned char)c < 0x80);
 }
 
-TEST(shortcut_label_spells_out_symbols_the_font_lacks) {
-    // An invalid font has no glyphs: every symbol is spelled out, on every
-    // platform, and plain text passes through.
+TEST(fit_shortcut_label_spells_out_symbols) {
+    // Apple-style symbols in a caller's hint become ASCII; plain text passes
+    // through. (Symbols written as UTF-8 escapes: the sources are ASCII.)
     slikui::text::Font none;
-    CHECK(slikui::fit_shortcut_label(none, "⌃⇧S") == "Ctrl+Shift+S");
-    CHECK(slikui::fit_shortcut_label(none, "⌘⌥←") == "Cmd+Alt+Left");
+    CHECK(slikui::fit_shortcut_label(none, "\xE2\x8C\x83\xE2\x87\xA7S") == "Ctrl+Shift+S");
+    CHECK(slikui::fit_shortcut_label(none, "\xE2\x8C\x98\xE2\x8C\xA5\xE2\x86\x90") ==
+          "Cmd+Alt+Left");
+    CHECK(slikui::fit_shortcut_label(none, "\xE2\x86\x91\xE2\x86\x93") == "UpDown");
     CHECK(slikui::fit_shortcut_label(none, "Ctrl+S") == "Ctrl+S");
-    CHECK(slikui::shortcut_label(slikui::Key::Up, slikui::ModAlt, none) ==
-          slikui::fit_shortcut_label(none, slikui::shortcut_label(slikui::Key::Up,
-                                                                  slikui::ModAlt)));
-
-    // With the bundled font: whatever survives, the font can draw.
-    slikui::text::Font f;
-    REQUIRE(f.load_memory(slikui::text::default_font_data(),
-                          slikui::text::default_font_size()));
-    CHECK(f.has_glyph('S'));
-    for (const char* in : {"⌘⌃⌥⇧S", "←→↑↓"}) {
-        std::string out = slikui::fit_shortcut_label(f, in);
-        for (std::size_t i = 0; i < out.size();) {
-            unsigned char c = (unsigned char)out[i];
-            std::uint32_t cp = c;
-            int n = 1;
-            if (c >= 0xE0) { cp = c & 0x0F; n = 3; }
-            else if (c >= 0xC0) { cp = c & 0x1F; n = 2; }
-            for (int k = 1; k < n; ++k) cp = (cp << 6) | ((unsigned char)out[i + k] & 0x3F);
-            CHECK(f.has_glyph(cp));
-            i += std::size_t(n);
-        }
-    }
+    CHECK(slikui::shortcut_label(slikui::Key::Up, slikui::ModAlt, none) == "Alt+Up");
 }
 
-TEST(menu_item_hint_spells_out_missing_symbols) {
+TEST(menu_item_hint_spells_out_symbols) {
     Fixture f;
-    // Measure the same item with a symbol hint and its spelled-out form:
-    // whatever the font lacks becomes text, so the widths match exactly
-    // when the font has no ⌃ (and the symbol form is narrower when it does).
+    // A symbol hint measures exactly like its spelled-out form.
     auto& root = f.ctx.set_root<slikui::Column>();
     auto& m1 = root.add<slikui::Menu>();
-    m1.add_item("Reset", [] {}, "⌃R");
+    m1.add_item("Reset", [] {}, "\xE2\x8C\x83R");
     auto& m2 = root.add<slikui::Menu>();
     m2.add_item("Reset", [] {}, "Ctrl+R");
     f.frame();
-    const float w1 = m1.measure(slikui::Constraints::loose()).w;
-    const float w2 = m2.measure(slikui::Constraints::loose()).w;
-    if (!f.ctx.font().has_glyph(0x2303))
-        CHECK(w1 == w2);
-    else
-        CHECK(w1 < w2);
+    CHECK(m1.measure(slikui::Constraints::loose()).w == m2.measure(slikui::Constraints::loose()).w);
 }

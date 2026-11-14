@@ -1,13 +1,13 @@
-"""05 — Extended controls: custom widgets with full mouse + keyboard handling.
+"""05 - Extended controls: custom widgets with full mouse + keyboard handling.
 
-* Knob — drag vertically (Shift = fine), wheel steps, double-click resets,
+* Knob - drag vertically (Shift = fine), wheel steps, double-click resets,
   arrows/Home/End when focused (Ctrl = fine).
-* XYPad — click to jump, drag to move (Shift locks the axis you started
+* XYPad - click to jump, drag to move (Shift locks the axis you started
   on), arrows nudge when focused; the teaching twin of the built-in Vec2Pad.
-* Joystick — drag the stick, it springs back on release (animated in
+* Joystick - drag the stick, it springs back on release (animated in
   tick); WASD/arrows push while held (KeyPress/KeyRelease), Space freezes.
   It steers the ball in the box beside it.
-* LimitSlider — the built-in Slider wrapped, with limit marks drawn on its
+* LimitSlider - the built-in Slider wrapped, with limit marks drawn on its
   track via ``paint_over`` (which runs after the children paint).
 
 Every drag uses the same idiom: ``context.capture_mouse(self)`` on press,
@@ -218,7 +218,7 @@ LEFT = slikui.MouseButton.MouseLeft
 class Joystick(slikui.Widget):
     """Stick vector in the unit disc (y up), springing back to centre."""
 
-    SPRING = 12.0  # 1/s — exponential return rate
+    SPRING = 12.0  # 1/s - exponential return rate
     KEYS = {K.W: (0, 1), K.Up: (0, 1), K.S: (0, -1), K.Down: (0, -1),
             K.A: (-1, 0), K.Left: (-1, 0), K.D: (1, 0), K.Right: (1, 0)}
 
@@ -227,7 +227,7 @@ class Joystick(slikui.Widget):
         self.vx = self.vy = 0.0
         self.frozen = False
         self._dragging = False
-        self._held = set()  # keys currently down — needs KeyRelease
+        self._held = set()  # keys currently down - needs KeyRelease
 
     def measure(self, constraints):
         return constraints.clamp(slikui.Size(110, 110))
@@ -333,7 +333,7 @@ class LimitSlider(slikui.Widget):
     """The built-in Slider with limit marks on its track.
 
     Python can't subclass bound widgets, so this wraps one: layout is
-    delegated to the child, and the marks are drawn in ``paint_over`` —
+    delegated to the child, and the marks are drawn in ``paint_over`` -
     after the Slider has painted, so they sit on top of its track. The
     track geometry mirrors the Slider's paint (8 px inset, centred; no
     label row).
@@ -385,10 +385,10 @@ def build(app):
 
     col = row.add(slikui.Column, gap=4)
     stick = col.add(Joystick)
-    col.add(slikui.Label, "WASD · Space").set_color(muted)
+    col.add(slikui.Label, "WASD | Space").set_color(muted)
     ball = row.add(BallBox, stick)
 
-    root.add(slikui.Label, "LimitSlider — paint_over marks on a built-in Slider") \
+    root.add(slikui.Label, "LimitSlider - paint_over marks on a built-in Slider") \
         .set_color(muted)
     limits = root.add(LimitSlider, -90.0, 90.0, 10.0, (-35.0, 60.0))
     return _support.State(knob=knob, knob_label=knob_label, pad=pad,
@@ -434,7 +434,7 @@ def smoke(app, state, session, log):
     c.ok(abs(pad.y - y_pressed) < 1e-6 and pad.x > 0.5, "shift-drag locks to x")
     c.ok(state.pad_label.text.startswith(f"x {pad.x:.2f}"), "readout follows")
 
-    # Joystick: hold D (KeyPress … KeyRelease), the ball moves; springs back.
+    # Joystick: hold D (KeyPress ... KeyRelease), the ball moves; springs back.
     stick.request_focus()
     app.handle(slikui.key_press(K.D))
     session.advance(20)

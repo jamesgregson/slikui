@@ -1,4 +1,4 @@
-// slikui/widgets/all.hpp — convenience include for the full widget set.
+// slikui/widgets/all.hpp - convenience include for the full widget set.
 #pragma once
 
 #include "containers.hpp"

@@ -1,6 +1,6 @@
-// slikui/widgets/image.hpp — Image: an RGBA bitmap drawn from app-provided
+// slikui/widgets/image.hpp - Image: an RGBA bitmap drawn from app-provided
 // pixels. The upload flows through the normal sink texture contract
-// (TexFormat::Rgba8, IRenderSink::upload) — both bundled sinks already
+// (TexFormat::Rgba8, IRenderSink::upload) - both bundled sinks already
 // implement it. Decoding helpers wrap the vendored stb_image (PNG/JPEG/BMP/
 // GIF/PNM/...); a private static copy is compiled into every TU so the
 // library stays header-only with no link requirements.
@@ -71,7 +71,15 @@ public:
         return c.clamp(size_.w > 0 ? size_ : Size{float(w_), float(h_)});
     }
 
-    void attached(Context& c) override { tex_id_ = c.next_texture_id(); }
+    ~Image() override { release_texture(tex_id_); }
+
+    // A fresh id per context: mark pixels dirty so the new sink gets them.
+    void attached(Context& c) override {
+        tex_id_ = c.next_texture_id();
+        dirty_ = !pixels_.empty();
+    }
+
+    void invalidate_uploads() override { dirty_ = !pixels_.empty(); }
 
     void paint(const PaintEnv& env) const override {
         if (w_ <= 0 || h_ <= 0) return;

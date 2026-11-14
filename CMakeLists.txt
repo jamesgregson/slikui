@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Version comes from include/slikui/version.hpp — the single source of truth
+# Version comes from include/slikui/version.hpp - the single source of truth
 # for C++ and Python alike.
 set(_slikui_version "")
 foreach(_part MAJOR MINOR PATCH)
@@ -31,7 +31,7 @@ option(SLIKUI_BUILD_EXAMPLES "Build slikui examples" ON)
 
 if(SKBUILD)
   # Python wheel build (scikit-build-core): only the bindings, which install
-  # into the wheel — the install/export rules below don't apply.
+  # into the wheel - the install/export rules below don't apply.
   add_subdirectory(python)
 else()
   if(SLIKUI_BUILD_TESTS)

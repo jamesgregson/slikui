@@ -1,4 +1,4 @@
-// slikui/context.hpp — Context: root widget tree + theme + font + sink wiring.
+// slikui/context.hpp - Context: root widget tree + theme + font + sink wiring.
 //
 // Typical frame:
 //   while (running) {
@@ -24,8 +24,8 @@
 
 namespace slikui {
 
-class Menu; // widgets/menus.hpp — borrowed popups, opened by right-click
-class Dialog; // widgets/shells.hpp — floating shell layer (see open_dialog)
+class Menu; // widgets/menus.hpp - borrowed popups, opened by right-click
+class Dialog; // widgets/shells.hpp - floating shell layer (see open_dialog)
 
 // Where an anchored popup opens relative to its anchor widget. When the
 // preferred side would leave the frame, the popup flips to the opposite side
@@ -110,7 +110,7 @@ public:
     // Destroys the widget tree, popups and deferred closures, releasing the
     // Python callbacks they hold. The Python bindings route App.close() /
     // App.__del__ through this: a callback capturing a widget wrapper forms a
-    // cycle closed by C++ ownership, which the GC cannot traverse — destroying
+    // cycle closed by C++ ownership, which the GC cannot traverse - destroying
     // the tree while the interpreter is alive is what makes shutdown
     // leak-free (see python/tests/test_shutdown_leaks.py). Not safe to call
     // from inside a widget callback: destruction is immediate, not deferred.
@@ -136,7 +136,7 @@ public:
 
     // --- input ---
 
-    // NOTE: popup destruction is deferred to the end of handle() — callbacks
+    // NOTE: popup destruction is deferred to the end of handle() - callbacks
     // may close the popup they're executing in.
     void handle(const Event& e) {
         {
@@ -215,8 +215,8 @@ public:
     // --- popups ---
     //
     // Popups float above the tree and are dismissed by clicking outside,
-    // Escape (topmost only), or FocusLost. They form a stack — a submenu is
-    // pushed above its parent menu — and clicks are resolved against the
+    // Escape (topmost only), or FocusLost. They form a stack - a submenu is
+    // pushed above its parent menu - and clicks are resolved against the
     // topmost popup containing the cursor: everything above it closes, the
     // popup itself stays (unless the click lands outside every popup, which
     // closes the whole stack).
@@ -302,7 +302,7 @@ public:
     // --- dialogs ---
     //
     // Floating shell windows ABOVE the popup layer (Dialog, MessageBox,
-    // FileBrowser — widgets/dialogs.hpp). Borrowed entries are app-owned and
+    // FileBrowser - widgets/dialogs.hpp). Borrowed entries are app-owned and
     // must outlive their stay; owned entries are destroyed on close. A modal
     // dialog dims the app and traps presses outside it.
     template <class D>
@@ -352,7 +352,7 @@ public:
     //
     // Global accelerators, checked on KeyPress before widget dispatch. A
     // shortcut requires at least one modifier so plain typing never fires one;
-    // matching is exact (Ctrl+S ≠ Ctrl+Shift+S).
+    // matching is exact (Ctrl+S != Ctrl+Shift+S).
     Context& add_shortcut(Key key, unsigned mods, std::function<void()> action) {
         shortcuts_.push_back(Shortcut{key, mods, std::move(action)});
         return *this;
@@ -362,6 +362,51 @@ public:
     // --- textures ---
 
     std::uint32_t next_texture_id() { return next_tex_id_++; }
+
+    // A texture id will never be drawn again (its owning widget died):
+    // forwards to IRenderSink::release so the sink can free it.
+    void release_texture(std::uint32_t id) {
+        if (sink_ && id) sink_->release(id);
+    }
+
+    // The sink lost every texture it held (GPU context lost or recreated,
+    // sink reset): re-upload the font atlas and every live widget texture
+    // on the next render().
+    void invalidate_textures() {
+        font_.mark_dirty();
+        if (root_) root_->invalidate_tree();
+        for (auto& p : popups_) p.widget->invalidate_tree();
+        for (auto& d : dialogs_) d.widget->invalidate_tree();
+    }
+
+    // --- host routing ---
+    //
+    // For hosts that share input between the UI and their own scene (a 3D
+    // viewport behind a panel): send a pointer event to the UI when
+    // wants_mouse(pos), else to the scene; keys when wants_keyboard().
+
+    // True when the UI should get a pointer event at `pos` (logical px): a
+    // drag or press is in progress in the UI (so its release must come back
+    // here), a modal dialog is open, or a popup, dialog or any widget that
+    // is not mouse_transparent() lies under `pos`. Pure layout (Column, Row,
+    // Spacer) lets the pointer through to the scene.
+    bool wants_mouse(Vec2 pos) {
+        if (mouse_capture_ || topmost_modal()) return true;
+        for (Widget* t : press_target_)
+            if (t) return true;
+        for (auto& d : dialogs_)
+            if (hit_test_in(*d.widget, pos)) return true;
+        for (auto& p : popups_)
+            if (hit_test_in(*p.widget, pos)) return true;
+        if (!root_) return false;
+        for (Widget* w = hit_test_in(*root_, pos); w; w = w->parent)
+            if (!w->mouse_transparent()) return true;
+        return false;
+    }
+
+    // True when the UI should get key events: a widget has keyboard focus
+    // (text field, slider, ...) or a modal dialog is open.
+    bool wants_keyboard() const { return focused_ != nullptr || topmost_modal() != nullptr; }
 
     // --- mouse capture ---
 
@@ -462,7 +507,7 @@ private:
     }
 
     // A widget is being destroyed: drop every raw pointer to it. Touches only
-    // pointer fields (never containers being cleared) — it can run from
+    // pointer fields (never containers being cleared) - it can run from
     // inside popups_.clear(), closing_.clear() or a dialog erase.
     void forget(const Widget* w) noexcept {
         if (focused_ == w) focused_ = nullptr;
@@ -558,7 +603,7 @@ private:
             w.attached(*this);
         }
         for (auto& c : w.children) attach_tree(*c);
-        // NOTE: popups are attached individually in push_popup — never here,
+        // NOTE: popups are attached individually in push_popup - never here,
         // or a popup re-attaching its own subtree recurses forever.
     }
 
@@ -573,6 +618,7 @@ private:
         uploads_.clear();
         if (root_) root_->collect_tree(uploads_);
         for (auto& p : popups_) p.widget->collect_tree(uploads_);
+        for (auto& d : dialogs_) d.widget->collect_tree(uploads_);
         for (const auto& up : uploads_) sink_->upload(up);
     }
 
@@ -779,6 +825,12 @@ inline void context_forget(Context* ctx, const Widget* w) noexcept {
     if (ctx) ctx->forget(w);
 }
 
+// noexcept: runs from widget destructors. A sink's release() must not throw
+// (the Python trampoline reports Python exceptions as unraisable).
+inline void context_release_texture(Context* ctx, std::uint32_t id) noexcept {
+    if (ctx) ctx->release_texture(id);
+}
+
 // Minimal text widget for tooltip popups. Lives in this header (not
 // widgets/text.hpp) to keep Context free of include cycles.
 class TooltipLabel : public Widget {
@@ -853,7 +905,7 @@ inline void Context::handle_event(const Event& e) {
         return;
     case T::FocusLost: {
         // The app lost focus: releases may never arrive. Tell the captured
-        // widget (if it is not also the focused one — set_focus covers that)
+        // widget (if it is not also the focused one - set_focus covers that)
         // so drags can cancel, then drop all transient input state.
         if (mouse_capture_ && mouse_capture_ != focused_)
             focus_notes_.push_back({mouse_capture_, T::FocusLost});
@@ -987,7 +1039,7 @@ inline void Context::handle_press(const Event& in) {
         return;
     }
     // A press outside every popup closes the whole stack; a press inside one
-    // dispatches into it untouched — menu items manage their own sub-stack.
+    // dispatches into it untouched - menu items manage their own sub-stack.
     if (has_popups() && topmost_popup_containing(e.pos) < 0) {
         close_popups();
         return;

@@ -1,4 +1,4 @@
-// tests/test_data.cpp — Phase C data display: Plot (+bars/fill), Vec2Pad,
+// tests/test_data.cpp - Phase C data display: Plot (+bars/fill), Vec2Pad,
 // TreeView, Table, PropertyGrid.
 #include "test.hpp"
 
@@ -126,7 +126,7 @@ TEST(vec2pad_drag_and_clamp) {
     pad.on_change([&](slikui::Vec2 v) { changes++; });
     f.frame();
 
-    // Drag from center to the top-right corner → (1, 1) with default range.
+    // Drag from center to the top-right corner -> (1, 1) with default range.
     slikui::Vec2 c = pad.bounds.center();
     f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, c.x, c.y));
     f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove,
@@ -171,7 +171,7 @@ TEST(treeview_expand_collapse_select) {
     long picked = -1;
     tree.on_select([&](size_t i) { picked = long(i); });
 
-    // Collapse "Scene" → its children vanish.
+    // Collapse "Scene" -> its children vanish.
     tree.set_expanded(0, false);
     f.frame();
     CHECK(tree.bounds.h == 48.f); // Scene + Camera

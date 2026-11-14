@@ -1,4 +1,4 @@
-"""kwargs → setters, and the `add`/`set_root` factories.
+"""kwargs -> setters, and the `add`/`set_root` factories.
 
 No registry to keep in sync: a kwarg name `foo` resolves to the method
 `set_foo`, or to `foo` itself when there is no setter (e.g. `on_click=`).
@@ -23,10 +23,10 @@ def apply_props(widget, props):
 
 
 def container_add(self, cls, *args, **props):
-    """self.add(slikui.Label, "hi", font_size=26) → construct + apply kwargs.
+    """self.add(slikui.Label, "hi", font_size=26) -> construct + apply kwargs.
 
     Python-defined widget subclasses (subclassing slikui.Widget) take the
-    add_widget() path instead — that is the trampoline seam.
+    add_widget() path instead - that is the trampoline seam.
     """
     fn = getattr(self, f"add_{cls.__name__.lower()}", None)
     if fn is not None and _is_bound(cls):
@@ -37,7 +37,7 @@ def container_add(self, cls, *args, **props):
 
 
 def context_set_root(self, cls, *args, **props):
-    """ctx.set_root(slikui.Column, padding=16) → construct + apply kwargs."""
+    """ctx.set_root(slikui.Column, padding=16) -> construct + apply kwargs."""
     fn = getattr(self, f"set_root_{cls.__name__.lower()}", None)
     if fn is not None and _is_bound(cls):
         return apply_props(fn(*args), props)

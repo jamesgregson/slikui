@@ -2,7 +2,7 @@
 
 Floating shells live on their own layer above popups: dialogs and message
 boxes, toasts, the status bar, the log console, and the image viewers.
-`GroupBox` and `SearchBox` are pictured here too — they are simple composites
+`GroupBox` and `SearchBox` are pictured here too - they are simple composites
 (a titled `Panel` and a `TextField` with magnifier/clear) that share the
 family's capture.
 
@@ -10,7 +10,7 @@ family's capture.
 
 `Dialog` has a draggable title bar with a close button and a `content()`
 column. `MessageBox` adds an action-button row. A **modal** dialog dims the
-app and traps presses outside it. Escape or the ✕ button closes.
+app and traps presses outside it. Escape or the X button closes.
 
 === "C++"
 
@@ -29,10 +29,10 @@ app and traps presses outside it. Escape or the ✕ button closes.
     mb.set_modal(True)
     mb.add_button("Delete", lambda: remove_item())
     mb.add_button("Cancel", lambda: None)
-    ui.ctx.open_dialog(mb)            # borrowed — keep the Python object alive
+    ui.ctx.open_dialog(mb)            # borrowed - keep the Python object alive
     ```
 
-![A modal MessageBox — the app behind it dims and presses outside are trapped](../images/dialog.png)
+![A modal MessageBox - the app behind it dims and presses outside are trapped](../images/dialog.png)
 
 | API | Signature |
 |-----|-----------|
@@ -40,12 +40,12 @@ app and traps presses outside it. Escape or the ✕ button closes.
 | `set_modal` | `(bool)` |
 | `set_position` | `(Vec2)` |
 | `on_close` | `(std::function<void()>)` |
-| `add_button` | MessageBox — `(label, fn)` |
+| `add_button` | MessageBox - `(label, fn)` |
 
 ## Toast
 
 Auto-dismissing corner notices: `ctx.push_toast(std::make_unique<Toast>("Saved"), 3.0)`
-— the second argument is the lifetime in seconds. `set_icon(Icon)` adds a
+- the second argument is the lifetime in seconds. `set_icon(Icon)` adds a
 procedural icon.
 
 === "Python"
@@ -58,7 +58,7 @@ procedural icon.
 
 ## GroupBox
 
-A titled panel — a `Panel` with a caption, for grouping related controls.
+A titled panel - a `Panel` with a caption, for grouping related controls.
 
 === "C++"
 
@@ -86,20 +86,20 @@ every edit, `on_submit` on Enter.
 === "C++"
 
     ```cpp
-    left.add<slikui::SearchBox>().set_placeholder("Search assets…");
+    left.add<slikui::SearchBox>().set_placeholder("Search assets...");
     ```
 
 === "Python"
 
     ```python
-    left.add(slikui.SearchBox, placeholder="Search assets…")
+    left.add(slikui.SearchBox, placeholder="Search assets...")
     ```
 
 ![searchbox](../images/searchbox.png)
 
 ## LogView
 
-A severity-colored autoscrolling console — pair it with `StatusBar` for
+A severity-colored autoscrolling console - pair it with `StatusBar` for
 feedback, or feed it event logs from demo panels (the showcase does exactly
 this).
 
@@ -127,19 +127,19 @@ this).
 
 ## StatusBar
 
-Status text with transient messages plus right-side widgets — a typical home
+Status text with transient messages plus right-side widgets - a typical home
 for `Spinner`s or scale indicators.
 
 === "C++"
 
     ```cpp
-    root.add<slikui::StatusBar>().set_text("60 fps · 1,440 objects");
+    root.add<slikui::StatusBar>().set_text("60 fps | 1,440 objects");
     ```
 
 === "Python"
 
     ```python
-    root.add(slikui.StatusBar).set_text("60 fps · 1,440 objects")
+    root.add(slikui.StatusBar).set_text("60 fps | 1,440 objects")
     ```
 
 ![statusbar](../images/statusbar.png)
@@ -219,7 +219,7 @@ the MessageBox dialog and posts a toast, so both appear over the panel:
     auto& gb = left.add<slikui::GroupBox>("Light");
     gb.add<slikui::Checkbox>("Enabled", true);
     gb.add<slikui::Slider>(0.f, 1.f);
-    left.add<slikui::SearchBox>().set_placeholder("Search assets…");
+    left.add<slikui::SearchBox>().set_placeholder("Search assets...");
     auto& log = top.add<slikui::LogView>();
     log.log(slikui::LogView::Level::Info, "loaded scene.dragon (24 ms)");
     log.log(slikui::LogView::Level::Warning, "missing texture: bark_d");
@@ -242,13 +242,13 @@ the MessageBox dialog and posts a toast, so both appear over the panel:
     cv.set_pixels_a(64, 48, grad.data());
     cv.set_pixels_b(64, 48, grad2.data());
     cv.set_fraction(.62f);
-    root.add<slikui::StatusBar>().set_text("60 fps · 1,440 objects");
+    root.add<slikui::StatusBar>().set_text("60 fps | 1,440 objects");
     ```
 
 === "Python"
 
     ```python
-    grad, grad_rb = ...  # small RGBA gradients — see slikui/examples/gallery.py
+    grad, grad_rb = ...  # small RGBA gradients - see slikui/examples/gallery.py
                          # (python -m slikui.examples.gallery)
 
     top = root.add(slikui.Row, gap=10)
@@ -256,7 +256,7 @@ the MessageBox dialog and posts a toast, so both appear over the panel:
     gb = left.add(slikui.GroupBox, "Light")
     gb.add(slikui.Checkbox, "Enabled", True)
     gb.add(slikui.Slider, 0, 1)
-    left.add(slikui.SearchBox, placeholder="Search assets…")
+    left.add(slikui.SearchBox, placeholder="Search assets...")
     log = top.add(slikui.LogView)
     log.log(slikui.LogView.Level.Info, "loaded scene.dragon (24 ms)")
     log.log(slikui.LogView.Level.Warning, "missing texture: bark_d")
@@ -276,13 +276,13 @@ the MessageBox dialog and posts a toast, so both appear over the panel:
     cv.set_pixels_a(64, 48, grad)
     cv.set_pixels_b(64, 48, grad_rb)
     cv.set_fraction(0.62)
-    root.add(slikui.StatusBar).set_text("60 fps · 1,440 objects")
+    root.add(slikui.StatusBar).set_text("60 fps | 1,440 objects")
     ```
 
 ![shells](../images/shells.png)
 
 !!! tip
 
-    Widgets can request cursor shapes via `set_cursor` — hosts map them to
+    Widgets can request cursor shapes via `set_cursor` - hosts map them to
     system cursors (`GlfwWindow::attach` does this). See
     [Input & events](../guide/input-events.md#cursor-shapes).

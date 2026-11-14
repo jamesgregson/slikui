@@ -1,4 +1,4 @@
-// tests/test.hpp — tiny zero-dependency test framework.
+// tests/test.hpp - tiny zero-dependency test framework.
 //
 //   TEST(math_basics) { CHECK(1 + 1 == 2); }
 //

@@ -50,7 +50,7 @@ jobs:
           - { os: windows-latest }    # windows amd64
     env:
       CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
-      # gcc 13 on manylinux_2_28 — C++20 needs more than 2014's devtoolset
+      # gcc 13 on manylinux_2_28 - C++20 needs more than 2014's devtoolset
       CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
       CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
       CIBW_TEST_REQUIRES: "pytest numpy pillow"

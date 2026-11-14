@@ -1,4 +1,4 @@
-// slikui/text/font.hpp — TrueType font, glyph atlas, measure/wrap/layout.
+// slikui/text/font.hpp - TrueType font, glyph atlas, measure/wrap/layout.
 //
 // Vendored stb_truetype + stb_rect_pack are compiled with STB*_STATIC into
 // this header: every TU including slikui gets its own private copy, so the
@@ -83,7 +83,7 @@ public:
 
     // All entry points tolerate an invalid font (load failed / never loaded):
     // metrics come back zero and glyphs are whitespace, so a fontless UI
-    // degrades to text-less layout instead of crashing — e.g. minimal Linux
+    // degrades to text-less layout instead of crashing - e.g. minimal Linux
     // containers have no system fonts (find_system_font() returns "").
     float scale(float px) const { return ok_ ? stbtt_ScaleForPixelHeight(&info_, px) : 0.f; }
 
@@ -142,11 +142,11 @@ public:
 
     TextLayout layout(std::string_view text, float px, float max_width = 0) const {
         TextLayout out;
-        if (!ok_) return out; // before any metrics call — see the class comment
+        if (!ok_) return out; // before any metrics call - see the class comment
         out.line_height = line_height(px);
 
         // Tight metrics: the first line's baseline sits on its ASCENT, not a
-        // full leading down — otherwise single-line text rides low in its box
+        // full leading down - otherwise single-line text rides low in its box
         // and every vertically-centered label (buttons, checkboxes, ...) ends
         // up visibly below center.
         float ascent = 0, descent = 0;
@@ -243,7 +243,7 @@ public:
         return w;
     }
 
-    // Width of the first `n` codepoints — caret hit-testing in text fields.
+    // Width of the first `n` codepoints - caret hit-testing in text fields.
     float advance_upto(std::string_view text, size_t n, float px) const {
         if (!ok_) return 0;
         float w = 0;
@@ -266,6 +266,7 @@ public:
     int atlas_height() const { return kAtlasPage; }
     bool atlas_dirty() const { return atlas_dirty_; }
     void clear_dirty() { atlas_dirty_ = false; }
+    void mark_dirty() { atlas_dirty_ = true; }
 
 private:
     static bool is_separator(std::uint32_t) { return false; } // kerning across spaces is fine

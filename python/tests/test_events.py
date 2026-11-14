@@ -1,4 +1,4 @@
-"""M2 tests: simulated input — popups, tooltips, typing, scrolling."""
+"""M2 tests: simulated input - popups, tooltips, typing, scrolling."""
 
 import numpy as np
 

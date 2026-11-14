@@ -1,4 +1,4 @@
-// examples/03_gallery/main.cpp — the full widget showcase.
+// examples/03_gallery/main.cpp - the full widget showcase.
 #define GL_SILENCE_DEPRECATION 1
 #include <OpenGL/gl3.h> // GL first: silenced deprecations, no legacy gl.h
 
@@ -92,17 +92,17 @@ int main() {
         .set_items({"one", "two", "three"})
         .set_placeholder("choose...");
 
-    // Expander — collapsible section.
+    // Expander - collapsible section.
     auto& more = root.add<slikui::Expander>("more options");
     more.add<slikui::Label>("hidden content lives here");
     more.add<slikui::Checkbox>("nested checkbox", checked);
 
-    // Splitter — drag the divider.
+    // Splitter - drag the divider.
     auto& split = root.add<slikui::Splitter>();
     split.add<slikui::Label>("left pane").set_color(slikui::Color::from_hex(0x77C7FF));
     split.add<slikui::Label>("right pane").set_color(slikui::Color::from_hex(0xFFD377));
 
-    // Image — procedural gradient (swap for Image::set_file with real assets).
+    // Image - procedural gradient (swap for Image::set_file with real assets).
     auto& img_row = root.add<slikui::Row>().set_gap(10);
     auto& img = img_row.add<slikui::Image>("gradient");
     {
@@ -118,7 +118,7 @@ int main() {
             }
         img.set_pixels(w, h, px.data()).set_size(96, 72).set_fit(slikui::Image::Fit::Contain);
     }
-    img_row.add<slikui::Label>("Image widget — Contain fit");
+    img_row.add<slikui::Label>("Image widget - Contain fit");
 
     auto& scroll = root.add<slikui::ScrollArea>();
     scroll.hint_w_ = 868;

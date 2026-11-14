@@ -1,10 +1,11 @@
-// slikui/render/sink.hpp — the one interface a graphics API must implement.
+// slikui/render/sink.hpp - the one interface a graphics API must implement.
 //
 //   1. upload(): create/replace a texture (font atlas, images)
 //   2. render(): execute a DrawList for this frame
+//   3. release(): optional - a texture id will never be drawn again
 //
 // slikui ships two sinks: SoftwareSink (raw uint32_t pixels) and, with an
-// OpenGL context, OpenglSink. Anything else — Vulkan, Metal, SDL_Renderer —
+// OpenGL context, OpenglSink. Anything else - Vulkan, Metal, SDL_Renderer -
 // is ~100 lines implementing this contract.
 #pragma once
 
@@ -28,6 +29,14 @@ public:
     virtual ~IRenderSink() = default;
     virtual void upload(const TexUpload&) = 0;
     virtual void render(const DrawList&, Vec2 framebuffer_size) = 0;
+
+    // The widget that owned texture `id` was destroyed: free its storage.
+    // Ids are never reused, so a sink that ignores this only leaks memory.
+    // May be called outside render() - e.g. from Context::clear_tree() - so
+    // a GPU sink without a current context should defer the delete to its
+    // next render(). Never called from ~Context (the sink frees everything
+    // it still holds when it is itself destroyed).
+    virtual void release(std::uint32_t /*id*/) {}
 };
 
 } // namespace slikui

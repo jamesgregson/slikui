@@ -31,8 +31,8 @@ each wheel.
 - `04_glfw_opengl` renders a lit reference shape (cube, sphere or torus) over
   a procedural sky, editing material/environment/light/camera live from an
   accordion control panel.
-- `05_showcase` puts every component in one window — menu bar, toolbar,
-  splitter with six tabbed pages, status bar — logging each state change
+- `05_showcase` puts every component in one window - menu bar, toolbar,
+  splitter with six tabbed pages, status bar - logging each state change
   on-screen, plus two custom widgets (`Fill`, `LevelMeter`) demonstrating the
   measure/paint/event/tick contract. Its `--smoke` transcript is
   byte-identical to the Python twin's (`python/examples/showcase.py`).
@@ -62,7 +62,7 @@ interpreter and fails on nanobind's shutdown leak report.
 
 Every screenshot in this site is real output:
 `tools/components_capture.cpp` builds each tree with the **software
-backend**, simulates a second of interaction, and dumps the framebuffer —
+backend**, simulates a second of interaction, and dumps the framebuffer -
 the snippets on the widget pages are the actual capture code.
 
 ```sh
@@ -75,8 +75,8 @@ for f in docs/images/*.ppm; do python3 tools/ppm2png.py "$f" "${f%.ppm}.png"; do
 
 - `tools/amalgamate.py` produces `dist/slikui.hpp` (bakes in the ~35 KB
   DejaVu Sans subset).
-- `tools/check_headers.sh` — every public header must compile standalone.
-- `tools/embed_font.py` — regenerate the embedded font subset.
+- `tools/check_headers.sh` - every public header must compile standalone.
+- `tools/embed_font.py` - regenerate the embedded font subset.
 - Tagging `v*` triggers the Python workflow: GitHub Release with sdist +
   wheels + `dist/slikui.hpp`, then PyPI via Trusted Publishing.
 

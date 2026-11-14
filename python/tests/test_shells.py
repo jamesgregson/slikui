@@ -136,7 +136,7 @@ def test_toast_shows_and_expires():
     assert b.right() > 300 and b.bottom() > 230  # bottom-right corner
     assert toast is not None
 
-    ui.tick(1.0, 1 / 60)  # 0.5 + 0.2 < 1.0 → expired
+    ui.tick(1.0, 1 / 60)  # 0.5 + 0.2 < 1.0 -> expired
     assert ui.ctx.popup_count == 0
 
 
@@ -151,9 +151,9 @@ def test_statusbar_transient_message():
     ui.tick(0.0, 1 / 60)
     assert bar.bounds.h >= 20
 
-    bar.show_message("Rendering…", 1.0)
+    bar.show_message("Rendering...", 1.0)
     assert bar.text == "Ready"  # getter holds the base text
-    ui.tick(2.0, 1 / 60)  # transient window passed → tick restores it
+    ui.tick(2.0, 1 / 60)  # transient window passed -> tick restores it
     bar.show_message("Done", 0.1)
     ui.tick(3.0, 1 / 60)
     ui.tick(3.2, 1 / 60)
@@ -177,7 +177,7 @@ def test_searchbox_typing_and_clear():
     ui, root = make_ui()
     changes = []
     box = root.add(slikui.SearchBox)
-    box.set_placeholder("Filter…")
+    box.set_placeholder("Filter...")
     box.on_change(lambda t: changes.append(str(t)))
     ui.tick(0.0, 1 / 60)
 
@@ -272,7 +272,7 @@ def test_cursor_shape_requests():
     assert cursors and cursors[-1] == slikui.Cursor.Grab
 
     cursors.clear()
-    move(ui, (2, 237))  # dead margin → back to arrow
+    move(ui, (2, 237))  # dead margin -> back to arrow
     assert cursors and cursors[-1] == slikui.Cursor.Arrow
 
 

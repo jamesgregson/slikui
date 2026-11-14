@@ -1,12 +1,12 @@
-"""07 — The render contract: one widget tree, any renderer.
+"""07 - The render contract: one widget tree, any renderer.
 
-slikui never draws pixels itself — a ``Context`` hands each frame to a
+slikui never draws pixels itself - a ``Context`` hands each frame to a
 *sink*: texture uploads (the font atlas, images) and a flat list of draw
 commands (Rect, Line, Glyph, Image, ClipPush, ClipPop). This example:
 
 * renders the same tree through the C++ ``Sink`` and the pure-Python
   ``CanvasSink`` and proves the frames are pixel-identical;
-* shows the seam for your own renderer — ``TraceSink`` subclasses
+* shows the seam for your own renderer - ``TraceSink`` subclasses
   ``slikui.RenderSink``, receives every upload and command, and forwards
   them to ``CanvasSink`` so the skeleton runs as-is. Replace the
   forwarding with your GPU/pygame/Qt calls (notes inline).
@@ -68,14 +68,14 @@ class TraceSink(slikui.RenderSink):
 
     ``render`` gets the whole frame, in paint order. Per command:
 
-    * Rect  — ``rect``, ``color``, ``radius``; ``hollow`` + ``thickness``
+    * Rect  - ``rect``, ``color``, ``radius``; ``hollow`` + ``thickness``
       for outlines (a rounded-rect SDF quad on the GPU).
-    * Line  — from ``(rect.x, rect.y)`` to ``(rect.x + rect.w,
+    * Line  - from ``(rect.x, rect.y)`` to ``(rect.x + rect.w,
       rect.y + rect.h)``, ``thickness``, ``color`` (a capsule).
-    * Glyph — textured quad: ``rect`` on screen, ``uv`` in *texel* units
+    * Glyph - textured quad: ``rect`` on screen, ``uv`` in *texel* units
       of texture ``tex_id`` (alpha8), tinted by ``color``.
-    * Image — like Glyph, rgba texture, untinted.
-    * ClipPush / ClipPop — a scissor stack: intersect ``rect`` with the top.
+    * Image - like Glyph, rgba texture, untinted.
+    * ClipPush / ClipPop - a scissor stack: intersect ``rect`` with the top.
 
     Coordinates are logical points; multiply by your HiDPI scale. To draw
     over your own 3D scene, call ``ctx.render(False)`` so slikui skips its
@@ -90,11 +90,11 @@ class TraceSink(slikui.RenderSink):
 
     def upload(self, up):
         self.uploads[up.id] = (up.width, up.height, up.format)
-        self.inner.upload(up)          # → glTexImage2D / pygame.Surface ...
+        self.inner.upload(up)          # -> glTexImage2D / pygame.Surface ...
 
     def render(self, cmds, framebuffer_size):
         self.counts = Counter(c.type.name for c in cmds)
-        self.inner.render(cmds, framebuffer_size)  # → your draw loop
+        self.inner.render(cmds, framebuffer_size)  # -> your draw loop
 
 
 # doc: end

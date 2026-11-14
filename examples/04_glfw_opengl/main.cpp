@@ -1,4 +1,4 @@
-// examples/04_glfw_opengl/main.cpp — GLFW + system OpenGL: a lit cube viewer.
+// examples/04_glfw_opengl/main.cpp - GLFW + system OpenGL: a lit cube viewer.
 //
 // Shows slikui living alongside raw GL:
 //   * The cube and floor grid render through their own shader/VAOs BEFORE the
@@ -26,7 +26,7 @@
 #include <slikui/text/system_fonts.hpp>
 
 // ---------------------------------------------------------------------------
-// Tiny column-major 4x4 math — the only GL math this example needs.
+// Tiny column-major 4x4 math - the only GL math this example needs.
 // ---------------------------------------------------------------------------
 constexpr float kDeg2Rad = 3.14159265f / 180.f;
 constexpr float kPi = 3.14159265f;
@@ -59,12 +59,12 @@ inline Mat4 perspective(float fov_y_rad, float aspect, float zn, float zf) {
 }
 
 // Right-handed look-at with world up (0,1,0); eye must not be straight above
-// the target — the camera pitch is clamped well short of vertical.
+// the target - the camera pitch is clamped well short of vertical.
 inline Mat4 look_at(const float eye[3], const float target[3]) {
     float zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
     float zl = std::sqrt(zx * zx + zy * zy + zz * zz);
     if (zl > 1e-6f) { zx /= zl; zy /= zl; zz /= zl; }
-    // x = normalize(up × z), y = z × x  (up = (0,1,0))
+    // x = normalize(up x z), y = z x x  (up = (0,1,0))
     float xx = zz, xy = 0.f, xz = -zx;
     float xl = std::sqrt(xx * xx + xz * xz);
     if (xl > 1e-6f) { xx /= xl; xz /= xl; }
@@ -276,7 +276,7 @@ static Mesh make_cube() {
                 v.insert(v.end(), {p[0], p[1], p[2], n[0], n[1], n[2]});
             }
             // Emit each triangle in the corner order whose edge cross
-            // product agrees with the face normal — i.e. CCW seen from
+            // product agrees with the face normal - i.e. CCW seen from
             // OUTSIDE the cube, as GL's default glFrontFace(GL_CCW) expects
             // for front faces under back-face culling. Deriving the order
             // from the actual vertex data makes this self-correcting: no
@@ -425,7 +425,7 @@ struct CubeState {
 };
 
 // ---------------------------------------------------------------------------
-// Swatch — a small clickable color chip that highlights when it matches the
+// Swatch - a small clickable color chip that highlights when it matches the
 // value it edits. Demonstrates a minimal custom slikui widget.
 // ---------------------------------------------------------------------------
 class Swatch : public slikui::Widget {
@@ -465,7 +465,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// CubeViewport — fills the window, transparent, and handles the 3D mouse
+// CubeViewport - fills the window, transparent, and handles the 3D mouse
 // interaction: left-drag orbits (via mouse capture), wheel zooms.
 // ---------------------------------------------------------------------------
 class CubeViewport : public slikui::Widget {
@@ -791,7 +791,7 @@ int main() {
         glViewport(0, 0, fw, fh);
         glDisable(GL_SCISSOR_TEST);
         glDisable(GL_BLEND);
-        // Clear FIRST with the depth mask on — glClear honours glDepthMask,
+        // Clear FIRST with the depth mask on - glClear honours glDepthMask,
         // so clearing after disabling writes would leave every previous
         // frame's depth values in place and make the cube z-fight with
         // itself (and the grid) one frame at a time.

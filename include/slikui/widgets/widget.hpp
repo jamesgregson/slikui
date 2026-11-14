@@ -1,4 +1,4 @@
-// slikui/widgets/widget.hpp — Widget base class and tree protocol.
+// slikui/widgets/widget.hpp - Widget base class and tree protocol.
 //
 // Frames are ABSOLUTE framebuffer coordinates, assigned during arrange().
 // That makes hit-testing, painting and clipping trivial for every widget.
@@ -27,8 +27,8 @@
 namespace slikui {
 
 struct Theme;   // style/theme.hpp
-struct PaintEnv; // widgets/env.hpp — draw list + theme + font for paint()
-class Context;   // context.hpp — back-reference set during arrange
+struct PaintEnv; // widgets/env.hpp - draw list + theme + font for paint()
+class Context;   // context.hpp - back-reference set during arrange
 class Widget;
 
 // Defined in context.hpp: logical px per framebuffer px for a widget's context.
@@ -36,6 +36,8 @@ float theme_scale_of(const Context* ctx);
 // Defined in context.hpp: drop every Context reference (focus, hover, mouse
 // capture, press targets) to a widget that is being destroyed.
 void context_forget(Context* ctx, const Widget* w) noexcept;
+// Defined in context.hpp: tell the context's sink a texture id is dead.
+void context_release_texture(Context* ctx, std::uint32_t id) noexcept;
 
 class Widget {
 public:
@@ -43,7 +45,7 @@ public:
     explicit Widget(std::string id) : id(std::move(id)) {}
     // A destroyed widget must not stay focused/hovered/captured: the Context
     // would later dispatch into freed memory. ctx_alive_ guards the reverse
-    // case — a borrowed widget (Menu, Dialog) outliving its Context.
+    // case - a borrowed widget (Menu, Dialog) outliving its Context.
     virtual ~Widget() {
         if (ctx && !ctx_alive_.expired()) context_forget(ctx, this);
     }
@@ -84,7 +86,7 @@ public:
     virtual void paint(const PaintEnv&) const {}
 
     // Paints after (on top of) the subtree, outside this widget's own
-    // clip_rect: decorations over children — marks on a wrapped Slider's
+    // clip_rect: decorations over children - marks on a wrapped Slider's
     // track, selection outlines, focus rings around content.
     virtual void paint_over(const PaintEnv&) const {}
 
@@ -126,6 +128,23 @@ protected:
     virtual void attached(Context&) {}
 
 public:
+    // True for pure layout widgets that paint nothing (Column, Row, Spacer):
+    // the pointer "falls through" them to the host's scene in
+    // Context::wants_mouse. A subclass of one of those that paints must
+    // return false again (Toolbar, MenuBar do).
+    virtual bool mouse_transparent() const { return false; }
+
+protected:
+
+    // Texture-owning widgets call this from their destructor (and before
+    // dropping an id): the context's sink frees the texture. Silent when the
+    // widget is detached or its context is already gone. Zeroes `id`.
+    void release_texture(std::uint32_t& id) noexcept {
+        if (id && ctx && !ctx_alive_.expired()) context_release_texture(ctx, id);
+        id = 0;
+    }
+
+public:
     virtual const char* widget_type() const { return "Widget"; }
 
     // --- destruction protocol ---
@@ -134,7 +153,7 @@ public:
     // calls release(). The default destroys a C++-owned widget. Bindings
     // override release() for widgets whose storage is owned by the Python
     // runtime (Python-subclass instances live inside a PyObject allocation,
-    // where `delete` is undefined behavior) — see
+    // where `delete` is undefined behavior) - see
     // docs/python-custom-widgets.md.
     virtual void release() noexcept { delete this; }
 
@@ -147,7 +166,7 @@ public:
 
     // Text shown in a popup after hovering this widget (Context manages the
     // popup: 0.6 s hover delay, dismissed by moving away or pressing).
-    // NOTE: returns Widget& — in fluent chains, call base-class setters last
+    // NOTE: returns Widget& - in fluent chains, call base-class setters last
     // (pre-C++23 has no deducing-this, so Widget& can't know the leaf type).
     Widget& set_tooltip(std::string t) { tooltip_ = std::move(t); return *this; }
     const std::string& tooltip() const { return tooltip_; }
@@ -178,6 +197,14 @@ public:
     void collect_tree(std::vector<TexUpload>& out) {
         collect_uploads(out);
         for (auto& c : children) c->collect_tree(out);
+    }
+
+    // The sink lost its textures (context loss, sink swap): mark every
+    // texture this widget owns dirty so the next collect re-uploads it.
+    virtual void invalidate_uploads() {}
+    void invalidate_tree() {
+        invalidate_uploads();
+        for (auto& c : children) c->invalidate_tree();
     }
 
     // --- state ---

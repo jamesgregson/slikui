@@ -1,4 +1,4 @@
-// slikui/core/utf8.hpp — minimal UTF-8 decoding for text widgets.
+// slikui/core/utf8.hpp - minimal UTF-8 decoding for text widgets.
 #pragma once
 
 #include <cstdint>

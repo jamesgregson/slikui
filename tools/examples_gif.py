@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/examples_gif.py — animated docs images from the shipped examples.
+"""tools/examples_gif.py - animated docs images from the shipped examples.
 
 Motion only where motion explains: Snake (the game loop in tick) and the
 ClockFace (tick-driven animation). Both run on the examples' deterministic

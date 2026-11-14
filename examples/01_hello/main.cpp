@@ -1,4 +1,4 @@
-// examples/01_hello/main.cpp — minimal windowed app: GLFW + system OpenGL.
+// examples/01_hello/main.cpp - minimal windowed app: GLFW + system OpenGL.
 #define GL_SILENCE_DEPRECATION 1
 #include <OpenGL/gl3.h> // GL first: silenced deprecations, no legacy gl.h
 

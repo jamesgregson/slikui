@@ -1,7 +1,7 @@
-// slikui/version.hpp — release version of the library.
+// slikui/version.hpp - release version of the library.
 //
 // THE single source of truth for the version, C++ and Python alike. To
-// release, bump the three numbers below — nothing else. Everything derives
+// release, bump the three numbers below - nothing else. Everything derives
 // from them:
 //   - SLIKUI_VERSION_STRING / slikui::version   (below, via the preprocessor)
 //   - CMake project(VERSION)                    (CMakeLists.txt parses them)
@@ -12,7 +12,7 @@
 #pragma once
 
 #define SLIKUI_VERSION_MAJOR 0
-#define SLIKUI_VERSION_MINOR 3
+#define SLIKUI_VERSION_MINOR 4
 #define SLIKUI_VERSION_PATCH 0
 
 #define SLIKUI_VERSION_STR_(x) #x

@@ -1,4 +1,4 @@
-// slikui/widgets/inputs.hpp — TextField (single-line, caret, placeholder).
+// slikui/widgets/inputs.hpp - TextField (single-line, caret, placeholder).
 #pragma once
 
 #include "slikui/context.hpp"
@@ -56,7 +56,7 @@ public:
         std::string shown = display_text();
         float px = t.s(t.base_font_px); // raster size
         float pad_x = 8.f;
-        // Center by the tight text block, not the leading — the block now
+        // Center by the tight text block, not the leading - the block now
         // starts at the ascent, so this is typographically centered.
 
         if (!shown.empty()) {
@@ -365,7 +365,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// TextArea — multiline editor. Newline insertion, per-line caret navigation,
+// TextArea - multiline editor. Newline insertion, per-line caret navigation,
 // click placement, vertical auto-scroll of the caret into view. No soft wrap
 // in v0.1: long lines clip at the field edge.
 // ---------------------------------------------------------------------------

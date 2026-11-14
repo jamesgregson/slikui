@@ -1,141 +1,32 @@
-// slikui/backends/glfw/glfw_window.hpp — GLFW window + event translation.
+// slikui/backends/glfw/glfw_window.hpp - a ready-made GLFW window for slikui.
 //
-// Optional backend: compiles only when <GLFW/glfw3.h> is available.
-// Pairs with OpenglSink:
+// Optional backend: compiles only when <GLFW/glfw3.h> is available. Creates
+// a GL 3.3 core window and owns a GlfwInput for it. Already have a window
+// (your engine, your own GLFW setup)? Use glfw_input.hpp directly: event
+// builders, GlfwInput on your GLFWwindow*, attach_services. Pairs with
+// OpenglSink:
 //
 //   slikui::glfw::GlfwWindow win(1280, 800, "slikui demo");
 //   slikui::opengl::OpenglSink sink;   // system OpenGL (see opengl.hpp)
 //   sink.init();
 //   slikui::Context ctx(sink);
+//   win.attach(ctx);                    // clipboard + cursor shapes
 //   while (!win.should_close()) {
 //       win.dispatch(ctx);              // poll + translate events
-//       ctx.set_frame_size(win.frame_size());
+//       ctx.set_frame_size(win.point_size());
 //       ctx.tick({time, dt});
 //       ctx.render();
 //       win.swap();
 //   }
 #pragma once
 
-#if defined(__has_include)
-#  if __has_include(<GLFW/glfw3.h>)
-#    define SLIKUI_HAS_GLFW 1
-#  endif
-#endif
+#include "slikui/backends/glfw/glfw_input.hpp"
 
 #ifdef SLIKUI_HAS_GLFW
 
-#include "slikui/context.hpp"
-
-// slikui's wrapper never touches GL itself — keep GLFW from pulling in any
-// OpenGL header (examples include their own, e.g. <OpenGL/gl3.h>).
-#ifndef GLFW_INCLUDE_NONE
-#define GLFW_INCLUDE_NONE
-#endif
-
-#include <GLFW/glfw3.h>
-
-#include <vector>
+#include <optional>
 
 namespace slikui::glfw {
-
-inline Key map_key(int glfw_key) {
-    switch (glfw_key) {
-    case GLFW_KEY_ENTER:
-    case GLFW_KEY_KP_ENTER: return Key::Enter;
-    case GLFW_KEY_TAB: return Key::Tab;
-    case GLFW_KEY_BACKSPACE: return Key::Backspace;
-    case GLFW_KEY_DELETE: return Key::Delete;
-    case GLFW_KEY_ESCAPE: return Key::Escape;
-    case GLFW_KEY_SPACE: return Key::Space;
-    case GLFW_KEY_APOSTROPHE: return Key::Apostrophe;
-    case GLFW_KEY_COMMA: return Key::Comma;
-    case GLFW_KEY_MINUS: return Key::Minus;
-    case GLFW_KEY_PERIOD: return Key::Period;
-    case GLFW_KEY_SLASH: return Key::Slash;
-    case GLFW_KEY_LEFT: return Key::Left;
-    case GLFW_KEY_RIGHT: return Key::Right;
-    case GLFW_KEY_UP: return Key::Up;
-    case GLFW_KEY_DOWN: return Key::Down;
-    case GLFW_KEY_HOME: return Key::Home;
-    case GLFW_KEY_END: return Key::End;
-    case GLFW_KEY_PAGE_UP: return Key::PageUp;
-    case GLFW_KEY_PAGE_DOWN: return Key::PageDown;
-    case GLFW_KEY_INSERT: return Key::Insert;
-    case GLFW_KEY_CAPS_LOCK: return Key::CapsLock;
-    case GLFW_KEY_F1: return Key::F1;
-    case GLFW_KEY_F2: return Key::F2;
-    case GLFW_KEY_F3: return Key::F3;
-    case GLFW_KEY_F4: return Key::F4;
-    case GLFW_KEY_F5: return Key::F5;
-    case GLFW_KEY_F6: return Key::F6;
-    case GLFW_KEY_F7: return Key::F7;
-    case GLFW_KEY_F8: return Key::F8;
-    case GLFW_KEY_F9: return Key::F9;
-    case GLFW_KEY_F10: return Key::F10;
-    case GLFW_KEY_F11: return Key::F11;
-    case GLFW_KEY_F12: return Key::F12;
-    case GLFW_KEY_A: return Key::A;
-    case GLFW_KEY_B: return Key::B;
-    case GLFW_KEY_C: return Key::C;
-    case GLFW_KEY_D: return Key::D;
-    case GLFW_KEY_E: return Key::E;
-    case GLFW_KEY_F: return Key::F;
-    case GLFW_KEY_G: return Key::G;
-    case GLFW_KEY_H: return Key::H;
-    case GLFW_KEY_I: return Key::I;
-    case GLFW_KEY_J: return Key::J;
-    case GLFW_KEY_K: return Key::K;
-    case GLFW_KEY_L: return Key::L;
-    case GLFW_KEY_M: return Key::M;
-    case GLFW_KEY_N: return Key::N;
-    case GLFW_KEY_O: return Key::O;
-    case GLFW_KEY_P: return Key::P;
-    case GLFW_KEY_Q: return Key::Q;
-    case GLFW_KEY_R: return Key::R;
-    case GLFW_KEY_S: return Key::S;
-    case GLFW_KEY_T: return Key::T;
-    case GLFW_KEY_U: return Key::U;
-    case GLFW_KEY_V: return Key::V;
-    case GLFW_KEY_W: return Key::W;
-    case GLFW_KEY_X: return Key::X;
-    case GLFW_KEY_Y: return Key::Y;
-    case GLFW_KEY_Z: return Key::Z;
-    case GLFW_KEY_0: return Key::Num0;
-    case GLFW_KEY_1: return Key::Num1;
-    case GLFW_KEY_2: return Key::Num2;
-    case GLFW_KEY_3: return Key::Num3;
-    case GLFW_KEY_4: return Key::Num4;
-    case GLFW_KEY_5: return Key::Num5;
-    case GLFW_KEY_6: return Key::Num6;
-    case GLFW_KEY_7: return Key::Num7;
-    case GLFW_KEY_8: return Key::Num8;
-    case GLFW_KEY_9: return Key::Num9;
-    default: return Key::Unknown;
-    }
-}
-
-inline std::uint32_t map_mods(int glfw_mods) {
-    std::uint32_t m = ModNone;
-    if (glfw_mods & GLFW_MOD_SHIFT) m |= ModShift;
-    if (glfw_mods & GLFW_MOD_CONTROL) m |= ModCtrl;
-    if (glfw_mods & GLFW_MOD_ALT) m |= ModAlt;
-    if (glfw_mods & GLFW_MOD_SUPER) m |= ModSuper;
-    return m;
-}
-
-// Modifier state for events whose GLFW callback carries none (cursor move,
-// scroll): read it from the key state so Shift-drag and Ctrl-wheel work.
-inline std::uint32_t current_mods(GLFWwindow* w) {
-    auto down = [w](int a, int b) {
-        return glfwGetKey(w, a) == GLFW_PRESS || glfwGetKey(w, b) == GLFW_PRESS;
-    };
-    std::uint32_t m = ModNone;
-    if (down(GLFW_KEY_LEFT_SHIFT, GLFW_KEY_RIGHT_SHIFT)) m |= ModShift;
-    if (down(GLFW_KEY_LEFT_CONTROL, GLFW_KEY_RIGHT_CONTROL)) m |= ModCtrl;
-    if (down(GLFW_KEY_LEFT_ALT, GLFW_KEY_RIGHT_ALT)) m |= ModAlt;
-    if (down(GLFW_KEY_LEFT_SUPER, GLFW_KEY_RIGHT_SUPER)) m |= ModSuper;
-    return m;
-}
 
 class GlfwWindow {
 public:
@@ -158,90 +49,30 @@ public:
         }
         // Explicit: don't rely on glfwCreateWindow's implicit context-current.
         glfwMakeContextCurrent(window_);
-        glfwSetWindowUserPointer(window_, this);
-        glfwSetFramebufferSizeCallback(window_, [](GLFWwindow* w, int width, int height) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            self->frame_ = {float(width), float(height)}; // keep cached size current
-            Event e{};
-            e.type = Event::Type::FrameResize;
-            e.pos = {float(width), float(height)};
-            self->push(e);
-        });
-        glfwSetWindowFocusCallback(window_, [](GLFWwindow* w, int focused) {
-            if (!focused) {
-                auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-                Event e{};
-                e.type = Event::Type::FocusLost;
-                self->push(e);
-            }
-        });
-        glfwSetMouseButtonCallback(window_, [](GLFWwindow* w, int button, int action, int) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            double x = 0, y = 0;
-            glfwGetCursorPos(w, &x, &y);
-            Event e{};
-            e.type = action == GLFW_PRESS ? Event::Type::MousePress : Event::Type::MouseRelease;
-            e.pos = {float(x), float(y)};
-            e.button = button;
-            self->push(e);
-        });
-        glfwSetCursorPosCallback(window_, [](GLFWwindow* w, double x, double y) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            Event e{};
-            e.type = Event::Type::MouseMove;
-            e.delta = {float(x) - self->last_mouse_.x, float(y) - self->last_mouse_.y};
-            e.pos = {float(x), float(y)};
-            e.mods = current_mods(w);
-            self->last_mouse_ = e.pos;
-            self->push(e);
-        });
-        glfwSetScrollCallback(window_, [](GLFWwindow* w, double dx, double dy) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            double x = 0, y = 0;
-            glfwGetCursorPos(w, &x, &y); // needed for hit-testing the wheel target
-            Event e{};
-            e.type = Event::Type::Scroll;
-            e.pos = {float(x), float(y)};
-            e.scroll = {float(dx), float(dy)};
-            e.mods = current_mods(w);
-            self->push(e);
-        });
-        glfwSetKeyCallback(window_, [](GLFWwindow* w, int key, int, int action, int mods) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            Event e{};
-            // GLFW_REPEAT is a press (auto-repeat), not a release.
-            e.type = action == GLFW_RELEASE ? Event::Type::KeyRelease : Event::Type::KeyPress;
-            e.repeat = action == GLFW_REPEAT;
-            e.key = map_key(key);
-            e.mods = map_mods(mods);
-            self->push(e);
-        });
-        glfwSetCharCallback(window_, [](GLFWwindow* w, unsigned int cp) {
-            auto* self = static_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-            Event e{};
-            e.type = Event::Type::TextInput;
-            e.codepoint = cp;
-            self->push(e);
-        });
-
-        int fbw = width, fbh = height;
-        glfwGetFramebufferSize(window_, &fbw, &fbh);
-        frame_ = {float(fbw), float(fbh)};
+        input_.emplace(window_);
     }
 
     ~GlfwWindow() {
+        input_.reset(); // restore callbacks while the window is still alive
         if (window_) glfwDestroyWindow(window_);
         // glfwTerminate is intentionally left to the app (single window typical).
     }
 
+    GlfwWindow(const GlfwWindow&) = delete;
+    GlfwWindow& operator=(const GlfwWindow&) = delete;
+
     bool ok() const { return !failed_ && window_; }
     bool should_close() const { return glfwWindowShouldClose(window_); }
 
+    // Poll GLFW, then hand every translated event to `ctx`.
     void dispatch(Context& ctx) {
         glfwPollEvents();
-        for (const auto& e : events_) ctx.handle(e);
-        events_.clear();
+        if (input_) input_->dispatch(ctx);
     }
+
+    // The event translator, for hosts that route events themselves:
+    //   glfwPollEvents(); for (auto& e : win.input().events()) ...; clear().
+    GlfwInput& input() { return *input_; }
 
     Vec2 frame_size() const {
         int w = 0, h = 0;
@@ -259,8 +90,8 @@ public:
         glfwGetWindowSize(window_, &w, &h);
         return {float(w), float(h)};
     }
-    // Logical px per framebuffer px for this window (HiDPI-aware, always
-    // current — queried from GLFW, never cached).
+    // Framebuffer px per logical point for this window (HiDPI-aware, always
+    // current - queried from GLFW, never cached).
     float ui_scale() const {
         int fw = 0, fh = 0, ww = 0, wh = 0;
         glfwGetFramebufferSize(window_, &fw, &fh);
@@ -272,64 +103,16 @@ public:
 
     GLFWwindow* handle() { return window_; }
 
-    // Wire host services that live on the window (system clipboard). Call
-    // once after creating the Context.
-    void attach(Context& ctx) {
-        ctx.set_clipboard_source([] {
-            const char* s = glfwGetClipboardString(nullptr);
-            return s ? std::string(s) : std::string{};
-        });
-        ctx.set_clipboard_sink([](std::string text) {
-            glfwSetClipboardString(nullptr, text.c_str());
-        });
-        // Cursor shapes → GLFW standard cursors (created lazily, cached).
-        struct Cursors {
-            GLFWcursor* map[7] = {};
-            GLFWcursor* get(int shape, int slot) {
-                if (!map[slot]) map[slot] = glfwCreateStandardCursor(shape);
-                return map[slot];
-            }
-        };
-        static Cursors cursors;
-        ctx.set_cursor_host([this](slikui::Cursor c) {
-            int shape = GLFW_ARROW_CURSOR, slot = 0;
-            switch (c) {
-            case slikui::Cursor::IBeam: shape = GLFW_IBEAM_CURSOR; slot = 1; break;
-            case slikui::Cursor::Hand: shape = GLFW_HAND_CURSOR; slot = 2; break;
-            case slikui::Cursor::Grab: shape = GLFW_HAND_CURSOR; slot = 3; break;
-            case slikui::Cursor::Crosshair:
-                shape = GLFW_CROSSHAIR_CURSOR;
-                slot = 4;
-                break;
-            case slikui::Cursor::ResizeH: shape = GLFW_HRESIZE_CURSOR; slot = 5; break;
-            case slikui::Cursor::ResizeV: shape = GLFW_VRESIZE_CURSOR; slot = 6; break;
-            default: break;
-            }
-            if (slot == 0) {
-                glfwSetCursor(window_, nullptr); // default arrow
-                return;
-            }
-            glfwSetCursor(window_, cursors.get(shape, slot));
-        });
-    }
+    // Wire host services that live on the window (system clipboard, cursor
+    // shapes). Call once after creating the Context.
+    void attach(Context& ctx) { attach_services(ctx, window_); }
 
 private:
-    void push(const Event& e) { events_.push_back(e); }
-
     GLFWwindow* window_ = nullptr;
     bool failed_ = false;
-    Vec2 frame_{};
-    Vec2 last_mouse_{};
-    std::vector<Event> events_;
+    std::optional<GlfwInput> input_;
 };
 
 } // namespace slikui::glfw
-
-#else
-
-// GLFW not installed: slikui still builds; only this wrapper is unavailable.
-namespace slikui::glfw {
-// Intentionally empty.
-}
 
 #endif // SLIKUI_HAS_GLFW

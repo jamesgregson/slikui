@@ -1,4 +1,4 @@
-// tools/components_capture.cpp — renders one image per widget family for the
+// tools/components_capture.cpp - renders one image per widget family for the
 // README component reference.
 //
 // Uses the software backend only: no window, no GPU, fully deterministic.
@@ -152,7 +152,7 @@ static std::vector<std::uint8_t> gradient_rgba() {
 }
 
 // ---------------------------------------------------------------------------
-// Custom widget: Meter — the C++ twin of the Python Meter in
+// Custom widget: Meter - the C++ twin of the Python Meter in
 // python/examples/custom_widget.py. Measures 10 px tall, stretches across the
 // column (stretch_cross defaults to true), paints a rounded track plus an
 // accent fill, and scrubs on click.
@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
     });
 
     // ---- sliders, progress, spinner ------------------------------------
-    // NOTE: keep in sync with the `editors` capture — `Slider`'s built-in
+    // NOTE: keep in sync with the `editors` capture - `Slider`'s built-in
     // label/value row is shown there.
     capture(dir, "sliders", 560, 168, [](Context& ctx, Column& root) {
         auto& cap = root.add<Row>();
@@ -223,12 +223,12 @@ int main(int argc, char** argv) {
         auto& busy = root.add<Row>();
         busy.set_gap(10);
         busy.add<Spinner>();
-        busy.add<Label>("Compiling shaders…").set_color(ctx.theme().text_dim);
+        busy.add<Label>("Compiling shaders...").set_color(ctx.theme().text_dim);
     });
 
     // ---- labels ---------------------------------------------------------
     capture(dir, "labels", 560, 150, [](Context& ctx, Column& root) {
-        root.add<Label>("Title — 26 px").set_font_size(26);
+        root.add<Label>("Title - 26 px").set_font_size(26);
         root.add<Label>("Body label at the default 15 px size.");
         root.add<Label>("Dim secondary text.")
             .set_color(ctx.theme().text_dim);
@@ -239,9 +239,9 @@ int main(int argc, char** argv) {
     // ---- text input ------------------------------------------------------
     capture(dir, "inputs", 560, 196, [](Context&, Column& root) {
         root.add<TextField>().set_text("jane@example.com").set_placeholder("you@host");
-        root.add<TextField>().set_placeholder("Search…");
+        root.add<TextField>().set_placeholder("Search...");
         root.add<TextArea>().set_rows(3)
-            .set_text("slikui renders this entirely on the CPU —\nno GPU, no window, no dependencies.");
+            .set_text("slikui renders this entirely on the CPU -\nno GPU, no window, no dependencies.");
     });
 
     // ---- data display: plot + pad + tree + table + property grid ---------
@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
     capture(dir, "menus", 560, 300, [](Context&, Column& root) {
         auto& bar = root.add<MenuBar>();
         auto& file = bar.add_menu("File");
-        file.add_item("Open…", [] {}, "Ctrl+O");
+        file.add_item("Open...", [] {}, "Ctrl+O");
         file.add_item("Save", [] {}, "Ctrl+S");
         file.add_separator();
         file.add_item("Quit", [] {}, "Ctrl+Q");
@@ -323,7 +323,7 @@ int main(int argc, char** argv) {
         auto& gb = left.add<GroupBox>("Light");
         gb.add<Checkbox>("Enabled", true);
         gb.add<Slider>(0.f, 1.f);
-        left.add<SearchBox>().set_placeholder("Search assets…");
+        left.add<SearchBox>().set_placeholder("Search assets...");
         auto& log = top.add<LogView>();
         log.log(LogView::Level::Info, "loaded scene.dragon (24 ms)");
         log.log(LogView::Level::Warning, "missing texture: bark_d");
@@ -347,7 +347,7 @@ int main(int argc, char** argv) {
         cv.set_pixels_a(64, 48, grad.data());
         cv.set_pixels_b(64, 48, grad2.data());
         cv.set_fraction(.62f);
-        root.add<StatusBar>().set_text("60 fps · 1,440 objects");
+        root.add<StatusBar>().set_text("60 fps | 1,440 objects");
     });
 
     // ---- editors: segmented, vec/drag values, labeled slider, colors ----
@@ -381,7 +381,7 @@ int main(int argc, char** argv) {
         col.set_gap(10);
         col.add<Tabs>().set_tabs({"Home", "Edits", "View"}).set_selected(1);
         col.add<Dropdown>().set_items({"Linear", "Nearest", "Cubic", "Lanczos"})
-            .set_placeholder("Filter…").set_selected(0);
+            .set_placeholder("Filter...").set_selected(0);
     }, {.hover = {200.f, 84.f}, .click_at_hover = true, .frames = 80});
 
     // ---- layout: panel / row / spacer / divider ---------------------------
@@ -389,7 +389,7 @@ int main(int argc, char** argv) {
         auto& panel = root.add<Panel>();
         panel.set_padding(14).set_gap(10);
         panel.set_radius(10);
-        panel.add<Label>("Panel — a bordered container");
+        panel.add<Label>("Panel - a bordered container");
         auto& top = panel.add<Row>();
         top.add<Label>("left");
         top.add<Spacer>(); // takes all remaining space
@@ -444,7 +444,7 @@ int main(int argc, char** argv) {
         row.set_gap(10);
         row.add<Button>("Save");
         row.add<Button>("Delete all")
-            .set_tooltip("Removes every item — this cannot be undone");
+            .set_tooltip("Removes every item - this cannot be undone");
         // cursor rests on "Delete all": 24 + Save(~76) + gap(10) + half(~62)
     }, {.hover = {168.f, 40.f}, .frames = 80});
 
@@ -474,12 +474,12 @@ int main(int argc, char** argv) {
         auto& scroll = root.add<ScrollArea>();
         for (int i = 1; i <= 12; ++i)
             scroll.add<Label>("Item " + std::to_string(i) +
-                              " — laid out, painted and clipped on the CPU");
+                              " - laid out, painted and clipped on the CPU");
     });
 
     // ---- file browser (a Dialog on the shell layer, over real directories) -
     capture(dir, "browser", 520, 380, [](Context& ctx, Column& root) {
-        root.add<Label>("Pick a scene file…");
+        root.add<Label>("Pick a scene file...");
         auto fb = std::make_unique<FileBrowser>(FileBrowser::Mode::Open);
         fb->set_path("examples");
         ctx.open_dialog(std::move(fb));
@@ -528,7 +528,7 @@ int main(int argc, char** argv) {
     });
 
     capture(dir, "searchbox", 480, 140, [](Context&, Column& root) {
-        root.add<SearchBox>().set_placeholder("Search assets…");
+        root.add<SearchBox>().set_placeholder("Search assets...");
     });
 
     capture(dir, "logview", 560, 260, [](Context&, Column& root) {
@@ -541,7 +541,7 @@ int main(int argc, char** argv) {
 
     capture(dir, "statusbar", 480, 180, [](Context&, Column& root) {
         root.add<Label>("Workspace");
-        root.add<StatusBar>().set_text("60 fps · 1,440 objects");
+        root.add<StatusBar>().set_text("60 fps | 1,440 objects");
     });
 
     capture(dir, "imageviews", 560, 220, [](Context&, Column& root) {

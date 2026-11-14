@@ -10,9 +10,9 @@ per-frame widget construction, and no cached styled state to invalidate.
 Every application drives a `slikui::Context` with the same three calls:
 
 ```cpp
-ctx.handle(event);   // 1. input  — hit-test, focus, popups
-ctx.tick({now, dt}); // 2. layout — attach -> measure -> arrange -> animation
-ctx.render();        // 3. paint  — DrawList -> your sink
+ctx.handle(event);   // 1. input  - hit-test, focus, popups
+ctx.tick({now, dt}); // 2. layout - attach -> measure -> arrange -> animation
+ctx.render();        // 3. paint  - DrawList -> your sink
 ```
 
 === "C++"
@@ -38,7 +38,7 @@ ctx.render();        // 3. paint  — DrawList -> your sink
         ui.render()                               # -> (H, W) uint32 ndarray
     ```
 
-![The loop drives everything — the GLFW + OpenGL demo is exactly these three
+![The loop drives everything - the GLFW + OpenGL demo is exactly these three
 calls around a window](../images/cube_viewer.png)
 
 The Python [`App`](../getting-started/python.md) shell wraps Target + Sink +
@@ -52,7 +52,7 @@ one `slikui::Event` vocabulary (see [Input & events](input-events.md)).
 `Context::handle` hit-tests the deepest visible widget under the pointer, then
 dispatches the event *up the parent chain* until some widget consumes it.
 Key and text events go to the focused widget. Clicking outside a popup
-dismisses it — popups are destroyed at the end of `handle`, never during
+dismisses it - popups are destroyed at the end of `handle`, never during
 dispatch.
 
 **2. Tick (`tick(Time{now, dt})`).** First `attach_tree` hands every widget a
@@ -65,7 +65,7 @@ void arrange(const Rect& abs);     // assign own absolute frame + children
 ```
 
 Frames are **absolute framebuffer coordinates**, which makes hit-testing,
-painting and clipping trivial. Finally each widget's `tick(Time)` runs —
+painting and clipping trivial. Finally each widget's `tick(Time)` runs -
 hover/press transitions and the `Anim` tween helper advance here.
 
 **3. Paint (`render`).** `paint_tree` walks the tree; widgets append commands
@@ -80,7 +80,7 @@ Flexbox-flavoured: `Column`/`Row` stack children along their main axis with a
 `gap` and `padding`; cross-axis alignment is `Stretch`/`Start`/`Center`.
 Children whose `expands_main()` is true (e.g. `Spacer`) split leftover
 main-axis space. Layout is recomputed from scratch every tick, so window
-resizes reflow automatically — see [Layout](layout.md) and the full
+resizes reflow automatically - see [Layout](layout.md) and the full
 [architecture](../reference/architecture.md) notes.
 
 ## Ownership and lifetime
@@ -88,7 +88,7 @@ resizes reflow automatically — see [Layout](layout.md) and the full
 - The tree is `std::unique_ptr`-owned: `ctx.set_root<T>(...)` and
   `widget.add<T>(...)` construct and own. You keep references, not owners.
 - Callbacks (`on_click`, `on_change`, ...) capture app state by
-  reference/pointer — **keep captures valid** for the tree's lifetime, or
+  reference/pointer - **keep captures valid** for the tree's lifetime, or
   remove the widget first.
 - Popup widgets are owned by the context until the end of the event that
   closes them. Menus are the exception: they are *borrowed* popups you build
@@ -96,7 +96,7 @@ resizes reflow automatically — see [Layout](layout.md) and the full
 - In Python the bindings are non-owning wrappers over the C++ tree;
   `App.close()` (also run by `with App(...)`) destroys the tree and releases
   the Python callbacks it holds. Keep the Python object alive for as long as
-  the widget exists — for `ctx.open_dialog(mb)`, that means keeping `mb`.
+  the widget exists - for `ctx.open_dialog(mb)`, that means keeping `mb`.
 
 ## Threading
 
@@ -106,7 +106,7 @@ window).
 
 ## Where to go next
 
-- [Getting started — C++](../getting-started/cpp.md) or
+- [Getting started - C++](../getting-started/cpp.md) or
   [Python](../getting-started/python.md) for a runnable first window.
 - [Layout](layout.md) for the container set.
 - [Input & events](input-events.md) for the event vocabulary, focus and

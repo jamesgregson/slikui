@@ -1,4 +1,4 @@
-// slikui/text/system_fonts.hpp — locate a system TTF for demos/tests.
+// slikui/text/system_fonts.hpp - locate a system TTF for demos/tests.
 //
 // Not part of the rendering contract: production apps ship or load their own
 // fonts. This just makes examples work out of the box.

@@ -1,4 +1,4 @@
-// slikui/core/color.hpp — sRGB color with alpha and simple blending.
+// slikui/core/color.hpp - sRGB color with alpha and simple blending.
 #pragma once
 
 #include <cstdint>

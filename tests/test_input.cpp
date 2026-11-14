@@ -1,4 +1,4 @@
-// tests/test_input.cpp — the 0.3 input model: every button reaches widgets,
+// tests/test_input.cpp - the 0.3 input model: every button reaches widgets,
 // Click/DoubleClick/clicks synthesis, Enter/Leave, focus notifications,
 // KeyRelease routing, destruction safety and paint_over.
 #include "test.hpp"
@@ -453,4 +453,94 @@ TEST(input_shift_tab_walks_backwards) {
     f.ctx.set_focus(nullptr);
     tab(true);
     CHECK(f.ctx.focused() == f.b); // from nothing: the last one
+}
+
+// --- host routing: wants_mouse / wants_keyboard ------------------------------
+
+namespace {
+
+slikui::Event mouse(T t, float x, float y, int button = slikui::MouseLeft) {
+    slikui::Event e{};
+    e.type = t;
+    e.pos = {x, y};
+    e.button = button;
+    return e;
+}
+
+} // namespace
+
+TEST(wants_mouse_passes_through_layout) {
+    slikui::software::Target target(300, 200);
+    slikui::software::Sink sink(target);
+    slikui::Context ctx(sink);
+    ctx.set_frame_size({300, 200});
+    // The 3D-viewer shape: a full-frame Row, a Spacer, a docked Panel.
+    auto& root = ctx.set_root<slikui::Row>();
+    root.add<slikui::Spacer>();
+    auto& panel = root.add<slikui::Panel>();
+    panel.add<slikui::Button>("Go");
+    auto& col = root.add<slikui::Column>();     // empty layout column
+    (void)col;
+    ctx.tick(slikui::Time{0, 0.016});
+
+    slikui::Rect pb = panel.bounds;
+    CHECK(pb.w > 0);
+    CHECK(!ctx.wants_mouse({5, 5}));                                 // over the Spacer
+    CHECK(ctx.wants_mouse({pb.x + 2, pb.y + 2}));                    // panel background
+    CHECK(ctx.wants_mouse({pb.x + pb.w * .5f, pb.y + 10}));          // button in panel
+    CHECK(!ctx.wants_mouse({-10, -10}));                             // outside everything
+
+    // A press that started in the UI keeps the pointer until its release.
+    ctx.handle(mouse(T::MousePress, pb.x + 2, pb.y + 2));
+    CHECK(ctx.wants_mouse({5, 5}));
+    ctx.handle(mouse(T::MouseRelease, 5, 5));
+    CHECK(!ctx.wants_mouse({5, 5}));
+}
+
+TEST(wants_mouse_popups_and_modal_dialogs) {
+    slikui::software::Target target(300, 200);
+    slikui::software::Sink sink(target);
+    slikui::Context ctx(sink);
+    ctx.set_frame_size({300, 200});
+    ctx.set_root<slikui::Column>();
+    ctx.tick(slikui::Time{0, 0.016});
+    CHECK(!ctx.wants_mouse({150, 100}));
+
+    slikui::Dialog dlg("Modeless");
+    dlg.set_modal(false);
+    ctx.open_dialog(dlg);
+    ctx.tick(slikui::Time{0.1, 0.016});
+    slikui::Rect db = dlg.bounds;
+    CHECK(ctx.wants_mouse({db.x + 4, db.y + 4}));
+    CHECK(!ctx.wants_mouse({1, 1}));
+    dlg.set_modal(true);
+    ctx.close_dialog(dlg);
+    ctx.open_dialog(dlg);
+    CHECK(ctx.wants_mouse({1, 1}));          // modal: the UI owns the pointer
+    CHECK(ctx.wants_keyboard());
+    ctx.close_dialog(dlg);
+}
+
+TEST(wants_keyboard_follows_focus) {
+    slikui::software::Target target(300, 200);
+    slikui::software::Sink sink(target);
+    slikui::Context ctx(sink);
+    ctx.set_frame_size({300, 200});
+    auto& field = ctx.set_root<slikui::Column>().add<slikui::TextField>();
+    ctx.tick(slikui::Time{0, 0.016});
+    CHECK(!ctx.wants_keyboard());
+    ctx.set_focus(&field);
+    CHECK(ctx.wants_keyboard());
+    ctx.set_focus(nullptr);
+    CHECK(!ctx.wants_keyboard());
+}
+
+TEST(toolbar_and_menubar_stay_opaque) {
+    slikui::Toolbar tb;
+    slikui::MenuBar mb;
+    slikui::Row row;
+    slikui::Column col;
+    slikui::Spacer sp;
+    CHECK(!tb.mouse_transparent() && !mb.mouse_transparent());
+    CHECK(row.mouse_transparent() && col.mouse_transparent() && sp.mouse_transparent());
 }

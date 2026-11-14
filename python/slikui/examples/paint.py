@@ -1,9 +1,9 @@
-"""04 — Widgets that do their own drawing.
+"""04 - Widgets that do their own drawing.
 
 Every widget here is a pure-Python subclass of ``slikui.Widget``: layout
 participation via ``measure``, geometry via ``env.list`` primitives, events
 via ``on_event``, animation via ``tick``. Text stays in ordinary ``Label``
-widgets beside them — the Python trampoline exposes ``env.list`` and
+widgets beside them - the Python trampoline exposes ``env.list`` and
 ``env.theme`` to custom widgets, not the font, and composing with Labels is
 the intended division of labor.
 
@@ -71,7 +71,7 @@ class Sparkline(slikui.Widget):
 
     ``hover_x`` is the pointer's local x (or ``None``); ``paint`` turns it
     into the crosshair line. MouseMove only arrives while the pointer is
-    over the widget, so the crosshair is cleared on MouseLeave — the hover
+    over the widget, so the crosshair is cleared on MouseLeave - the hover
     idiom for any widget.
     """
 
@@ -79,7 +79,7 @@ class Sparkline(slikui.Widget):
         super().__init__()
         self.series = np.asarray(series, dtype=np.float32)
         self.capacity = capacity
-        self.color = color          # None → theme accent
+        self.color = color          # None -> theme accent
         self.hover_x = None
 
     def push(self, v):
@@ -127,11 +127,11 @@ import slikui
 
 
 class RadialGauge(slikui.Widget):
-    """A 270-degree arc gauge built from line segments (no arc primitive —
+    """A 270-degree arc gauge built from line segments (no arc primitive -
     draw the circle you need). The gap sits at the bottom; text lives in a
     Label beside the gauge."""
 
-    START, SWEEP = 135.0, 270.0  # degrees, 0° at 3 o'clock, clockwise
+    START, SWEEP = 135.0, 270.0  # degrees, 0 deg at 3 o'clock, clockwise
 
     def __init__(self, value=0.5, segments=48):
         super().__init__()
@@ -177,7 +177,7 @@ import slikui
 
 class ClockFace(slikui.Widget):
     """An animated analog clock: rim, twelve ticks, three hands. Time comes
-    from ``tick(Time)`` — never ``time.time()`` — so scripted runs are
+    from ``tick(Time)`` - never ``time.time()`` - so scripted runs are
     deterministic."""
 
     def __init__(self):
@@ -232,7 +232,7 @@ import slikui
 
 class BoundsDebug(slikui.Widget):
     """Wrapper that delegates layout to its child, then outlines every
-    descendant in ``paint_over`` — which runs after the children have
+    descendant in ``paint_over`` - which runs after the children have
     painted, so the outlines are never covered. The one-widget layout
     debugger."""
 
@@ -269,28 +269,28 @@ def build(app):
     root = app.set_root(slikui.Column, padding=16, gap=8)
 
     root.add(slikui.Label, "Custom drawing", font_size=26)
-    root.add(slikui.Label, "pure-Python subclasses of slikui.Widget — "
+    root.add(slikui.Label, "pure-Python subclasses of slikui.Widget - "
                            "env.list geometry, Labels for text").set_color(muted)
 
-    root.add(slikui.Label, "Meter — click the bar to scrub").set_color(muted)
+    root.add(slikui.Label, "Meter - click the bar to scrub").set_color(muted)
     meter = root.add(Meter, 0.4)
 
     row = root.add(slikui.Row, gap=14)
     left = row.add(slikui.Column, gap=4)
     spark = left.add(Sparkline, np.sin(np.arange(64) / 5.0))
     spark.color = slikui.Color.from_hex(BLUE)  # ctor args are positional
-    left.add(slikui.Label, "Sparkline — hover").set_color(muted)
+    left.add(slikui.Label, "Sparkline - hover").set_color(muted)
     mid = row.add(slikui.Column, gap=4)
     pair = mid.add(slikui.Row, gap=8)
     gauge = pair.add(RadialGauge, 0.7)
     clock = pair.add(ClockFace)
-    mid.add(slikui.Label, "Gauge & Clock — tick-animated").set_color(muted)
+    mid.add(slikui.Label, "Gauge & Clock - tick-animated").set_color(muted)
 
-    root.add(slikui.Label, "BoundsDebug — outlines every descendant") \
+    root.add(slikui.Label, "BoundsDebug - outlines every descendant") \
         .set_color(muted)
     wrap = root.add(BoundsDebug)
     panel = wrap.add(slikui.Panel, padding=10, gap=6)
-    panel.add(slikui.Label, "a Panel hosting a Slider and this Label…")
+    panel.add(slikui.Label, "a Panel hosting a Slider and this Label...")
     panel.add(slikui.Slider, 0, 1, value=0.3)
     outline = root.add(slikui.Checkbox, "show layout bounds", checked=False)
     outline.on_change(lambda v: setattr(wrap, "outlines", v))
@@ -353,7 +353,7 @@ def build_meter_docs(app):
 
 # Doc images: exact trees the docs pages embed, rendered by
 # tools/python_examples_capture.py (or --docs-image from the CLI).
-# image stem → (width, height, scale, builder callable)
+# image stem -> (width, height, scale, builder callable)
 DOCS = {
     "custom_widget": (340, 150, 1.0, build_meter_docs),
 }

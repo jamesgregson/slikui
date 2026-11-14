@@ -1,4 +1,4 @@
-// slikui/slikui.hpp — umbrella header: everything the library offers.
+// slikui/slikui.hpp - umbrella header: everything the library offers.
 //
 //   #include <slikui/slikui.hpp>
 //
@@ -11,6 +11,7 @@
 #include "core/time.hpp"
 #include "core/utf8.hpp"
 #include "layout/layout.hpp"
+#include "render/batcher.hpp"
 #include "render/draw_list.hpp"
 #include "render/sink.hpp"
 #include "style/anim.hpp"

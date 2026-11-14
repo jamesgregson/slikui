@@ -2,9 +2,9 @@
 # header-only; internal-linkage stb compiles into the module).
 #
 # Consumed two ways:
-#   * wheel builds — scikit-build-core runs CMake with the repo root as the
+#   * wheel builds - scikit-build-core runs CMake with the repo root as the
 #     source dir and this file as a subdirectory (see root CMakeLists.txt).
-#   * none by itself — `pip install -e .` from the repo root is the entry point.
+#   * none by itself - `pip install -e .` from the repo root is the entry point.
 
 # nanobind expects the consumer to locate Python first: Python_INCLUDE_DIRS is
 # a directory-scope variable, so it must be set in THIS scope, not inside the

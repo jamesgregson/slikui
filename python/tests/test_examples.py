@@ -3,7 +3,7 @@
 Mirrors what the wheel self-test runs (`python -m slikui.examples --smoke
 all`): every REGISTRY entry gets its scripted smoke pass. Examples
 self-check via _support.Checks, so these tests only assert the harness
-contract — the contract exists, the smoke produced a summary, and the PNG
+contract - the contract exists, the smoke produced a summary, and the PNG
 is real.
 """
 
@@ -27,7 +27,7 @@ def test_smoke_pass(example, tmp_path):
 
 @pytest.mark.parametrize("example", REGISTRY, ids=lambda e: e.name)
 def test_registry_contract(example):
-    """SIZE / build / smoke / main — what the launcher and driver consume."""
+    """SIZE / build / smoke / main - what the launcher and driver consume."""
     mod = load(example.name)
     for attr in ("NAME", "SIZE", "build", "smoke", "main"):
         assert hasattr(mod, attr), (example.name, attr)
@@ -61,7 +61,7 @@ def test_paint_docs_image(tmp_path):
 @pytest.mark.parametrize("example", REGISTRY, ids=lambda e: e.name)
 def test_smoke_is_leak_free(example, tmp_path):
     """Run each smoke pass in a fresh interpreter and fail on nanobind's
-    shutdown leak report — examples get copied into apps, so a reference
+    shutdown leak report - examples get copied into apps, so a reference
     cycle in one (e.g. a custom widget holding a callback that captures one
     of its own descendants) would be copied too."""
     import subprocess

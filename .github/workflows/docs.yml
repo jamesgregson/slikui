@@ -2,7 +2,7 @@ name: docs
 
 # Builds the MkDocs Material site and deploys it to GitHub Pages on every
 # push to main. The C++ side is only parsed (tools/doc_check.py), never
-# compiled — docs CI stays fast and needs no toolchain.
+# compiled - docs CI stays fast and needs no toolchain.
 
 on:
   push:

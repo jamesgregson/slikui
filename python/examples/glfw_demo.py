@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""slikui cube viewer — Python-native GLFW + OpenGL host, slikui software UI.
+"""slikui cube viewer - Python-native GLFW + OpenGL host, slikui software UI.
 
 The Python twin of examples/04_glfw_opengl: a lit cube/sphere/torus over a
 procedural sky, with a slikui controls panel. The difference is who owns the
-window: here GLFW and OpenGL are driven from Python (glfw + PyOpenGL), while
-every UI pixel is rasterized on the CPU by slikui's software backend and
-blitted as one texture:
+window: here GLFW and OpenGL are driven from Python (glfw + PyOpenGL):
 
-    scene pass  — plain GL (sky + grid + shape)
-    UI pass     — ctx.render(clear=False) into a uint32 Target, alpha keeps
-                  whatever slikui painted (0 where untouched), uploaded as one
-                  texture and blended over the scene
-    input       — GLFW callbacks → slikui.Event for UI hits, camera ops else
+    scene pass  - plain GL (sky + grid + shape)
+    UI pass     - slikui.GlApp.render(clear=False): GLSink draws the UI
+                  straight over the scene (a few instanced draws per frame)
+    input       - GLFW callbacks -> slikui.Event for UI hits, camera ops else
 
-Run:  python examples/glfw_demo.py     (deps: glfw, PyOpenGL, numpy)
+With --software the UI pass is the CPU path instead: ctx.render(clear=False)
+into a uint32 Target cleared to transparent, uploaded as one texture every
+frame and blended (premultiplied) over the scene.
+
+Run:  python examples/glfw_demo.py [--software]   (deps: glfw, PyOpenGL, numpy)
 """
 
 import math
@@ -31,7 +32,7 @@ K_MIN_DIST, K_MAX_DIST = 2.4, 10.0
 
 
 # ---------------------------------------------------------------------------
-# Shaders — one lit program for the shape, one procedural sky, one blit for
+# Shaders - one lit program for the shape, one procedural sky, one blit for
 # the UI texture. Same GLSL as the C++ example.
 # ---------------------------------------------------------------------------
 MESH_VS = """
@@ -157,7 +158,7 @@ def look_at(eye, target):
     m[12] = -float(np.dot(x, eye))
     m[13] = -float(np.dot(y, eye))
     m[14] = -float(np.dot(z, eye))
-    m[15] = 1.0  # w row — C++ Mat4 identity-initializes this; zeros would
+    m[15] = 1.0  # w row - C++ Mat4 identity-initializes this; zeros would
                  # make clip.w = 0 for every vertex (NaN after the divide)
     return m
 
@@ -258,7 +259,7 @@ def make_grid():
 
 def upload_mesh(verts, idx=None):
     """verts: (N, 6) float32 [pos|normal] for indexed shapes, or (N, 7)
-    [pos|color] for the grid. One VBO per attribute — PyOpenGL's
+    [pos|color] for the grid. One VBO per attribute - PyOpenGL's
     glVertexAttribPointer only accepts None (offset 0) pointers on this
     stack, so interleaved layouts with non-zero offsets silently break
     vertex fetch."""
@@ -319,7 +320,7 @@ def uniforms(prog, *names):
 
 
 # ---------------------------------------------------------------------------
-# App state — everything the panel edits, plus the camera.
+# App state - everything the panel edits, plus the camera.
 # ---------------------------------------------------------------------------
 class State:
     shape = 0  # 0 cube, 1 sphere, 2 torus
@@ -478,12 +479,12 @@ def apply_sky(state, i):
     state.sky_zenith, state.sky_horizon, state.ground = list(z), list(h), list(g)
 
 
-def over_ui(app, panel, x, y):
-    """True when a point (logical) is over the panel or any open popup."""
-    if panel.bounds.contains(slikui.Vec2(x, y)):
-        return True
-    return any(app.ctx.popup(i).bounds.contains(slikui.Vec2(x, y))
-               for i in range(app.ctx.popup_count))
+def over_ui(app, x, y):
+    """True when the UI should get a pointer event at (x, y) (logical): over
+    the controls or hint panel, an open popup, or during a UI drag. The
+    full-window Row/Column/Spacer layout lets the pointer through to the
+    camera (Context.wants_mouse)."""
+    return app.ctx.wants_mouse(x, y)
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +509,7 @@ def setup_gl():
                 upload_mesh(*make_torus())]
     g.grid = upload_mesh(make_grid())
 
-    # Blit quad: separate pos/uv VBOs (see upload_mesh — None-offset rule);
+    # Blit quad: separate pos/uv VBOs (see upload_mesh - None-offset rule);
     # v=0 is the top row of the CPU pixels.
     g.blit_vao = GL.glGenVertexArrays(1)
     GL.glBindVertexArray(g.blit_vao)
@@ -614,12 +615,23 @@ def draw_scene(g, state, fw, fh):
     GL.glBindVertexArray(0)
 
 
+def draw_ui_gl(app):
+    """Draw the UI on the GPU, over the scene (GLSink sets its own state)."""
+    app.render(clear=False)
+
+
 def draw_ui(g, app, tex_size):
-    """Rasterize the UI on the CPU and blend it over the scene."""
+    """--software: rasterize the UI on the CPU and blend it over the scene."""
+    # Start from transparent every frame, or translucent panels accumulate
+    # alpha frame over frame until they are opaque.
+    app.target.clear(slikui.Color(0, 0, 0, 0))
     pix = app.render(clear=False)  # zero-copy (H, W) uint32; alpha 0 where bare
     h, w = pix.shape
     GL.glEnable(GL.GL_BLEND)
-    GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+    # Blending into a transparent target leaves premultiplied color
+    # (rgb = src * a), so composite with ONE, not SRC_ALPHA (that would
+    # multiply by alpha twice and darken translucent UI).
+    GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)
     GL.glDisable(GL.GL_DEPTH_TEST)
     GL.glActiveTexture(GL.GL_TEXTURE0)
     GL.glBindTexture(GL.GL_TEXTURE_2D, g.ui_tex)
@@ -627,7 +639,7 @@ def draw_ui(g, app, tex_size):
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, w, h, 0, GL.GL_RGBA,
                         GL.GL_UNSIGNED_BYTE, None)
         tex_size[:] = [w, h]
-    # ...and upload every frame — an allocate-only frame would show undefined
+    # ...and upload every frame - an allocate-only frame would show undefined
     # texture contents (and glTexImage2D with data=None does not upload).
     GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0, w, h, GL.GL_RGBA,
                        GL.GL_UNSIGNED_BYTE, pix.view(np.uint8))
@@ -639,24 +651,13 @@ def draw_ui(g, app, tex_size):
     GL.glBindVertexArray(0)
 
 
-# GLFW keys we forward to slikui (popup navigation, Escape, ...).
-KEY_MAP = {
-    glfw.KEY_ESCAPE: slikui.Key.Escape, glfw.KEY_ENTER: slikui.Key.Enter,
-    glfw.KEY_TAB: slikui.Key.Tab, glfw.KEY_BACKSPACE: slikui.Key.Backspace,
-    glfw.KEY_DELETE: slikui.Key.Delete, glfw.KEY_SPACE: slikui.Key.Space,
-    glfw.KEY_LEFT: slikui.Key.Left, glfw.KEY_RIGHT: slikui.Key.Right,
-    glfw.KEY_UP: slikui.Key.Up, glfw.KEY_DOWN: slikui.Key.Down,
-    glfw.KEY_HOME: slikui.Key.Home, glfw.KEY_END: slikui.Key.End,
-    glfw.KEY_PAGE_UP: slikui.Key.PageUp, glfw.KEY_PAGE_DOWN: slikui.Key.PageDown,
-}
-BUTTON_MAP = {  # GLFW: L=0 R=1 M=2 — slikui: L=0 M=1 R=2
-    glfw.MOUSE_BUTTON_LEFT: slikui.MouseButton.MouseLeft,
-    glfw.MOUSE_BUTTON_MIDDLE: slikui.MouseButton.MouseMiddle,
-    glfw.MOUSE_BUTTON_RIGHT: slikui.MouseButton.MouseRight,
-}
+def main(argv=None):
+    import argparse
 
-
-def main():
+    ap = argparse.ArgumentParser(description="slikui cube viewer (python)")
+    ap.add_argument("--software", action="store_true",
+                    help="CPU-rasterized UI blitted as a texture (the old path)")
+    args = ap.parse_args(argv)
     slikui.set_leak_warnings(False)  # teardown-order noise, not a real leak
     if not glfw.init():
         raise SystemExit("glfw.init failed")
@@ -676,8 +677,13 @@ def main():
 
     g = setup_gl()
     state = State()
-    app = slikui.App(960, 640)
-    panel = build_ui(app, state)
+    if args.software:
+        app = slikui.App(960, 640)
+    else:
+        fw, _ = glfw.get_framebuffer_size(win)
+        ww, _ = glfw.get_window_size(win)
+        app = slikui.GlApp(960, 640, scale=fw / ww if ww > 0 else 1.0)
+    build_ui(app, state)
 
     # --- input routing state (slikui owns UI hits, the app owns the camera) ---
     ctl = {"dragging": False, "last": (0.0, 0.0)}
@@ -685,45 +691,49 @@ def main():
     def pt():
         return glfw.get_cursor_pos(win)
 
-    def on_button(_w, button, action, _mods):
+    # This host owns its GLFW callbacks and routes each event: UI hits go to
+    # slikui through the slikui.glfw_input event builders (which also map
+    # GLFW's L/R/M button order to slikui's), everything else drives the
+    # camera. Hosts that don't need routing can use slikui.GlfwInput instead.
+    gi = slikui.glfw_input
+
+    def on_button(w, button, action, mods):
         x, y = pt()
-        ui = over_ui(app, panel, x, y)
+        ui = over_ui(app, x, y)
         if action == glfw.PRESS:
             if ui:
-                if button in BUTTON_MAP:
-                    app.handle(slikui.mouse_press((x, y), BUTTON_MAP[button]))
+                app.handle(gi.mouse_button_event(w, button, action, mods))
             elif button == glfw.MOUSE_BUTTON_LEFT:
                 ctl["dragging"], ctl["last"] = True, (x, y)
         elif action == glfw.RELEASE:
             if ctl["dragging"]:  # a drag owns the mouse until it ends
                 ctl["dragging"] = False
-            elif button in BUTTON_MAP:
+            else:
                 # Always deliver releases that slikui saw a press for (e.g. a
-                # slider press that slid off the panel) — slikui ignores
+                # slider press that slid off the panel) - slikui ignores
                 # releases it did not pair.
-                app.handle(slikui.mouse_release((x, y), BUTTON_MAP[button]))
+                app.handle(gi.mouse_button_event(w, button, action, mods))
 
-    def on_cursor(_w, x, y):
+    def on_cursor(w, x, y):
         if ctl["dragging"]:
             lx, ly = ctl["last"]
             state.yaw -= (x - lx) * 0.008
             state.pitch = max(-1.45, min(1.45, state.pitch + (y - ly) * 0.008))
             ctl["last"] = (x, y)
         else:
-            app.handle(slikui.mouse_move((x, y)))
+            app.handle(gi.cursor_pos_event(w, x, y))
 
-    def on_scroll(_w, xoff, yoff):
+    def on_scroll(w, xoff, yoff):
         x, y = pt()
-        if over_ui(app, panel, x, y):
-            app.handle(slikui.scroll((x, y), (xoff, yoff)))
+        if over_ui(app, x, y):
+            app.handle(gi.scroll_event(w, xoff, yoff))
         else:
             state.distance = max(K_MIN_DIST,
                                  min(K_MAX_DIST, state.distance * (1.0 - 0.12 * yoff)))
 
-    def on_key(_w, key, _sc, action, mods):
-        if key in KEY_MAP and action in (glfw.PRESS, glfw.RELEASE):
-            e = slikui.key_press(KEY_MAP[key], mods) if action == glfw.PRESS \
-                else slikui.key_release(KEY_MAP[key], mods)
+    def on_key(_w, key, scancode, action, mods):
+        e = gi.key_event(key, scancode, action, mods)
+        if e is not None:
             app.handle(e)
 
     glfw.set_mouse_button_callback(win, on_button)
@@ -737,13 +747,16 @@ def main():
         glfw.poll_events()
         fw, fh = glfw.get_framebuffer_size(win)
         ww, wh = glfw.get_window_size(win)
-        if (fw, fh) != (app.target.width, app.target.height):
-            app.target.resize(fw, fh)  # reallocates the CPU framebuffer
-
         ui_scale = fw / ww if ww > 0 else 1.0
-        app.ctx.theme.scale = ui_scale
-        app.sink.set_scale(ui_scale)
-        app.ctx.set_frame_size(float(ww), float(wh))  # LOGICAL: layout in points
+        if args.software:
+            if (fw, fh) != (app.target.width, app.target.height):
+                app.target.resize(fw, fh)  # reallocates the CPU framebuffer
+            app.ctx.theme.scale = ui_scale
+            app.sink.set_scale(ui_scale)
+            app.ctx.set_frame_size(float(ww), float(wh))  # LOGICAL: layout in points
+        else:
+            app.set_scale(ui_scale)
+            app.resize(ww, wh)  # LOGICAL: layout in points
 
         dt = min(time.perf_counter() - last, 0.05)
         last, now = time.perf_counter(), now + dt
@@ -752,11 +765,16 @@ def main():
         app.tick(now, dt)
 
         draw_scene(g, state, fw, fh)
-        draw_ui(g, app, tex_size)
+        if args.software:
+            draw_ui(g, app, tex_size)
+        else:
+            draw_ui_gl(app)
         glfw.swap_buffers(win)
 
+    # GlApp frees its GL objects here, so close while the context is alive;
+    # both flavours release UI callbacks while the interpreter is alive.
+    app.close()
     glfw.destroy_window(win)
-    app.close()  # release UI callbacks while the interpreter is alive
     glfw.terminate()
 
 

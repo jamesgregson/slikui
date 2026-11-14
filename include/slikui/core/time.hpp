@@ -1,4 +1,4 @@
-// slikui/core/time.hpp — per-frame time passed to Context::tick().
+// slikui/core/time.hpp - per-frame time passed to Context::tick().
 #pragma once
 
 namespace slikui {

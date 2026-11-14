@@ -1,7 +1,7 @@
-// examples/02_raw_pixels/main.cpp — headless rendering to raw pixels.
+// examples/02_raw_pixels/main.cpp - headless rendering to raw pixels.
 //
 // No window, no GPU: the UI is rasterized into a plain uint32_t buffer and
-// written out as a PPM image. This is the "raw pixel setting" path — the
+// written out as a PPM image. This is the "raw pixel setting" path - the
 // same one an embedded framebuffer or software blitter would use.
 #include <slikui/backends/software/software.hpp>
 #include <slikui/slikui.hpp>

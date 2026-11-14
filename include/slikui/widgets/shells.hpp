@@ -1,10 +1,10 @@
-// slikui/widgets/shells.hpp — Phase D floating shells & feedback:
+// slikui/widgets/shells.hpp - Phase D floating shells & feedback:
 // Dialog, MessageBox, FileBrowser (floating layer), Toast, StatusBar,
 // LogView, SearchBox, GroupBox, ImageView, CompareView.
 //
 // Dialogs live on Context's dialog layer (above popups; modal dialogs dim
 // the app and trap outside presses). They are borrowed like Menus: build
-// once, open/close many times — or hand Context ownership with
+// once, open/close many times - or hand Context ownership with
 // open_dialog(std::unique_ptr<Dialog>).
 #pragma once
 
@@ -31,8 +31,8 @@
 namespace slikui {
 
 // ---------------------------------------------------------------------------
-// Dialog — floating window: draggable title bar with a close button over a
-// content column. Opened via Context::open_dialog; closed by the ✕ button,
+// Dialog - floating window: draggable title bar with a close button over a
+// content column. Opened via Context::open_dialog; closed by the X button,
 // close_dialog(), or Escape (topmost first). A modal dialog dims the app and
 // swallows presses outside it.
 // ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ public:
     }
 
     // Pin to the requested position (set_position / drags) and stay inside
-    // the frame — Context lays out at the current bounds, this corrects them.
+    // the frame - Context lays out at the current bounds, this corrects them.
     void arrange(const Rect& area) override {
         Rect a = area;
         if (pos_set_) {
@@ -140,7 +140,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// MessageBox — a Dialog with a message and an action-button row.
+// MessageBox - a Dialog with a message and an action-button row.
 // ---------------------------------------------------------------------------
 class MessageBox : public Dialog {
 public:
@@ -169,7 +169,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// GroupBox — titled panel section.
+// GroupBox - titled panel section.
 // ---------------------------------------------------------------------------
 class GroupBox : public Panel {
 public:
@@ -203,7 +203,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// SearchBox — magnifier + field + clear button, one control.
+// SearchBox - magnifier + field + clear button, one control.
 // ---------------------------------------------------------------------------
 class SearchBox : public Widget {
 public:
@@ -250,7 +250,7 @@ public:
     IconButton& icon_button() { return *icon_; }
     IconButton& clear_button() { return *clear_; }
 
-    // Not focusable itself — Tab reaches the inner TextField directly.
+    // Not focusable itself - Tab reaches the inner TextField directly.
 
     Size measure(const Constraints& c) override {
         Size s = children[1]->measure(Constraints::loose({kInfinite, kInfinite}));
@@ -277,7 +277,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// StatusBar — bottom strip: status text, transient messages, app-added
+// StatusBar - bottom strip: status text, transient messages, app-added
 // widgets (ProgressBar/Spinner/labels) on the right.
 // ---------------------------------------------------------------------------
 class StatusBar : public Row {
@@ -320,7 +320,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// LogView — severity-colored, autoscrolling console (shows the tail).
+// LogView - severity-colored, autoscrolling console (shows the tail).
 // ---------------------------------------------------------------------------
 class LogView : public Widget {
 public:
@@ -423,7 +423,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// FileBrowser — in-UI directory listing + name field on a Dialog shell.
+// FileBrowser - in-UI directory listing + name field on a Dialog shell.
 // Directories navigate on click; files land in the name field. Open/Save
 // commits through on_pick; Cancel closes. `..` navigates up.
 // ---------------------------------------------------------------------------
@@ -541,7 +541,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Toast — transient corner notice. Pushed owned via Context::push_toast:
+// Toast - transient corner notice. Pushed owned via Context::push_toast:
 // positioned in the bottom-right corner, removed automatically after the
 // requested seconds (see Context::tick).
 // ---------------------------------------------------------------------------
@@ -600,7 +600,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// ImageView — pan/zoom preview over an RGBA bitmap (textures, render
+// ImageView - pan/zoom preview over an RGBA bitmap (textures, render
 // targets). Wheel zooms around the cursor, drag pans (grab cursor),
 // checkerboard shows through transparent regions.
 // ---------------------------------------------------------------------------
@@ -633,7 +633,15 @@ public:
     float zoom() const { return zoom_; }
     Vec2 pan() const { return pan_; }
 
-    void attached(Context& c) override { tex_id_ = c.next_texture_id(); }
+    ~ImageView() override { release_texture(tex_id_); }
+
+    // A fresh id per context: mark pixels dirty so the new sink gets them.
+    void attached(Context& c) override {
+        tex_id_ = c.next_texture_id();
+        dirty_ = !pixels_.empty();
+    }
+
+    void invalidate_uploads() override { dirty_ = !pixels_.empty(); }
 
     Size measure(const Constraints& c) override { return c.clamp({200.f, 150.f}); }
     bool expands_main() const override { return true; }
@@ -730,7 +738,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// CompareView — before/after A|B split: two images drawn over the same rect,
+// CompareView - before/after A|B split: two images drawn over the same rect,
 // each clipped to its side of a draggable divider (tonemap/filter A-B).
 // ---------------------------------------------------------------------------
 class CompareView : public Widget {
@@ -754,9 +762,21 @@ public:
     }
     float fraction() const { return fraction_; }
 
+    ~CompareView() override {
+        release_texture(tex_a_);
+        release_texture(tex_b_);
+    }
+
+    // Fresh ids per context: mark both slots dirty so the new sink gets them.
     void attached(Context& c) override {
         tex_a_ = c.next_texture_id();
         tex_b_ = c.next_texture_id();
+        invalidate_uploads();
+    }
+
+    void invalidate_uploads() override {
+        a_.dirty = !a_.px.empty();
+        b_.dirty = !b_.px.empty();
     }
 
     Size measure(const Constraints& c) override { return c.clamp({220.f, 140.f}); }

@@ -1,4 +1,4 @@
-// tools/gallery_capture.cpp — runs the full gallery through the real GL sink
+// tools/gallery_capture.cpp - runs the full gallery through the real GL sink
 // and reads the framebuffer back: a true screenshot without screen-recording
 // permissions.
 #define GL_SILENCE_DEPRECATION 1
@@ -105,18 +105,18 @@ int main(int argc, char** argv) {
     root.add<slikui::ListView>().set_items({"alpha", "beta", "gamma", "delta"});
     root.add<slikui::Dropdown>().set_items({"one", "two", "three"}).set_placeholder("choose...");
 
-    // Expander — collapsible section.
+    // Expander - collapsible section.
     auto& more = root.add<slikui::Expander>("more options");
     more.set_open(true);
     more.add<slikui::Label>("hidden content lives here");
     more.add<slikui::Checkbox>("nested checkbox", checked);
 
-    // Splitter — drag the divider; panes resize live.
+    // Splitter - drag the divider; panes resize live.
     auto& split = root.add<slikui::Splitter>();
     split.add<slikui::Label>("left pane").set_color(slikui::Color::from_hex(0x77C7FF));
     split.add<slikui::Label>("right pane").set_color(slikui::Color::from_hex(0xFFD377));
 
-    // Image — procedural RGBA gradient uploaded through the sink.
+    // Image - procedural RGBA gradient uploaded through the sink.
     auto& img_row = root.add<slikui::Row>().set_gap(10);
     auto& img = img_row.add<slikui::Image>("gradient");
     {
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
             }
         img.set_pixels(w, h, px.data()).set_size(96, 72).set_fit(slikui::Image::Fit::Contain);
     }
-    img_row.add<slikui::Label>("Image widget — Contain fit");
+    img_row.add<slikui::Label>("Image widget - Contain fit");
 
     auto& scroll = root.add<slikui::ScrollArea>();
     scroll.hint_w_ = 868;
@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
             int w = 0, h = 0;
             glfwGetFramebufferSize(win.handle(), &w, &h);
             dump_ppm(argc > 1 ? argv[1] : "shots/gallery.ppm", w, h);
-            std::printf("captured %dx%d px — resizing window now\n", w, h);
+            std::printf("captured %dx%d px - resizing window now\n", w, h);
             glfwSetWindowSize(win.handle(), 600, 440); // exercise the resize path
         }
         if (frame == 90) {

@@ -1,5 +1,5 @@
 """The committed type stub (python/slikui/_slikui.pyi) must match the built
-extension — regenerate with `python tools/gen_stubs.py` after binding
+extension - regenerate with `python tools/gen_stubs.py` after binding
 changes."""
 
 import ast
@@ -31,4 +31,4 @@ def test_stub_matches_built_module():
     finally:
         sys.path.pop(0)
     assert gen_stubs.generate() == STUB.read_text(encoding="utf-8"), (
-        "python/slikui/_slikui.pyi is stale — run: python tools/gen_stubs.py")
+        "python/slikui/_slikui.pyi is stale - run: python tools/gen_stubs.py")

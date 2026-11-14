@@ -1,4 +1,4 @@
-// slikui/widgets/menus.hpp — Menu, MenuItem, MenuBar, shortcut labels.
+// slikui/widgets/menus.hpp - Menu, MenuItem, MenuBar, shortcut labels.
 //
 // Menus are BORROWED popups: build them once (a MenuBar owns its menus; a
 // standalone Menu is app-owned, e.g. as a widget's context menu) and opening
@@ -25,26 +25,23 @@
 
 namespace slikui {
 
-// Human-readable shortcut hint for menus and tooltips: "Ctrl+Shift+S"
-// ("⌘⇧S" on Apple). Complements Context::add_shortcut, which fires actions.
-// The symbols need font support: pass the font (or let MenuItem do it) to
-// get the text form wherever a symbol is missing.
+// Human-readable shortcut hint for menus and tooltips: "Ctrl+Shift+S",
+// "Cmd+S", "Alt+Left". Plain ASCII on every platform, so it renders with any
+// font and prints on any console. Complements Context::add_shortcut, which
+// fires actions.
 inline std::string shortcut_label(Key key, unsigned mods) {
     std::string out;
-#if defined(__APPLE__)
-    if (mods & ModSuper) out += "⌘";
-    if (mods & ModCtrl) out += "⌃";
-    if (mods & ModAlt) out += "⌥";
-    if (mods & ModShift) out += "⇧";
-#else
     if (mods & ModCtrl) out += "Ctrl+";
     if (mods & ModSuper) out += "Cmd+";
     if (mods & ModAlt) out += "Alt+";
     if (mods & ModShift) out += "Shift+";
-#endif
     int k = int(key);
     if (k >= int(Key::A) && k <= int(Key::Z)) {
         out += char('A' + k - int(Key::A));
+        return out;
+    }
+    if (k >= int(Key::Num0) && k <= int(Key::Num9)) {
+        out += char('0' + k - int(Key::Num0));
         return out;
     }
     switch (key) {
@@ -54,10 +51,10 @@ inline std::string shortcut_label(Key key, unsigned mods) {
     case Key::Tab: out += "Tab"; break;
     case Key::Backspace: out += "Bksp"; break;
     case Key::Delete: out += "Del"; break;
-    case Key::Left: out += "←"; break;
-    case Key::Right: out += "→"; break;
-    case Key::Up: out += "↑"; break;
-    case Key::Down: out += "↓"; break;
+    case Key::Left: out += "Left"; break;
+    case Key::Right: out += "Right"; break;
+    case Key::Up: out += "Up"; break;
+    case Key::Down: out += "Down"; break;
     case Key::Home: out += "Home"; break;
     case Key::End: out += "End"; break;
     case Key::PageUp: out += "PgUp"; break;
@@ -70,48 +67,40 @@ inline std::string shortcut_label(Key key, unsigned mods) {
     return out;
 }
 
-// `label` with the shortcut symbols `font` cannot draw spelled out, so hints
-// never render as missing-glyph boxes. Modifier symbols switch together
-// ("⌃⇧S" → "Ctrl+Shift+S", never "⌃Shift+S"); arrows individually
-// ("←" → "Left").
-inline std::string fit_shortcut_label(const text::Font& font, std::string label) {
+// `label` with Apple-style shortcut symbols (command, control, option,
+// shift, arrows: U+2318, U+2303, U+2325, U+21E7, U+2190..U+2193) spelled
+// out as ASCII ("Ctrl+Shift+S", "Cmd+Alt+Left"), so a hint written with them
+// never needs the glyphs. Plain text passes through unchanged. `font` is
+// unused (kept for API compatibility: labels are always spelled out).
+inline std::string fit_shortcut_label(const text::Font& /*font*/, std::string label) {
     struct Sub {
-        std::uint32_t cp;
-        const char* utf8;
+        const char* utf8; // the symbol's UTF-8 bytes
         const char* text;
     };
-    static constexpr Sub mods[] = {{0x2318, "⌘", "Cmd+"},
-                                   {0x2303, "⌃", "Ctrl+"},
-                                   {0x2325, "⌥", "Alt+"},
-                                   {0x21E7, "⇧", "Shift+"}};
-    static constexpr Sub arrows[] = {{0x2190, "←", "Left"},
-                                     {0x2192, "→", "Right"},
-                                     {0x2191, "↑", "Up"},
-                                     {0x2193, "↓", "Down"}};
-    auto replace_all = [&label](const Sub& s) {
+    static constexpr Sub subs[] = {{"\xE2\x8C\x98", "Cmd+"},   // U+2318
+                                   {"\xE2\x8C\x83", "Ctrl+"},  // U+2303
+                                   {"\xE2\x8C\xA5", "Alt+"},   // U+2325
+                                   {"\xE2\x87\xA7", "Shift+"}, // U+21E7
+                                   {"\xE2\x86\x90", "Left"},   // U+2190
+                                   {"\xE2\x86\x92", "Right"},  // U+2192
+                                   {"\xE2\x86\x91", "Up"},     // U+2191
+                                   {"\xE2\x86\x93", "Down"}};  // U+2193
+    for (const Sub& s : subs) {
         const std::size_t n = std::strlen(s.utf8);
         for (std::size_t at = label.find(s.utf8); at != std::string::npos;
              at = label.find(s.utf8, at))
             label.replace(at, n, s.text);
-    };
-    bool spell_mods = false;
-    for (const Sub& s : mods)
-        if (label.find(s.utf8) != std::string::npos && !font.has_glyph(s.cp))
-            spell_mods = true;
-    if (spell_mods)
-        for (const Sub& s : mods) replace_all(s);
-    for (const Sub& s : arrows)
-        if (!font.has_glyph(s.cp)) replace_all(s);
+    }
     return label;
 }
 
-// shortcut_label, spelled out where `font` lacks a symbol.
+// Kept for API compatibility: identical to shortcut_label(key, mods).
 inline std::string shortcut_label(Key key, unsigned mods, const text::Font& font) {
     return fit_shortcut_label(font, shortcut_label(key, mods));
 }
 
 // ---------------------------------------------------------------------------
-// MenuItem — one row of a Menu: label, optional checkmark, right-aligned
+// MenuItem - one row of a Menu: label, optional checkmark, right-aligned
 // shortcut hint, optional submenu (owned; pushed as its own popup on
 // hover/click), disabled state.
 // ---------------------------------------------------------------------------
@@ -243,7 +232,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Menu — vertical list of MenuItems inside a bordered panel. Build once, open
+// Menu - vertical list of MenuItems inside a bordered panel. Build once, open
 // many times: open_for() pushes this object onto the popup stack.
 // ---------------------------------------------------------------------------
 class Menu : public Panel {
@@ -255,7 +244,7 @@ public:
 
     const std::string& title() const { return title_; }
     Menu& set_min_width(float w) { min_width_ = w; return *this; }
-    // Fired each time the menu is about to open — refresh enabled flags there
+    // Fired each time the menu is about to open - refresh enabled flags there
     // (checkmarks read live through MenuItem::set_checked_fn callbacks).
     Menu& on_open(std::function<void()> f) { on_open_ = std::move(f); return *this; }
 
@@ -282,7 +271,7 @@ public:
         return ref;
     }
     // Borrowed flavor: the caller keeps the submenu alive (Python bindings
-    // use this — keep a reference to the Menu on the Python side).
+    // use this - keep a reference to the Menu on the Python side).
     Menu& add_submenu(std::string label, Menu& sub, std::string hint = {},
                       bool enabled = true) {
         attach_submenu(label, sub, std::move(hint), enabled);
@@ -295,7 +284,7 @@ public:
 
     // Open beside `anchor` (a MenuBar title or a parent-menu item) with menu
     // stack discipline: everything above the anchor's popup closes first.
-    // The menu takes its Context from the anchor — standalone menus aren't
+    // The menu takes its Context from the anchor - standalone menus aren't
     // attached to any tree until first opened.
     void open_for(Widget& anchor, PopupDir dir = PopupDir::Below) {
         Context* c = ctx ? ctx : anchor.context();
@@ -385,7 +374,7 @@ inline Menu* MenuItem::owner_menu() {
 }
 
 // ---------------------------------------------------------------------------
-// MenuBar — top strip of menu titles. Click a title to open its menu below it;
+// MenuBar - top strip of menu titles. Click a title to open its menu below it;
 // with a menu already open, moving over another title switches to it.
 // ---------------------------------------------------------------------------
 class MenuBar : public Row {
@@ -416,6 +405,7 @@ public:
     }
 
     const char* widget_type() const override { return "MenuBar"; }
+    bool mouse_transparent() const override { return false; } // paints a bar
 
     // Implementation detail, public only so Widget::add<MenuButton> can
     // instantiate (nested-private classes are inaccessible in the template).

@@ -1,4 +1,4 @@
-// tests/test_shells.cpp — Phase D: dialogs (floating layer, modal trap,
+// tests/test_shells.cpp - Phase D: dialogs (floating layer, modal trap,
 // drag, close), MessageBox, GroupBox, SearchBox, StatusBar, Toast, LogView,
 // FileBrowser, ImageView, CompareView, cursor-shape requests.
 #include "test.hpp"
@@ -94,7 +94,7 @@ TEST(dialog_open_close_and_layering) {
     f.ctx.handle(f.key(slikui::Key::Escape));
     CHECK(f.ctx.dialog_count() == 0);
 
-    // The close ✕ button closes too.
+    // The close X button closes too.
     auto dlg2 = std::make_unique<slikui::Dialog>("Second");
     auto& ref2 = f.ctx.open_dialog(std::move(dlg2));
     f.frame();
@@ -191,7 +191,7 @@ TEST(statusbar_transient_message) {
     REQUIRE(f.has_font);
     CHECK(bar.bounds.h >= 20.f);
 
-    bar.show_message("Rendering…", 1.0);
+    bar.show_message("Rendering...", 1.0);
     f.frame();
     CHECK(bar.text() == "Ready"); // getter holds the base text
 
@@ -235,7 +235,7 @@ TEST(searchbox_typing_and_clear) {
     auto& root = f.ctx.set_root<slikui::Column>();
     std::vector<std::string> changes;
     auto& box = root.add<slikui::SearchBox>();
-    box.set_placeholder("Filter…");
+    box.set_placeholder("Filter...");
     box.on_change([&](std::string_view t) { changes.push_back(std::string(t)); });
     f.frame();
     REQUIRE(f.has_font);
@@ -280,7 +280,7 @@ TEST(imageview_pan_zoom) {
     view.set_pixels(32, 32, px.data());
     f.frame();
     REQUIRE(f.has_font);
-    // Fit: 32px image in a >=150px viewport → initial zoom > 1.
+    // Fit: 32px image in a >=150px viewport -> initial zoom > 1.
     CHECK(view.zoom() > 1.f);
 
     float z0 = view.zoom();
@@ -357,7 +357,7 @@ TEST(cursor_shape_requests) {
     CHECK(!f.cursors.empty() && f.cursors.back() == slikui::Cursor::Grab);
 
     f.cursors.clear();
-    f.move(2, 237); // dead margin → back to arrow
+    f.move(2, 237); // dead margin -> back to arrow
     CHECK(!f.cursors.empty() && f.cursors.back() == slikui::Cursor::Arrow);
 }
 
@@ -386,7 +386,7 @@ TEST(filebrowser_lists_navigates_picks) {
     auto& list = *dynamic_cast<slikui::ListView*>(ref.children[1]->children[1].get());
     CHECK(list.bounds.h > 0);
 
-    // Click the subdir entry (row 1) → navigates into it.
+    // Click the subdir entry (row 1) -> navigates into it.
     float row_y = list.bounds.y + 1.5f * 24.f;
     f.click(list.bounds.x + 30, row_y);
     f.frame();
@@ -396,7 +396,7 @@ TEST(filebrowser_lists_navigates_picks) {
     // ("mat.png" or "scene.png"), then Open.
     f.click(list.bounds.x + 30, list.bounds.y + 12.f); // ".."
     f.frame();
-    // entries: "..", "sub/", then sorted files — first file is row 2.
+    // entries: "..", "sub/", then sorted files - first file is row 2.
     f.click(list.bounds.x + 30, list.bounds.y + 2 * 24.f + 12.f);
     f.frame();
     // Open = the primary button in the button row (content last Row, 3rd child).

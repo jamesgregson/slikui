@@ -1,11 +1,11 @@
-"""CanvasSink — a pure-Python (numpy) renderer implementing the slikui contract.
+"""CanvasSink - a pure-Python (numpy) renderer implementing the slikui contract.
 
 This is the "your renderer" seam: subclass `slikui.RenderSink`, and slikui hands
 you every frame as a flat command list (Rect/Line/Glyph/Image/ClipPush/ClipPop)
 plus texture uploads. CanvasSink rasterizes that list into a numpy uint32
 buffer with the exact same math as the C++ software backend in
-`include/slikui/backends/software/software.hpp` — same blend formula, same SDF
-coverage, same sampling — so frames come out pixel-identical.
+`include/slikui/backends/software/software.hpp` - same blend formula, same SDF
+coverage, same sampling - so frames come out pixel-identical.
 
 Pixel format: 0xAABBGGRR uint32, straight alpha, row-major (H, W).
 
@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from slikui._slikui import DrawCmdType, RenderSink, TexFormat
+from slikui._slikui import DrawCmdType, RenderSink
 
 _F32 = np.float32
 _U32 = np.uint32
@@ -99,13 +99,15 @@ class CanvasSink(RenderSink):
     # -- IRenderSink ---------------------------------------------------------
 
     def upload(self, up):
-        n = up.width * up.height * (4 if up.format == TexFormat.Rgba8 else 1)
-        data = np.frombuffer(bytes(up.pixels), np.uint8, n).copy()
-        if up.format == TexFormat.Rgba8:
-            data = data.reshape(up.height, up.width, 4)
-        else:
-            data = data.reshape(up.height, up.width)
-        self._textures[up.id] = data
+        # up.pixels is a borrowed (H, W[, 4]) view, valid during this call.
+        self._textures[up.id] = np.array(up.pixels, np.uint8)
+
+    def release(self, tex_id):
+        self._textures.pop(tex_id, None)
+
+    @property
+    def texture_count(self):
+        return len(self._textures)
 
     def render(self, cmds, framebuffer_size):
         self._clips = [(_F32(0), _F32(0), _F32(self.width), _F32(self.height))]
@@ -196,7 +198,7 @@ class CanvasSink(RenderSink):
         if w <= 0 or h <= 0:
             return
         if radius <= 0:
-            # NOTE: matches C++ exactly — the fast path loops from int(r.x)
+            # NOTE: matches C++ exactly - the fast path loops from int(r.x)
             # with no per-pixel clip check, so a fractional origin paints the
             # pixel below clip.x too. Quirk kept on purpose.
             Y, X = self._grid(y, np.ceil(y + h) - 1, x, np.ceil(x + w) - 1)
@@ -258,6 +260,19 @@ class CanvasSink(RenderSink):
         sa = self._faded_alpha(color.a, cov).astype(_U32)
         self._blend(X, Y, mask, _U32(color.r), _U32(color.g), _U32(color.b), sa)
 
+    def _quad_pixels(self, x, y, w, h):
+        """software::Sink::quad_pixels - pixels a textured quad covers: center
+        inside the quad, index inside the clip. [x0, x1) x [y0, y1) or None."""
+        cx, cy, cw, ch = self._clips[-1]
+        half = _F32(0.5)
+        x0 = max(int(np.ceil(x - half)), int(np.ceil(cx)))
+        x1 = min(int(np.ceil((x + w) - half)), int(np.ceil(cx + cw)))
+        y0 = max(int(np.ceil(y - half)), int(np.ceil(cy)))
+        y1 = min(int(np.ceil((y + h) - half)), int(np.ceil(cy + ch)))
+        if x0 >= x1 or y0 >= y1:
+            return None
+        return x0, x1, y0, y1
+
     def _uv_maps(self, c, x, y, w, h, X, Y):
         # shared uv math for glyph/image: sample point from pixel center
         fx = X.astype(_F32) + _F32(0.5)
@@ -270,11 +285,11 @@ class CanvasSink(RenderSink):
         tex = self._textures.get(c.tex_id)
         if tex is None or c.uv.w <= 0 or c.uv.h <= 0:
             return
-        clip = self._clips[-1]
-        cx, cy, cw, ch = _intersect(x, y, w, h, *clip)
-        if cw <= 0 or ch <= 0:
+        span = self._quad_pixels(x, y, w, h)
+        if span is None:
             return
-        Y, X = self._grid(cy, np.ceil(cy + ch) - 1, cx, np.ceil(cx + cw) - 1)
+        x0, x1, y0, y1 = span
+        Y, X = self._grid(y0, y1 - 1, x0, x1 - 1)
         u, v = self._uv_maps(c, x, y, w, h, X, Y)
         alpha = self._sample_alpha(tex, u, v)
         # Color c = cmd.color.faded(a.a / 255); blend only where a > 0.
@@ -285,7 +300,7 @@ class CanvasSink(RenderSink):
                     _U32(c.color.b), sa)
 
     def _sample_alpha(self, tex, u, v):
-        """detail::sample_alpha — bilinear alpha at texel centers (i + 0.5),
+        """detail::sample_alpha - bilinear alpha at texel centers (i + 0.5),
         clamped, rounded (+0.5)."""
         th, tw = tex.shape
         fx = np.maximum(np.minimum(u - _F32(0.5), _F32(tw - 1)), _F32(0))
@@ -308,11 +323,11 @@ class CanvasSink(RenderSink):
         tex = self._textures.get(c.tex_id)
         if tex is None:
             return
-        clip = self._clips[-1]
-        cx, cy, cw, ch = _intersect(x, y, w, h, *clip)
-        if cw <= 0 or ch <= 0:
+        span = self._quad_pixels(x, y, w, h)
+        if span is None:
             return
-        Y, X = self._grid(cy, np.ceil(cy + ch) - 1, cx, np.ceil(cx + cw) - 1)
+        x0, x1, y0, y1 = span
+        Y, X = self._grid(y0, y1 - 1, x0, x1 - 1)
         u, v = self._uv_maps(c, x, y, w, h, X, Y)
         if tex.ndim == 3:
             # Rgba8: nearest sample, blend the texel's own color/alpha.

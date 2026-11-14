@@ -90,11 +90,11 @@ a group is yours to wire (set the others false in the callback).
 ## Slider, ProgressBar, Spinner
 
 `Slider` drives a float range (`set_range`, `set_value`, `on_change`) and can
-carry its own caption row — `set_label` adds a title with a live formatted
+carry its own caption row - `set_label` adds a title with a live formatted
 value on the right (`set_format`, e.g. `"%.2f"`), `set_log_scale` makes
 picking across magnitudes sane, and `set_step` quantizes clicks and wheel
-ticks. `ProgressBar` shows a clamped 0–1 fraction; `Spinner` animates forever
-and takes `set_speed` (degrees per second) — it is driven by the time you
+ticks. `ProgressBar` shows a clamped 0-1 fraction; `Spinner` animates forever
+and takes `set_speed` (degrees per second) - it is driven by the time you
 pass to `ctx.tick`, so it pauses with your app.
 
 === "C++"
@@ -110,7 +110,7 @@ pass to `ctx.tick`, so it pauses with your app.
     auto& busy = root.add<slikui::Row>();
     busy.set_gap(10);
     busy.add<slikui::Spinner>();
-    busy.add<slikui::Label>("Compiling shaders…").set_color(ctx.theme().text_dim);
+    busy.add<slikui::Label>("Compiling shaders...").set_color(ctx.theme().text_dim);
     ```
 
 === "Python"
@@ -124,7 +124,7 @@ pass to `ctx.tick`, so it pauses with your app.
     root.add(slikui.ProgressBar, value=0.72)
     busy = root.add(slikui.Row, gap=10)
     busy.add(slikui.Spinner)
-    busy.add(slikui.Label, "Compiling shaders…").set_color(ui.ctx.theme.text_dim)
+    busy.add(slikui.Label, "Compiling shaders...").set_color(ui.ctx.theme.text_dim)
     ```
 
 ![sliders](../images/sliders.png)
@@ -133,12 +133,12 @@ pass to `ctx.tick`, so it pauses with your app.
 |-----|-----------|
 | `Slider::set_range` | `(float min, float max)` |
 | `Slider::set_value` | `(float, bool fire_callback = false)` |
-| `Slider::set_label` | `(std::string)` — built-in caption row, live value on the right |
+| `Slider::set_label` | `(std::string)` - built-in caption row, live value on the right |
 | `Slider::set_format` | `(const char* printf_format)` |
 | `Slider::set_log_scale` | `(bool)` |
 | `Slider::set_step` | `(float)` |
 | `Slider::on_change` | `(std::function<void(float)>)` |
-| `ProgressBar::set_value` | `(float 0–1)` |
+| `ProgressBar::set_value` | `(float 0-1)` |
 | `Spinner::set_speed` | `(float degrees/sec)` |
 
 The built-in caption row is demonstrated in the
@@ -152,7 +152,7 @@ overrides the theme text color, `set_wrap_width` word-wraps.
 === "C++"
 
     ```cpp
-    root.add<slikui::Label>("Title — 26 px").set_font_size(26);
+    root.add<slikui::Label>("Title - 26 px").set_font_size(26);
     root.add<slikui::Label>("Body label at the default 15 px size.");
     root.add<slikui::Label>("Dim secondary text.").set_color(ctx.theme().text_dim);
     root.add<slikui::Label>("Accent-colored label.").set_color(ctx.theme().accent);
@@ -161,7 +161,7 @@ overrides the theme text color, `set_wrap_width` word-wraps.
 === "Python"
 
     ```python
-    root.add(slikui.Label, "Title — 26 px", font_size=26)
+    root.add(slikui.Label, "Title - 26 px", font_size=26)
     root.add(slikui.Label, "Body label at the default 15 px size.")
     root.add(slikui.Label, "Dim secondary text.").set_color(ui.ctx.theme.text_dim)
     root.add(slikui.Label, "Accent-colored label.").set_color(ui.ctx.theme.accent)

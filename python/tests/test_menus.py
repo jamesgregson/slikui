@@ -327,10 +327,9 @@ def test_icon_button_and_toolbar():
 
 
 def test_shortcut_label_format():
-    if sys.platform == "darwin":
-        assert slikui.shortcut_label(slikui.Key.S, MOD_SHORTCUT) == "⌘S"
-        assert slikui.shortcut_label(slikui.Key.S, MOD_SHORTCUT | SHIFT) == "⌘⇧S"
-    else:
-        assert slikui.shortcut_label(slikui.Key.S, MOD_SHORTCUT) == "Ctrl+S"
-        assert slikui.shortcut_label(slikui.Key.S, MOD_SHORTCUT | SHIFT) == "Ctrl+Shift+S"
+    # Plain ASCII on every platform; MOD_SHORTCUT is Cmd on Apple, Ctrl elsewhere.
+    name = "Cmd" if sys.platform == "darwin" else "Ctrl"
+    assert slikui.shortcut_label(slikui.Key.S, MOD_SHORTCUT) == f"{name}+S"
+    assert slikui.shortcut_label(slikui.Key.S, MOD_SHORTCUT | SHIFT) == f"{name}+Shift+S"
     assert slikui.shortcut_label(slikui.Key.F5, 0) == "F5"
+    assert slikui.shortcut_label(slikui.Key.Left, 0).isascii()

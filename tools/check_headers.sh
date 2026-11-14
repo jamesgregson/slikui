@@ -1,5 +1,5 @@
 #!/bin/sh
-# Compile every public header standalone — catches missing std includes.
+# Compile every public header standalone - catches missing std includes.
 #
 # apple-libc++ pulls <cstdint>/<functional>/<string> transitively from
 # unrelated headers; libstdc++ (Linux CI) and MSVC don't, so a header that
