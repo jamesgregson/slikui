@@ -52,6 +52,19 @@ public:
 
     std::optional<Rect> clip_rect() const override { return bounds; }
 
+    float scroll_into_view(const Rect& r) override {
+        // Small margin keeps focus rings visible; a target taller than the
+        // view aligns its top.
+        const float m = 4.f;
+        float top = bounds.y + m, bot = bounds.bottom() - m;
+        float dy = 0;
+        if (r.y < top || r.h > bot - top) dy = r.y - top;
+        else if (r.bottom() > bot) dy = r.bottom() - bot;
+        float old = scroll_y_;
+        scroll_y_ = std::clamp(scroll_y_ + dy, 0.f, max_scroll_);
+        return scroll_y_ - old;
+    }
+
     Rect bar_rect() const {
         float bar_h = std::fmax(24.f, bounds.h * bounds.h / content_height_);
         float track = bounds.h - bar_h;
@@ -182,6 +195,10 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseLeave) {
+            hovered_ = size_t(-1);
+            return false;
+        }
         if (e.type == Event::Type::MouseMove) {
             hovered_ = row_at(e.pos.y);
             return false;
@@ -287,6 +304,10 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseLeave) {
+            hovered_ = size_t(-1);
+            return false;
+        }
         if (e.type == Event::Type::MouseMove) {
             hovered_ = tab_at(e.pos.x);
             return false;

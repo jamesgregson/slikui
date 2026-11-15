@@ -70,7 +70,8 @@ hover/press transitions and the `Anim` tween helper advance here.
 
 **3. Paint (`render`).** `paint_tree` walks the tree; widgets append commands
 to a flat `DrawList` through `PaintEnv` (draw list + theme + font). Containers
-may provide `clip_rect()` to clip their subtree. The finished list goes to the
+may provide `clip_rect()` to clip their subtree; hit-testing honors the same
+clip, so content clipped out of view can't be clicked. The finished list goes to the
 [render sink](backends.md); popups paint after the root, dialogs and toasts
 above those.
 

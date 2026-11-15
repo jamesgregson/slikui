@@ -723,8 +723,17 @@ private:
 
     Widget* hit_test_in(Widget& w, Vec2 pos) {
         if (!w.visible) return nullptr;
-        for (auto it = w.children.rbegin(); it != w.children.rend(); ++it)
-            if (Widget* hit_child = hit_test_in(**it, pos)) return hit_child;
+        // Children are only pickable where they are painted: a clipping
+        // widget (ScrollArea) hides content scrolled out of view, so that
+        // content must not steal clicks from widgets outside the clip.
+        std::optional<Rect> clip = w.clip_rect();
+        if (!clip || clip->contains(pos)) {
+            for (auto it = w.children.rbegin(); it != w.children.rend(); ++it) {
+                std::optional<Rect> child_clip = w.child_clip_rect(**it);
+                if (child_clip && !child_clip->contains(pos)) continue;
+                if (Widget* hit_child = hit_test_in(**it, pos)) return hit_child;
+            }
+        }
         return w.bounds.contains(pos) ? &w : nullptr;
     }
 
@@ -746,6 +755,14 @@ private:
         if (backwards) next = cur == n ? n - 1 : (cur + n - 1) % n;
         else next = cur == n ? 0 : (cur + 1) % n;
         set_focus(focusables[next]);
+        reveal(focusables[next]);
+    }
+
+    // Scroll every scrolling ancestor so `w` is in view (inner first; each
+    // ancestor sees the frame shifted by the scrolls already applied).
+    void reveal(Widget* w) {
+        Rect r = w->bounds;
+        for (Widget* p = w->parent; p; p = p->parent) r.y -= p->scroll_into_view(r);
     }
 
     void collect_focusables(Widget* w, std::vector<Widget*>& out) {

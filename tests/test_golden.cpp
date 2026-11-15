@@ -45,6 +45,28 @@ struct Golden {
 } // namespace
 
 
+TEST(golden_listview_hover_clears_on_leave) {
+    Golden g;
+    auto& root = g.ctx.set_root<slikui::Column>();
+    auto& lv = root.add<slikui::ListView>().set_items({"a", "b"});
+    g.frame();
+    REQUIRE(lv.bounds.bottom() < 110.f); // room below the list to move to
+
+    auto move = [&](float x, float y) {
+        slikui::Event e{};
+        e.type = slikui::Event::Type::MouseMove;
+        e.pos = {x, y};
+        g.ctx.handle(e);
+        g.frame();
+    };
+    // Right end of row 0: no text, just the hover fill.
+    int px = int(lv.bounds.right()) - 8, py = int(lv.bounds.y) + 6;
+    move(float(px), float(py));
+    CHECK(g.pixel(px, py) == g.ctx.theme().surface_alt);
+    move(float(px), 115.f); // off the list onto the bare root column
+    CHECK(g.pixel(px, py) == g.ctx.theme().background);
+}
+
 TEST(golden_background_fill) {
     Golden g;
     g.ctx.set_root<slikui::Column>();
