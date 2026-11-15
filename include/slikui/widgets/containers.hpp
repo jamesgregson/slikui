@@ -466,6 +466,9 @@ public:
 
     bool on_event(const Event& e) override {
         switch (e.type) {
+        case Event::Type::MouseLeave:
+            hovered_ = false;
+            return false;
         case Event::Type::MouseMove:
             hovered_ = divider_.contains(e.pos);
             if (dragging_) {
@@ -494,6 +497,15 @@ public:
     }
 
     const char* widget_type() const override { return "Splitter"; }
+
+protected:
+    // Each pane clips to its own frame: content that overflows a squeezed
+    // pane neither paints nor picks over the divider or the other pane.
+    std::optional<Rect> child_clip_rect(const Widget& c) const override {
+        for (size_t i = 0; i < children.size() && i < 2; ++i)
+            if (children[i].get() == &c) return c.bounds;
+        return {};
+    }
 
 private:
     static constexpr float kGrab = 6.f; // divider hit area, logical px

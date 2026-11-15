@@ -18,7 +18,9 @@ A widget implements whichever of these it needs:
 | `on_event(const Event&)` | return `true` to consume an event |
 | `tick(Time)` | animation / per-frame state |
 | `focusable()`, `expands_main()`, `stretch_cross()` | opt-in layout/focus behavior |
-| `clip_rect()` | container clipping for its subtree |
+| `clip_rect()` | container clipping for its subtree (painting and hit-testing) |
+| `child_clip_rect(const Widget&)` | C++ only: extra clip for one child's subtree (e.g. per pane) |
+| `scroll_into_view(const Rect&)` | C++ only: scrolling containers bring a keyboard-focused descendant into view |
 | `attached(Context&)` | called once when the widget joins a context |
 
 Layout runs in `Context::tick` (Python `app.tick()`), not in `render`: bounds

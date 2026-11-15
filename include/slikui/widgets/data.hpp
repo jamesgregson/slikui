@@ -386,6 +386,10 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseLeave) {
+            hovered_ = -1;
+            return false;
+        }
         if (e.type == Event::Type::MouseMove) {
             hovered_ = bounds.contains(e.pos) ? long(row_at(e.pos.y)) : -1;
             return false;
@@ -522,6 +526,10 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseLeave) {
+            hovered_ = -1;
+            return false;
+        }
         if (e.type == Event::Type::MouseMove) {
             hovered_ = bounds.contains(e.pos) ? row_at(e.pos.y) : -1;
             return false;

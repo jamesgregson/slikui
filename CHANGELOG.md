@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.1
+
+### Fixed
+
+- **Clipped content is no longer pickable.** Hit-testing now honors
+  `clip_rect()`: widgets scrolled out of a `ScrollArea` (e.g. behind a tab
+  header) no longer steal clicks, hover, tooltips or context menus from what
+  is actually drawn there.
+- **Tab focus scrolls into view.** Moving keyboard focus with Tab/Shift+Tab
+  scrolls every enclosing `ScrollArea` so the focused widget is visible.
+- **Hover highlights clear on leave** in `ListView`, `Tabs`, `TreeView`,
+  `Table`, `Segmented` and the `Splitter` divider.
+- **`Splitter` clips each pane**: content overflowing a squeezed pane no longer
+  paints or picks over the divider or the other pane.
+
+### Added
+
+- `Widget::child_clip_rect(child)` (per-child clip, honored by painting and
+  hit-testing) and `Widget::scroll_into_view(rect)` hooks.
+
+### Removed
+
+- `Widget::dispatch(Event)`: an unused broadcast helper that ignored pointer
+  position and clipping. Route events through `Context::handle`.
+
 ## 0.4.0
 
 Added OpenGL renderer support in python. Batcher collects draw calls and is

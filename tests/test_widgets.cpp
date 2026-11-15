@@ -223,6 +223,118 @@ TEST(scrollarea_wheel_scroll) {
 }
 
 
+TEST(scrollarea_clips_picking_to_viewport) {
+    // Tabs header above a scrolled page: content scrolled up behind the
+    // header is clipped from view and must not receive the header's clicks.
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    size_t tab_changed = 99;
+    auto& tabs = root.add<slikui::Tabs>()
+                     .set_tabs({"a", "second tab label"}) // tab 1 starts ~25px in
+                     .on_change([&](size_t i) { tab_changed = i; });
+    auto& scroll = root.add<slikui::ScrollArea>();
+    scroll.hint_w_ = 300;
+    scroll.hint_h_ = 60;
+    int clicks = 0;
+    for (int i = 0; i < 20; ++i)
+        scroll.add<slikui::Button>("row").on_click([&] { ++clicks; });
+    f.frame();
+
+    slikui::Event wheel{};
+    wheel.type = slikui::Event::Type::Scroll;
+    wheel.pos = scroll.bounds.center();
+    wheel.scroll = {0, -3};
+    f.ctx.handle(wheel);
+    f.frame();
+
+    // Probe a point where a scrolled-away button overlaps the tab header.
+    slikui::Widget* hidden = nullptr;
+    for (auto& c : scroll.content().children) {
+        float top = std::fmax(c->bounds.y, tabs.bounds.y);
+        float bot = std::fmin(c->bounds.bottom(), tabs.bounds.bottom());
+        if (bot - top > 4.f && c->bounds.bottom() <= scroll.bounds.y) hidden = c.get();
+    }
+    REQUIRE(hidden != nullptr);
+    float top = std::fmax(hidden->bounds.y, tabs.bounds.y);
+    float bot = std::fmin(hidden->bounds.bottom(), tabs.bounds.bottom());
+    slikui::Vec2 p{hidden->bounds.center().x, (top + bot) * .5f};
+    REQUIRE(!scroll.bounds.contains(p));
+
+    f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, p.x, p.y));
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, p.x, p.y));
+    CHECK(clicks == 0);
+    CHECK(tab_changed == 1);
+}
+
+TEST(scrollarea_reveals_keyboard_focus) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& scroll = root.add<slikui::ScrollArea>();
+    scroll.hint_w_ = 300;
+    scroll.hint_h_ = 60;
+    std::vector<slikui::Button*> rows;
+    for (int i = 0; i < 20; ++i) rows.push_back(&scroll.add<slikui::Button>("row"));
+    f.frame();
+
+    auto in_view = [&](const slikui::Widget& w) {
+        return w.bounds.y >= scroll.bounds.y - .5f &&
+               w.bounds.bottom() <= scroll.bounds.bottom() + .5f;
+    };
+    REQUIRE(!in_view(*rows[10]));
+    for (int i = 0; i <= 10; ++i) { // tab down to rows[10]
+        f.ctx.handle(f.key(slikui::Key::Tab));
+        f.frame();
+    }
+    REQUIRE(rows[10]->focused);
+    CHECK(in_view(*rows[10]));
+    CHECK(!in_view(*rows[0]));
+
+    // Wrap around backwards to the last row, then forwards to the first.
+    for (int i = 0; i <= 10; ++i) {
+        f.ctx.handle(f.key(slikui::Key::Tab, slikui::ModShift));
+        f.frame();
+    }
+    REQUIRE(rows[19]->focused);
+    CHECK(in_view(*rows[19]));
+    f.ctx.handle(f.key(slikui::Key::Tab));
+    f.frame();
+    REQUIRE(rows[0]->focused);
+    CHECK(in_view(*rows[0]));
+}
+
+TEST(splitter_pane_overflow_does_not_cover_divider) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& split = root.add<slikui::Splitter>(/*vertical=*/true).set_fraction(0.f);
+    auto& top = split.add<slikui::Column>(); // overflows its squeezed pane
+    int clicks = 0;
+    for (int i = 0; i < 6; ++i) top.add<slikui::Button>("row").on_click([&] { ++clicks; });
+    auto& bottom = split.add<slikui::Column>();
+    for (int i = 0; i < 6; ++i) bottom.add<slikui::Label>("pane two");
+    f.frame();
+
+    // Divider centre, and a point inside pane two, both under overflow.
+    slikui::Vec2 d{top.children[0]->bounds.center().x, top.bounds.bottom() + 3.f};
+    slikui::Vec2 p2{d.x, bottom.bounds.y + 10.f};
+    bool covered_d = false, covered_p2 = false;
+    for (auto& c : top.children) {
+        covered_d |= c->bounds.contains(d);
+        covered_p2 |= c->bounds.contains(p2);
+    }
+    REQUIRE(covered_d && covered_p2);
+
+    f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, p2.x, p2.y));
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, p2.x, p2.y));
+    CHECK(clicks == 0);
+
+    float before = split.fraction();
+    f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, d.x, d.y));
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, d.x, d.y + 40.f));
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, d.x, d.y + 40.f));
+    CHECK(clicks == 0);
+    CHECK(split.fraction() > before); // the divider was grabbed and dragged
+}
+
 TEST(window_resize_reflows_layout) {
     Fixture f;
     auto& root = f.ctx.set_root<slikui::Column>();

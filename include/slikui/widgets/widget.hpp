@@ -97,7 +97,12 @@ public:
         paint(env);
         std::optional<Rect> clip = clip_rect();
         if (clip) env.list.push_clip(*clip);
-        for (const auto& c : children) c->paint_tree(env);
+        for (const auto& c : children) {
+            std::optional<Rect> child_clip = child_clip_rect(*c);
+            if (child_clip) env.list.push_clip(*child_clip);
+            c->paint_tree(env);
+            if (child_clip) env.list.pop_clip();
+        }
         if (clip) env.list.pop_clip();
         paint_over(env);
     }
@@ -122,7 +127,19 @@ protected:
     float ui_scale() const { return theme_scale_of(ctx); }
 
     // Optional clip region applied to the subtree while painting children.
+    // Hit-testing honors it too: children are not pickable outside it.
     virtual std::optional<Rect> clip_rect() const { return {}; }
+
+    // Optional extra clip for one child's subtree (inside clip_rect), e.g.
+    // a Splitter keeping each pane's overflow off the divider and the other
+    // pane. Honored by painting and hit-testing alike.
+    virtual std::optional<Rect> child_clip_rect(const Widget&) const { return {}; }
+
+    // Scrolling containers (ScrollArea) adjust their offset so `r` (absolute,
+    // in the current layout) is in view, and return how far the content
+    // moved up (px; negative = down). Context calls it on each ancestor of a
+    // widget that keyboard focus moved to. Takes effect at the next arrange.
+    virtual float scroll_into_view(const Rect&) { return 0.f; }
 
     // Called by Context once per widget when it enters a context.
     virtual void attached(Context&) {}
@@ -231,14 +248,6 @@ public:
     // The Context this widget is attached to (null while detached). Menus and
     // other popup widgets read it off their anchor when first opened.
     Context* context() const { return ctx; }
-
-    // Invoke an event on the subtree, deepest-first, until consumed.
-    bool dispatch(const Event& e) {
-        if (!visible) return false;
-        for (auto it = children.rbegin(); it != children.rend(); ++it)
-            if ((*it)->dispatch(e)) return true;
-        return on_event(e);
-    }
 
     void tick_tree(Time t) {
         tick(t);
