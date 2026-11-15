@@ -8943,7 +8943,12 @@ public:
         paint(env);
         std::optional<Rect> clip = clip_rect();
         if (clip) env.list.push_clip(*clip);
-        for (const auto& c : children) c->paint_tree(env);
+        for (const auto& c : children) {
+            std::optional<Rect> child_clip = child_clip_rect(*c);
+            if (child_clip) env.list.push_clip(*child_clip);
+            c->paint_tree(env);
+            if (child_clip) env.list.pop_clip();
+        }
         if (clip) env.list.pop_clip();
         paint_over(env);
     }
@@ -8968,7 +8973,19 @@ protected:
     float ui_scale() const { return theme_scale_of(ctx); }
 
     // Optional clip region applied to the subtree while painting children.
+    // Hit-testing honors it too: children are not pickable outside it.
     virtual std::optional<Rect> clip_rect() const { return {}; }
+
+    // Optional extra clip for one child's subtree (inside clip_rect), e.g.
+    // a Splitter keeping each pane's overflow off the divider and the other
+    // pane. Honored by painting and hit-testing alike.
+    virtual std::optional<Rect> child_clip_rect(const Widget&) const { return {}; }
+
+    // Scrolling containers (ScrollArea) adjust their offset so `r` (absolute,
+    // in the current layout) is in view, and return how far the content
+    // moved up (px; negative = down). Context calls it on each ancestor of a
+    // widget that keyboard focus moved to. Takes effect at the next arrange.
+    virtual float scroll_into_view(const Rect&) { return 0.f; }
 
     // Called by Context once per widget when it enters a context.
     virtual void attached(Context&) {}
@@ -9077,14 +9094,6 @@ public:
     // The Context this widget is attached to (null while detached). Menus and
     // other popup widgets read it off their anchor when first opened.
     Context* context() const { return ctx; }
-
-    // Invoke an event on the subtree, deepest-first, until consumed.
-    bool dispatch(const Event& e) {
-        if (!visible) return false;
-        for (auto it = children.rbegin(); it != children.rend(); ++it)
-            if ((*it)->dispatch(e)) return true;
-        return on_event(e);
-    }
 
     void tick_tree(Time t) {
         tick(t);
@@ -9832,8 +9841,17 @@ private:
 
     Widget* hit_test_in(Widget& w, Vec2 pos) {
         if (!w.visible) return nullptr;
-        for (auto it = w.children.rbegin(); it != w.children.rend(); ++it)
-            if (Widget* hit_child = hit_test_in(**it, pos)) return hit_child;
+        // Children are only pickable where they are painted: a clipping
+        // widget (ScrollArea) hides content scrolled out of view, so that
+        // content must not steal clicks from widgets outside the clip.
+        std::optional<Rect> clip = w.clip_rect();
+        if (!clip || clip->contains(pos)) {
+            for (auto it = w.children.rbegin(); it != w.children.rend(); ++it) {
+                std::optional<Rect> child_clip = w.child_clip_rect(**it);
+                if (child_clip && !child_clip->contains(pos)) continue;
+                if (Widget* hit_child = hit_test_in(**it, pos)) return hit_child;
+            }
+        }
         return w.bounds.contains(pos) ? &w : nullptr;
     }
 
@@ -9855,6 +9873,14 @@ private:
         if (backwards) next = cur == n ? n - 1 : (cur + n - 1) % n;
         else next = cur == n ? 0 : (cur + 1) % n;
         set_focus(focusables[next]);
+        reveal(focusables[next]);
+    }
+
+    // Scroll every scrolling ancestor so `w` is in view (inner first; each
+    // ancestor sees the frame shifted by the scrolls already applied).
+    void reveal(Widget* w) {
+        Rect r = w->bounds;
+        for (Widget* p = w->parent; p; p = p->parent) r.y -= p->scroll_into_view(r);
     }
 
     void collect_focusables(Widget* w, std::vector<Widget*>& out) {
@@ -10660,6 +10686,9 @@ public:
 
     bool on_event(const Event& e) override {
         switch (e.type) {
+        case Event::Type::MouseLeave:
+            hovered_ = false;
+            return false;
         case Event::Type::MouseMove:
             hovered_ = divider_.contains(e.pos);
             if (dragging_) {
@@ -10688,6 +10717,15 @@ public:
     }
 
     const char* widget_type() const override { return "Splitter"; }
+
+protected:
+    // Each pane clips to its own frame: content that overflows a squeezed
+    // pane neither paints nor picks over the divider or the other pane.
+    std::optional<Rect> child_clip_rect(const Widget& c) const override {
+        for (size_t i = 0; i < children.size() && i < 2; ++i)
+            if (children[i].get() == &c) return c.bounds;
+        return {};
+    }
 
 private:
     static constexpr float kGrab = 6.f; // divider hit area, logical px
@@ -11294,6 +11332,9 @@ public:
 
     bool on_event(const Event& e) override {
         switch (e.type) {
+        case Event::Type::MouseLeave:
+            hovered_ = -1;
+            return false;
         case Event::Type::MouseMove:
             hovered_ = index_at(e.pos.x);
             return false;
@@ -12239,6 +12280,19 @@ public:
 
     std::optional<Rect> clip_rect() const override { return bounds; }
 
+    float scroll_into_view(const Rect& r) override {
+        // Small margin keeps focus rings visible; a target taller than the
+        // view aligns its top.
+        const float m = 4.f;
+        float top = bounds.y + m, bot = bounds.bottom() - m;
+        float dy = 0;
+        if (r.y < top || r.h > bot - top) dy = r.y - top;
+        else if (r.bottom() > bot) dy = r.bottom() - bot;
+        float old = scroll_y_;
+        scroll_y_ = std::clamp(scroll_y_ + dy, 0.f, max_scroll_);
+        return scroll_y_ - old;
+    }
+
     Rect bar_rect() const {
         float bar_h = std::fmax(24.f, bounds.h * bounds.h / content_height_);
         float track = bounds.h - bar_h;
@@ -12369,6 +12423,10 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseLeave) {
+            hovered_ = size_t(-1);
+            return false;
+        }
         if (e.type == Event::Type::MouseMove) {
             hovered_ = row_at(e.pos.y);
             return false;
@@ -12474,6 +12532,10 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseLeave) {
+            hovered_ = size_t(-1);
+            return false;
+        }
         if (e.type == Event::Type::MouseMove) {
             hovered_ = tab_at(e.pos.x);
             return false;
@@ -13035,6 +13097,10 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseLeave) {
+            hovered_ = -1;
+            return false;
+        }
         if (e.type == Event::Type::MouseMove) {
             hovered_ = bounds.contains(e.pos) ? long(row_at(e.pos.y)) : -1;
             return false;
@@ -13171,6 +13237,10 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::MouseLeave) {
+            hovered_ = -1;
+            return false;
+        }
         if (e.type == Event::Type::MouseMove) {
             hovered_ = bounds.contains(e.pos) ? row_at(e.pos.y) : -1;
             return false;
@@ -25354,7 +25424,7 @@ private:
 
 #define SLIKUI_VERSION_MAJOR 0
 #define SLIKUI_VERSION_MINOR 4
-#define SLIKUI_VERSION_PATCH 0
+#define SLIKUI_VERSION_PATCH 1
 
 #define SLIKUI_VERSION_STR_(x) #x
 #define SLIKUI_VERSION_XSTR_(x) SLIKUI_VERSION_STR_(x)
