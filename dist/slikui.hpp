@@ -336,6 +336,12 @@ struct Event {
         MouseEnter,     // pointer entered this widget or a descendant; pos
         MouseLeave,     // pointer left this widget and all its descendants
         FocusGained,    // this widget received keyboard focus
+        // --- appended in 0.5 ---
+        PopupClosed,    // this popup or dialog (its root widget) left the
+                        // screen: click outside, Escape, focus loss, menu
+                        // action, close_popups/close_dialog, ... Sent once the
+                        // Context is between operations; not sent when it
+                        // was reopened in the same pass. Does not bubble.
     };
 
     Type type;
@@ -10560,11 +10566,7 @@ public:
 
     void close_popups() {
         Busy busy(*this);
-        for (auto& p : popups_) {
-            Widget* root = p.widget;
-            if (focused_ && inside(focused_, root)) set_focus(nullptr);
-            if (p.owned) closing_.push_back(std::move(p.owned));
-        }
+        for (size_t i = popups_.size(); i-- > 0;) retire_popup(popups_[i]); // topmost first
         popups_.clear();
     }
     bool has_popups() const { return !popups_.empty(); }
@@ -10624,6 +10626,7 @@ public:
             if (dialogs_[i].widget == &d) {
                 if (focused_ && inside(focused_, dialogs_[i].widget))
                     set_focus(nullptr);
+                focus_notes_.push_back({dialogs_[i].widget, Event::Type::PopupClosed});
                 if (dialogs_[i].owned)
                     closing_.push_back(std::move(dialogs_[i].owned));
                 dialogs_.erase(dialogs_.begin() + long(i));
@@ -10808,6 +10811,9 @@ private:
         for (size_t i = 0; i < focus_notes_.size(); ++i) {
             FocusNote n = focus_notes_[i];
             if (!n.widget) continue; // forgotten (destroyed) meanwhile
+            // Closed and reopened within one pass (menus re-pushing
+            // themselves): it never really closed.
+            if (n.type == Event::Type::PopupClosed && on_screen(n.widget)) continue;
             Event e{};
             e.type = n.type;
             n.widget->on_event(e);
@@ -10919,12 +10925,17 @@ private:
     }
     void close_popups_above_index(long k) {
         Busy busy(*this);
-        for (long i = long(popups_.size()) - 1; i > k; --i) {
-            Popup& p = popups_[size_t(i)];
-            if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
-            if (p.owned) closing_.push_back(std::move(p.owned));
-        }
+        for (long i = long(popups_.size()) - 1; i > k; --i) retire_popup(popups_[size_t(i)]);
         if (k + 1 < long(popups_.size())) popups_.resize(size_t(k + 1));
+    }
+
+    // A popup is leaving the stack: drop focus inside it, queue its
+    // PopupClosed, and defer an owned popup's destruction past that
+    // notification (closing_ is cleared after the notes flush).
+    void retire_popup(Popup& p) {
+        if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
+        focus_notes_.push_back({p.widget, Event::Type::PopupClosed});
+        if (p.owned) closing_.push_back(std::move(p.owned));
     }
 
     // Dispatch an event up the chain from `w` to the root, until consumed.
@@ -11117,10 +11128,17 @@ private:
     std::shared_ptr<const bool> alive_ = std::make_shared<const bool>(true);
 
     // Focus notifications waiting for a safe point (see set_focus / Busy).
+    // Queued widget notifications: FocusLost / FocusGained / PopupClosed.
     struct FocusNote {
         Widget* widget;
         Event::Type type;
     };
+    bool on_screen(const Widget* w) const {
+        if (popup_open(w)) return true;
+        for (const auto& d : dialogs_)
+            if (d.widget == w) return true;
+        return false;
+    }
     std::vector<FocusNote> focus_notes_;
     int busy_ = 0;
 
@@ -23846,6 +23864,11 @@ public:
     // Fired each time the menu is about to open - refresh enabled flags there
     // (checkmarks read live through MenuItem::set_checked_fn callbacks).
     Menu& on_open(std::function<void()> f) { on_open_ = std::move(f); return *this; }
+    // Fired when the menu leaves the screen for any reason (item chosen,
+    // click outside, Escape, another menu opened, focus lost), after the
+    // event that closed it - reopening from here is safe. When one menu
+    // replaces another, the new one's on_open runs first.
+    Menu& on_close(std::function<void()> f) { on_close_ = std::move(f); return *this; }
 
     Menu& add_item(std::string label, std::function<void()> action,
                    std::string hint = {}, bool enabled = true) {
@@ -23900,6 +23923,16 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::PopupClosed) {
+            // Borrowed menus are reopened later: don't come back with the
+            // last-hovered row still lit (no ticks run while closed).
+            for (auto& c : children)
+                if (auto* it = dynamic_cast<MenuItem*>(c.get())) it->hover_ = Anim{0, 0, 15};
+            if (opened_item_) opened_item_->note_opened_from(nullptr);
+            opened_item_ = nullptr;
+            if (on_close_) on_close_();
+            return true;
+        }
         if (e.type == Event::Type::MouseMove && ctx && opened_item_ &&
             ctx->popup_open(opened_item_->submenu_) &&
             !opened_item_->bounds.contains(e.pos)) {
@@ -23936,7 +23969,7 @@ private:
 
     std::string title_;
     float min_width_ = 140.f;
-    std::function<void()> on_open_;
+    std::function<void()> on_open_, on_close_;
     std::vector<std::unique_ptr<Menu>> owned_submenus_;
     MenuItem* opened_item_ = nullptr; // item whose submenu is currently open
 
@@ -24376,9 +24409,11 @@ public:
     Vec2 position() const { return pos_; }
     Dialog& on_close(std::function<void()> f) { on_close_ = std::move(f); return *this; }
 
+    // Closes the dialog; on_close fires (once) for every way it closes -
+    // this, Escape, Context::close_dialog - after the closing event.
     void request_close() {
-        if (ctx) ctx->close_dialog(*this);
-        if (on_close_) on_close_();
+        if (ctx) ctx->close_dialog(*this);  // -> PopupClosed -> on_close
+        else if (on_close_) on_close_();     // never opened: fire directly
     }
 
     void attached(Context& c) override {
@@ -24406,6 +24441,9 @@ public:
 
     bool on_event(const Event& e) override {
         switch (e.type) {
+        case Event::Type::PopupClosed:
+            if (on_close_) on_close_();
+            return true;
         case Event::Type::MousePress:
             if (e.button == MouseLeft && enabled && children[0]->bounds.contains(e.pos) &&
                 !children[0]->children[2]->bounds.contains(e.pos)) {

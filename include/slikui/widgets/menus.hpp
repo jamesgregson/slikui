@@ -271,6 +271,11 @@ public:
     // Fired each time the menu is about to open - refresh enabled flags there
     // (checkmarks read live through MenuItem::set_checked_fn callbacks).
     Menu& on_open(std::function<void()> f) { on_open_ = std::move(f); return *this; }
+    // Fired when the menu leaves the screen for any reason (item chosen,
+    // click outside, Escape, another menu opened, focus lost), after the
+    // event that closed it - reopening from here is safe. When one menu
+    // replaces another, the new one's on_open runs first.
+    Menu& on_close(std::function<void()> f) { on_close_ = std::move(f); return *this; }
 
     Menu& add_item(std::string label, std::function<void()> action,
                    std::string hint = {}, bool enabled = true) {
@@ -325,6 +330,16 @@ public:
     }
 
     bool on_event(const Event& e) override {
+        if (e.type == Event::Type::PopupClosed) {
+            // Borrowed menus are reopened later: don't come back with the
+            // last-hovered row still lit (no ticks run while closed).
+            for (auto& c : children)
+                if (auto* it = dynamic_cast<MenuItem*>(c.get())) it->hover_ = Anim{0, 0, 15};
+            if (opened_item_) opened_item_->note_opened_from(nullptr);
+            opened_item_ = nullptr;
+            if (on_close_) on_close_();
+            return true;
+        }
         if (e.type == Event::Type::MouseMove && ctx && opened_item_ &&
             ctx->popup_open(opened_item_->submenu_) &&
             !opened_item_->bounds.contains(e.pos)) {
@@ -361,7 +376,7 @@ private:
 
     std::string title_;
     float min_width_ = 140.f;
-    std::function<void()> on_open_;
+    std::function<void()> on_open_, on_close_;
     std::vector<std::unique_ptr<Menu>> owned_submenus_;
     MenuItem* opened_item_ = nullptr; // item whose submenu is currently open
 

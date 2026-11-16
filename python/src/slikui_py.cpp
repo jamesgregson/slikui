@@ -784,7 +784,8 @@ NB_MODULE(_slikui, m) {
         .value("DoubleClick", Event::Type::DoubleClick)
         .value("MouseEnter", Event::Type::MouseEnter)
         .value("MouseLeave", Event::Type::MouseLeave)
-        .value("FocusGained", Event::Type::FocusGained);
+        .value("FocusGained", Event::Type::FocusGained)
+        .value("PopupClosed", Event::Type::PopupClosed);
 
     nb::class_<Event>(m, "Event")
         .def("__init__",
@@ -1770,6 +1771,10 @@ NB_MODULE(_slikui, m) {
              nb::arg("w"), nb::rv_policy::reference)
         .def("on_open", [](Menu& m, std::function<void()> f) -> Menu& { return m.on_open(std::move(f)); },
              nb::arg("f"), nb::rv_policy::reference)
+        .def("on_close", [](Menu& m, std::function<void()> f) -> Menu& { return m.on_close(std::move(f)); },
+             nb::arg("f"), nb::rv_policy::reference,
+             "Fired when the menu leaves the screen for any reason, after the "
+             "closing event (reopening from here is safe).")
         .def("open_for",
              [](Menu& m, Widget& anchor, PopupDir dir) {
                  m.open_for(anchor, dir);

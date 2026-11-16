@@ -825,3 +825,99 @@ TEST(treeview_row_rect) {
     CHECK_NEAR(tree.row_rect(2).y, tree.bounds.y + r.h, 0.01f);
     CHECK(tree.row_rect(99).empty());
 }
+
+// ---------------------------------------------------------------------------
+// PopupClosed
+// ---------------------------------------------------------------------------
+namespace {
+struct PopupProbe : slikui::Widget {
+    int* closed;
+    std::function<void()> on_closed;
+    explicit PopupProbe(int* counter) : closed(counter) {}
+    slikui::Size measure(const slikui::Constraints& c) override { return c.clamp({60, 30}); }
+    bool on_event(const slikui::Event& e) override {
+        if (e.type != slikui::Event::Type::PopupClosed) return false;
+        ++*closed;
+        if (on_closed) on_closed();
+        return true;
+    }
+};
+} // namespace
+
+TEST(popup_closed_on_every_path_once) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& anchor = root.add<slikui::Button>("anchor");
+    f.frame();
+    int closed = 0;
+    auto open = [&] {
+        f.ctx.push_popup(std::make_unique<PopupProbe>(&closed), anchor, slikui::PopupDir::Below);
+        f.frame();
+    };
+    using T = slikui::Event::Type;
+
+    open(); // click outside every popup
+    f.ctx.handle(f.mouse(T::MousePress, 300, 230));
+    CHECK(closed == 1);
+    CHECK(f.ctx.popup_count() == 0);
+
+    open(); // Escape
+    f.ctx.handle(f.key(slikui::Key::Escape));
+    CHECK(closed == 2);
+
+    open(); // app focus lost
+    slikui::Event lost{};
+    lost.type = T::FocusLost;
+    f.ctx.handle(lost);
+    CHECK(closed == 3);
+
+    open(); // programmatic, outside any pass
+    f.ctx.close_popups();
+    CHECK(closed == 4);
+    f.frame(); // owned probe destroyed after its notification (ASan)
+    f.ctx.close_popups(); // nothing open: no notification
+    CHECK(closed == 4);
+}
+
+TEST(popup_closed_handler_may_reopen) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& anchor = root.add<slikui::Button>("anchor");
+    f.frame();
+    int closed = 0;
+    auto& first = static_cast<PopupProbe&>(f.ctx.push_popup(
+        std::make_unique<PopupProbe>(&closed), anchor, slikui::PopupDir::Below));
+    first.on_closed = [&] { // runs after the Escape pass, stack unlocked
+        f.ctx.push_popup(std::make_unique<PopupProbe>(&closed), anchor, slikui::PopupDir::Above);
+    };
+    f.frame();
+    f.ctx.handle(f.key(slikui::Key::Escape));
+    CHECK(closed == 1);
+    CHECK(f.ctx.popup_count() == 1); // the replacement is open
+    f.frame();
+    f.ctx.handle(f.key(slikui::Key::Escape));
+    CHECK(closed == 2);
+    CHECK(f.ctx.popup_count() == 0);
+    f.frame();
+}
+
+TEST(popup_closed_skipped_when_reopened_same_pass) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& anchor = root.add<slikui::Button>("anchor");
+    int closed = 0;
+    PopupProbe borrowed(&closed);
+    // Close + re-push inside one handle() pass - what Menu::open_for does.
+    f.ctx.add_shortcut(slikui::Key::R, slikui::ModCtrl, [&] {
+        f.ctx.close_popups();
+        f.ctx.push_popup(borrowed, anchor, slikui::PopupDir::Below);
+    });
+    f.frame();
+    f.ctx.push_popup(borrowed, anchor, slikui::PopupDir::Below);
+    f.frame();
+    f.ctx.handle(f.key(slikui::Key::R, slikui::ModCtrl));
+    CHECK(closed == 0); // it never really closed
+    CHECK(f.ctx.popup_count() == 1);
+    f.ctx.close_popups();
+    CHECK(closed == 1);
+}

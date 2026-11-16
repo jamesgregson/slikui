@@ -72,6 +72,12 @@ struct Event {
         MouseEnter,     // pointer entered this widget or a descendant; pos
         MouseLeave,     // pointer left this widget and all its descendants
         FocusGained,    // this widget received keyboard focus
+        // --- appended in 0.5 ---
+        PopupClosed,    // this popup or dialog (its root widget) left the
+                        // screen: click outside, Escape, focus loss, menu
+                        // action, close_popups/close_dialog, ... Sent once the
+                        // Context is between operations; not sent when it
+                        // was reopened in the same pass. Does not bubble.
     };
 
     Type type;

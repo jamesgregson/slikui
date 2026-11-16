@@ -53,6 +53,15 @@
 - `Color::from_float(r, g, b, a = 1)` (Python `Color.from_float`) and
   Python `Constraints(min, max)`.
 - Python `Container.set_padding(left, top, right, bottom)` (per side).
+- **`Event::Type::PopupClosed`**: a popup's (or dialog's) root widget is told
+  when it leaves the screen, whatever closed it - click outside, Escape,
+  focus loss, a menu action, `close_popups`/`close_dialog`. Delivered after
+  the closing event (reopening from the handler is safe) and skipped when the
+  popup was reopened within the same pass. Owned popups are destroyed only
+  after their notification.
+- `Menu::on_close(fn)` (Python `Menu.on_close`), pairing `on_open`. Closed
+  menus also drop their rows' hover highlight, so a reopened menu doesn't
+  flash the last-hovered row.
 
 ### Changed
 
@@ -73,6 +82,9 @@
 
 ### Fixed
 
+- **`Dialog::on_close` fires for every way a dialog closes**: Escape and
+  `Context::close_dialog` skipped it (only the X button / `request_close`
+  fired it). It now runs once, after the closing event.
 - **An open toast no longer swallows clicks**: the first press anywhere
   outside it closed the toast and was dropped (the press never reached its
   widget, so no Click either).

@@ -39,7 +39,7 @@ app and traps presses outside it. Escape or the X button closes.
 | `set_title` | `(std::string)` |
 | `set_modal` | `(bool)` |
 | `set_position` | `(Vec2)` |
-| `on_close` | `(std::function<void()>)` |
+| `on_close` | `(std::function<void()>)` - once per close, however it closes (X, Escape, `close_dialog`), after the closing event |
 | `add_button` | MessageBox - `(label, fn)` |
 
 ## Toast

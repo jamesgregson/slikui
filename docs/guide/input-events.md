@@ -28,6 +28,7 @@ The Context synthesizes these for widgets (hosts never send them):
 | `DoubleClick` | after the `Click` whose `clicks == 2` | the pressed widget, bubbling |
 | `MouseEnter` / `MouseLeave` | the pointer entered / left the widget *and its descendants* | that widget only |
 | `FocusGained` / `FocusLost` | keyboard focus moved (or the app lost focus mid-drag) | that widget only |
+| `PopupClosed` | this popup or dialog left the screen (click outside, Escape, focus loss, menu action, `close_popups`, ...); sent after the closing event, skipped if it was reopened in the same pass | the popup's root widget only |
 
 `clicks` counts presses of the same button within
 `Event::kMultiClickTime` (0.4 s, Python `slikui.Event.MULTI_CLICK_TIME`) and
@@ -63,8 +64,8 @@ exactly these constructors through the real dispatch path](../images/views.png)
 
 1. **Hit-testing** - the deepest visible widget containing the pointer wins.
 2. **Bubble up** - the event dispatches up the parent chain until a widget
-   consumes it (widgets return `true` from `on_event`). Enter/Leave and
-   FocusGained/FocusLost never bubble.
+   consumes it (widgets return `true` from `on_event`). Enter/Leave,
+   FocusGained/FocusLost and PopupClosed never bubble.
 3. **Every button** - left, middle and right presses all reach widgets
    (built-ins act on the left button only). A right press on a widget with a
    context menu opens the menu instead; that press and its release are not

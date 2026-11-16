@@ -595,3 +595,88 @@ def test_scrollarea_tight_insets_and_pane_edge_scrollbar():
     frame(ui, 0.1)
     assert tree.bounds.x - s.x == pytest.approx(10)
     ui.close()
+
+
+# --- PopupClosed / Menu.on_close / Dialog.on_close ------------------------------
+
+class ChordPopup(slikui.Widget):
+    def __init__(self):
+        super().__init__()
+        self.closed = 0
+
+    def measure(self, c):
+        return c.clamp(slikui.Size(80, 40))
+
+    def on_event(self, e):
+        if e.type == slikui.EventType.PopupClosed:
+            self.closed += 1
+            return True
+        return False
+
+
+def test_custom_popup_gets_popup_closed():
+    ui = slikui.App(300, 200)
+    anchor = ui.set_root(slikui.Column).add(slikui.Button, "note")
+    frame(ui)
+    pop = ChordPopup()
+    for close in (lambda: [ui.handle(e) for e in slikui.mouse_click((290, 190))],
+                  lambda: ui.handle(slikui.key_press(slikui.Key.Escape)),
+                  lambda: ui.ctx.close_popups()):
+        ui.ctx.push_popup(pop, anchor, slikui.PopupDir.Below)
+        frame(ui)
+        before = pop.closed
+        close()
+        assert pop.closed == before + 1
+        assert ui.ctx.popup_count == 0
+    ui.close()
+
+
+def test_menu_on_close():
+    ui = slikui.App(300, 200)
+    bar = ui.set_root(slikui.Column).add(slikui.MenuBar)
+    events = []
+    file = bar.add_menu("File")
+    file.add_item("Open", lambda: events.append("open"))
+    file.on_open(lambda: events.append("file+")).on_close(lambda: events.append("file-"))
+    edit = bar.add_menu("Edit")
+    edit.add_item("Undo", lambda: None)
+    edit.on_open(lambda: events.append("edit+")).on_close(lambda: events.append("edit-"))
+    frame(ui)
+    ft, et = bar.children[0].bounds, bar.children[1].bounds
+    for e in slikui.mouse_click((ft.x + 4, ft.y + 4)):
+        ui.handle(e)
+    frame(ui, 0.1)
+    ui.handle(slikui.mouse_move((et.x + 4, et.y + 4)))  # hover-switch to Edit
+    frame(ui, 0.2)
+    ui.handle(slikui.key_press(slikui.Key.Escape))
+    # Close notices arrive after the closing event, so when one menu
+    # replaces another the new one's on_open comes first.
+    assert events == ["file+", "edit+", "file-", "edit-"]
+    # Choosing an item: action, then close.
+    events.clear()
+    for e in slikui.mouse_click((ft.x + 4, ft.y + 4)):
+        ui.handle(e)
+    frame(ui, 0.3)
+    item = ui.ctx.popup(0).children[0].bounds
+    for e in slikui.mouse_click((item.x + 4, item.y + 4)):
+        ui.handle(e)
+    assert events == ["file+", "open", "file-"]
+    ui.close()
+
+
+def test_dialog_on_close_fires_once_on_every_path():
+    ui = slikui.App(300, 200)
+    ui.set_root(slikui.Column)
+    frame(ui)
+    closes = []
+    dlg = slikui.Dialog("Settings")
+    dlg.on_close(lambda: closes.append(1))
+    ui.ctx.open_dialog(dlg)
+    frame(ui)
+    ui.handle(slikui.key_press(slikui.Key.Escape))  # used to skip on_close
+    assert closes == [1] and ui.ctx.dialog_count == 0
+    ui.ctx.open_dialog(dlg)
+    frame(ui, 0.1)
+    dlg.request_close()                              # used to fire it directly
+    assert closes == [1, 1] and ui.ctx.dialog_count == 0
+    ui.close()

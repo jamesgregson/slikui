@@ -490,6 +490,8 @@ class EventType(enum.IntEnum):
 
     FocusGained = 13
 
+    PopupClosed = 14
+
 class Event:
     def __init__(self, type: EventType) -> None: ...
 
@@ -1498,6 +1500,11 @@ class Menu(Panel):
     def set_min_width(self, w: float) -> Menu: ...
 
     def on_open(self, f: Callable[[], None]) -> Menu: ...
+
+    def on_close(self, f: Callable[[], None]) -> Menu:
+        """
+        Fired when the menu leaves the screen for any reason, after the closing event (reopening from here is safe).
+        """
 
     def open_for(self, anchor: Widget, dir: PopupDir = PopupDir.Below) -> None:
         """Push this menu onto the popup stack beside anchor."""
