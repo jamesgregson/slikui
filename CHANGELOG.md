@@ -52,6 +52,7 @@
   `set_tooltip`); previously every kwarg was treated as a setter.
 - `Color::from_float(r, g, b, a = 1)` (Python `Color.from_float`) and
   Python `Constraints(min, max)`.
+- Python `Container.set_padding(left, top, right, bottom)` (per side).
 
 ### Changed
 
@@ -65,6 +66,10 @@
   room; otherwise short labels stay whole and the long ones shrink, eliding
   with "...".
 - `TreeView` and `ListView` elide row labels that don't fit the frame.
+- **Tighter `ScrollArea` spacing**: content sits 2 px inside the viewport
+  (was 8) and 6 px from the scrollbar thumb (was 12), so scrolled content
+  lines up with its siblings and highlights run close to the bar.
+  `set_content_insets(left, right)` restores more room where wanted.
 
 ### Fixed
 

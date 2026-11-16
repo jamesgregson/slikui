@@ -1252,7 +1252,14 @@ class Widget:
         """
 
 class Container(Widget):
+    @overload
     def set_padding(self, all: float) -> Container: ...
+
+    @overload
+    def set_padding(self, left: float, top: float, right: float, bottom: float) -> Container:
+        """
+        Per-side padding - e.g. right=0 so a ScrollArea's scrollbar sits at a pane's edge.
+        """
 
     def set_gap(self, value: float) -> Container: ...
 
@@ -1964,6 +1971,11 @@ class ScrollArea(Widget):
 
     @property
     def content(self) -> Column: ...
+
+    def set_content_insets(self, left: float, right: float) -> ScrollArea:
+        """
+        Viewport edge -> content spacing (default 2, 2); the scrollbar gutter is added on the right while scrolling.
+        """
 
     @property
     def scroll_y(self) -> float: ...

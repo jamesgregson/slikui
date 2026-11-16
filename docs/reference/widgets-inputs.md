@@ -90,6 +90,11 @@ viewport heights change (including window resizes).
 | `scroll_to(rect)` / `scroll_to(widget)` | least scroll that brings it into view; returns the distance moved |
 | `remove(child)` / `clear_children()` | act on the content column |
 | `hint_w_` / `hint_h_` (Python `hint_w` / `hint_h`) | size hint; `set_expand()` to fill a Column instead |
+| `set_content_insets(left, right)` | viewport edge to content (default 2, 2); the bar gutter is added while scrolling |
+
+The thumb sits 2 px from the ScrollArea's right edge. To put it at a pane's
+edge, give the pane no right padding (Python:
+`pane.set_padding(8, 8, 0, 8)`) and pad the other children instead.
 
 Rows inside list widgets aren't widgets: `TreeView::row_rect(i)` and
 `ListView::row_rect(i)` give a row's rect for `scroll_to`, e.g. revealing

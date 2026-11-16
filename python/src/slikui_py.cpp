@@ -1530,6 +1530,14 @@ NB_MODULE(_slikui, m) {
         .def("set_padding",
              [](Container& c, float all) -> Container& { return c.set_padding(all); },
              nb::arg("all"), nb::rv_policy::reference)
+        .def("set_padding",
+             [](Container& c, float left, float top, float right, float bottom) -> Container& {
+                 return c.set_padding(Padding{left, top, right, bottom});
+             },
+             nb::arg("left"), nb::arg("top"), nb::arg("right"), nb::arg("bottom"),
+             nb::rv_policy::reference,
+             "Per-side padding - e.g. right=0 so a ScrollArea's scrollbar sits "
+             "at a pane's edge.")
         .def("set_gap",
              [](Container& c, float g) -> Container& { return c.set_gap(g); },
              nb::arg("value"), nb::rv_policy::reference)
@@ -1977,7 +1985,11 @@ NB_MODULE(_slikui, m) {
     scroll.def_prop_ro("content",
                        [](ScrollArea& s) -> Column& { return s.content(); },
                        nb::rv_policy::reference);
-    scroll.def_prop_ro("scroll_y", &ScrollArea::scroll_y)
+    scroll.def("set_content_insets", &ScrollArea::set_content_insets, nb::arg("left"),
+               nb::arg("right"), nb::rv_policy::reference,
+               "Viewport edge -> content spacing (default 2, 2); the scrollbar "
+               "gutter is added on the right while scrolling.")
+        .def_prop_ro("scroll_y", &ScrollArea::scroll_y)
         .def_prop_ro("max_scroll", &ScrollArea::max_scroll)
         .def("set_scroll_y", &ScrollArea::set_scroll_y, nb::arg("y"), nb::rv_policy::reference,
              "Content px above the viewport; applied (and clamped) at the next tick.")

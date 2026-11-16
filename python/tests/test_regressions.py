@@ -575,3 +575,23 @@ def test_menu_check_gutter_only_when_checkable():
         insets.append(_label_inset(px, item, bg))
         ui.close()
     assert insets[0] < 16 < insets[1]
+
+
+# --- ScrollArea spacing: content hugs the viewport, thumb hugs the content ------
+
+def test_scrollarea_tight_insets_and_pane_edge_scrollbar():
+    ui = slikui.App(300, 200)
+    pane = ui.set_root(slikui.Column)
+    pane.set_padding(8, 8, 0, 8)  # per side: no right padding at the pane edge
+    scroll = pane.add(slikui.ScrollArea, expand=True)
+    tree = scroll.add(slikui.TreeView)
+    tree.set_rows([R(f"row {i}") for i in range(40)])
+    frame(ui)
+    s, t = scroll.bounds, tree.bounds
+    assert s.x + s.w == 300                      # scroll area reaches the pane edge
+    assert t.x - s.x == pytest.approx(2)         # 2 px left inset (was 8)
+    assert (s.x + s.w) - (t.x + t.w) == pytest.approx(18)  # 2 + 6 gap + 8 thumb + 2 (was 28)
+    scroll.set_content_insets(10, 10)
+    frame(ui, 0.1)
+    assert tree.bounds.x - s.x == pytest.approx(10)
+    ui.close()

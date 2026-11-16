@@ -13517,6 +13517,15 @@ public:
     bool remove(Widget& child) override { return content_->remove(child); }
     void clear_children() override { content_->clear_children(); }
 
+    // Space between the viewport edges and the content (logical px, default
+    // 2 each side). The scrollbar gutter is added on the right while the
+    // content scrolls. Larger insets keep e.g. drop shadows unclipped.
+    ScrollArea& set_content_insets(float left, float right) {
+        content_inset_l_ = std::fmax(left, 0.f);
+        content_inset_r_ = std::fmax(right, 0.f);
+        return *this;
+    }
+
     // --- scroll position (logical px of content above the viewport) ---
     //
     // Setters take effect at the next arrange (Context::tick), which clamps
@@ -13541,11 +13550,11 @@ public:
         content_height_ = content_size.h;
         max_scroll_ = std::fmax(0.f, content_height_ - area.h);
         scroll_y_ = std::clamp(scroll_y_, 0.f, max_scroll_);
-        // Inset the content so anything drawn slightly outside a widget's
-        // bounds (selection rings, shadows) isn't clipped by the scroll
-        // region, and keep a clear gap before the scrollbar gutter.
+        // Inset the content a hair so antialiased edges at a widget's bounds
+        // aren't clipped by the scroll region, and keep a small gap before
+        // the scrollbar gutter (reserved only while scrolling).
         float right = content_inset_r_;
-        if (max_scroll_ > 0) right += bar_w_ + 12.f;
+        if (max_scroll_ > 0) right += kBarGap + bar_w_ + 2.f;
         content_->arrange({area.x + content_inset_l_, area.y - scroll_y_,
                            std::fmax(0.f, area.w - content_inset_l_ - right),
                            content_height_});
@@ -13638,9 +13647,10 @@ public:
 private:
     Column* content_ = nullptr;
     float scroll_y_ = 0, max_scroll_ = 0, content_height_ = 0;
+    static constexpr float kBarGap = 6; // content -> thumb
     float bar_w_ = 8;           // thumb width; sits 2px from the right edge
-    float content_inset_l_ = 8; // breathing room inside the clip rect
-    float content_inset_r_ = 8;
+    float content_inset_l_ = 2; // breathing room inside the clip rect
+    float content_inset_r_ = 2;
     bool drag_bar_ = false;
     float drag_grab_ = 0;  // cursor offset inside the thumb while dragging
 };
