@@ -46,11 +46,17 @@ public:
                                       : (c.is_bounded_x() ? c.max.x : 0.f);
         refresh(avail);
         float inv = 1.f / sc();
-        // +2 raster px: layout size is the ink extent, but wrapping decides
-        // on ADVANCE width, which can be a hair wider. Without the slack a
-        // parent sized exactly to the ink width makes the label re-wrap in
-        // arrange (text wider than its box).
-        return c.clamp({(cached_.size.w + 2.f) * inv, cached_.size.h * inv});
+        // Layout size is the INK extent, but wrapping decides on ADVANCE
+        // width (TextLine::width), which can be several raster px wider at
+        // large raster sizes (high UI scale). Report whichever is wider, or a
+        // parent sized exactly to the result makes the label re-wrap in
+        // arrange (last word dropped onto a second line, outside its box).
+        // +2 keeps the historical slack; the +.05 absorbs the logical-px
+        // round trip (w * inv * sc) in arrange.
+        float advance = 0;
+        for (const auto& ln : cached_.lines) advance = std::fmax(advance, ln.width);
+        float w = std::fmax(cached_.size.w + 2.f, advance + .05f);
+        return c.clamp({w * inv, cached_.size.h * inv});
     }
 
     void arrange(const Rect& area) override {
@@ -68,6 +74,8 @@ public:
     }
 
     const char* widget_type() const override { return "Label"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
 
 private:
     float sc() const { return ctx ? ctx->theme().scale : 1.f; }

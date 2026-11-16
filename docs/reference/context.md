@@ -46,7 +46,13 @@ The shell layer above popups - see
 | `open_dialog(D&)` | **borrowed** - keep the Python object alive |
 | `close_dialog(widget)` | explicit close |
 | `dialog_count()` / `dialog(i)` | inspection |
-| `push_toast(widget, seconds)` | auto-dismissing corner notice |
+| `push_toast(widget, seconds)` | auto-dismissing corner notice; returns the widget |
+| `toast_count()` / `toast(i)` | inspection |
+
+Toasts are their own passive layer (above popups, below dialogs): never
+hit-tested, so clicks pass through them, and they neither close nor are
+closed by the popup stack. Several toasts stack upward from the
+bottom-right corner, newest lowest.
 
 ## Focus, capture, shortcuts
 

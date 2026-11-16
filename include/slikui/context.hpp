@@ -196,7 +196,7 @@ public:
         inside_press_ = false;
         popups_.clear();  // popup widgets may hold callbacks
         dialogs_.clear(); // dialog entries (owned dialogs move to closing_)
-        toasts_.clear();
+        toasts_.clear();  // owned toast widgets
         root_.reset();    // the tree itself
         closing_.clear(); // widgets deferred by close_popups()
         shortcuts_.clear(); // may hold Python callables
@@ -238,30 +238,53 @@ public:
     // --- frame ---
 
     void tick(Time t) {
-        Busy busy(*this);
+        {
+            Busy busy(*this);
+            tick_pass(t);
+        }
+        // Widgets retired during the pass (Widget::remove, expired toasts).
+        if (busy_ == 0) closing_.clear();
+    }
+
+private:
+    void tick_pass(Time t) {
         now_ = t.now;
+        if (!(theme_ == seen_theme_)) { // zoom, preset, palette edit
+            seen_theme_ = theme_;
+            if (root_) root_->theme_changed_tree();
+            for (auto& p : popups_) p.widget->theme_changed_tree();
+            for (auto& ts : toasts_) ts.widget->theme_changed_tree();
+            for (auto& d : dialogs_) d.widget->theme_changed_tree();
+        }
         if (!root_) return;
         attach_tree(*root_);
         root_->measure(Constraints::tight({frame_.x, frame_.y}));
         root_->arrange({0, 0, frame_.x, frame_.y});
         root_->tick_tree(t);
         for (auto& p : popups_) {
+            attach_tree(*p.widget); // like root_: catch subtrees grown since push
             layout_popup(p);
             p.widget->tick_tree(t); // menus animate hover, toasts fade
         }
         for (auto& d : dialogs_) {
+            attach_tree(*d.widget);
             layout_dialog(d);
             d.widget->tick_tree(t);
         }
-        // Expired toasts leave the popup stack.
+        // Expired toasts leave (destroyed at the end of this pass).
         for (size_t i = toasts_.size(); i-- > 0;) {
             if (t.now >= toasts_[i].expires_at) {
-                close_popup_widget(toasts_[i].widget);
+                if (focused_ && inside(focused_, toasts_[i].widget.get())) set_focus(nullptr);
+                closing_.push_back(std::move(toasts_[i].widget));
                 toasts_.erase(toasts_.begin() + long(i));
             }
         }
+        layout_toasts();
+        for (auto& ts : toasts_) ts.widget->tick_tree(t);
         update_tooltip(t);
     }
+
+public:
 
     void render(bool clear = true) {
         if (!sink_) return;
@@ -270,6 +293,7 @@ public:
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
+        for (auto& ts : toasts_) ts.widget->paint_tree(env);
         if (Widget* modal = topmost_modal()) // dim everything under dialogs
             list.rect({0, 0, frame_.x, frame_.y}, Color::black().faded(.45f));
         for (auto& d : dialogs_) d.widget->paint_tree(env);
@@ -408,14 +432,21 @@ public:
 
     // --- toasts ---
     //
-    // Transient corner notices on the popup layer: pushed owned, positioned
-    // in the bottom-right corner, removed automatically after `seconds`
-    // (measured from the last tick's time).
-    void push_toast(std::unique_ptr<Widget> w, double seconds) {
-        Widget* raw = w.get();
-        push_popup(std::move(w), {frame_.x - 12, frame_.y - 12});
-        toasts_.push_back(ToastEntry{raw, now_ + seconds});
+    // Transient corner notices: pushed owned, stacked upward from the
+    // bottom-right corner (newest at the bottom), removed automatically after
+    // `seconds` (measured from the last tick's time). Toasts are their own
+    // layer - painted above popups, below dialogs - and are passive: never
+    // hit-tested, so clicks, hover and wheel pass through to what is under
+    // them, and they neither close nor are closed by the popup stack.
+    Widget& push_toast(std::unique_ptr<Widget> w, double seconds) {
+        Widget& ref = *w;
+        toasts_.push_back(ToastEntry{Widget::WidgetPtr(w.release()), now_ + seconds});
+        attach_tree(ref);
+        layout_toasts();
+        return ref;
     }
+    size_t toast_count() const { return toasts_.size(); }
+    Widget* toast(size_t i) { return toasts_[i].widget.get(); }
 
     // --- shortcuts ---
     //
@@ -445,6 +476,7 @@ public:
         fonts_.for_each_font([](text::Font& f) { f.mark_dirty(); });
         if (root_) root_->invalidate_tree();
         for (auto& p : popups_) p.widget->invalidate_tree();
+        for (auto& ts : toasts_) ts.widget->invalidate_tree();
         for (auto& d : dialogs_) d.widget->invalidate_tree();
     }
 
@@ -500,9 +532,24 @@ private:
         bool placed = false; // false until the first layout centers it
     };
     struct ToastEntry {
-        Widget* widget = nullptr;
+        Widget::WidgetPtr widget; // owned
         double expires_at = 0;
     };
+
+    void layout_toasts() {
+        const float margin = 12.f, gap = 8.f;
+        float bottom = frame_.y - margin;
+        for (size_t i = toasts_.size(); i-- > 0;) { // newest lowest
+            Widget& w = *toasts_[i].widget;
+            attach_tree(w);
+            Size s = w.measure(Constraints::loose(frame_));
+            s.w = std::fmin(s.w, std::fmax(frame_.x - 2 * margin, 40.f));
+            float x = std::fmax(frame_.x - margin - s.w, 0.f);
+            float y = std::fmax(bottom - s.h, 0.f);
+            w.arrange({x, y, s.w, s.h});
+            bottom = y - gap;
+        }
+    }
 
     struct Popup {
         Widget::WidgetPtr owned;  // null for borrowed popups
@@ -586,8 +633,28 @@ private:
             if (t == w) t = nullptr;
         for (auto& n : focus_notes_)
             if (n.widget == w) n.widget = nullptr;
+        // A popup anchored to it stays where it is, unanchored.
+        for (auto& p : popups_)
+            if (p.anchor == w) {
+                p.anchor = nullptr;
+                p.pos = {p.widget->bounds.x, p.widget->bounds.y};
+            }
     }
     friend void context_forget(Context* ctx, const Widget* w) noexcept;
+    friend bool context_detach(Context* ctx, Widget& w);
+    friend void context_defer_destroy(Context* ctx, Widget* w) noexcept;
+
+    // Widget::remove: `w`'s subtree just left the tree.
+    bool detach(Widget& w) {
+        if (focused_ && inside(focused_, &w)) set_focus(nullptr); // FocusLost
+        forget_tree(w);
+        return busy_ > 0;
+    }
+    void forget_tree(const Widget& w) noexcept {
+        forget(&w);
+        for (const auto& c : w.children) forget_tree(*c);
+    }
+    friend void context_attach(Context* ctx, Widget& w);
 
     static size_t key_index(Key k) { return size_t(k) & 0xFF; }
 
@@ -690,6 +757,7 @@ private:
         uploads_.clear();
         if (root_) root_->collect_tree(uploads_);
         for (auto& p : popups_) p.widget->collect_tree(uploads_);
+        for (auto& ts : toasts_) ts.widget->collect_tree(uploads_);
         for (auto& d : dialogs_) d.widget->collect_tree(uploads_);
         for (const auto& up : uploads_) sink_->upload(up);
     }
@@ -780,19 +848,6 @@ private:
             if (it->modal) return it->widget;
         return nullptr;
     }
-    // Remove one popup (used by toast expiry); moves owned storage to closing_.
-    void close_popup_widget(Widget* w) {
-        Busy busy(*this);
-        for (size_t i = 0; i < popups_.size(); ++i) {
-            if (popups_[i].widget == w) {
-                if (focused_ && inside(focused_, w)) set_focus(nullptr);
-                if (popups_[i].owned) closing_.push_back(std::move(popups_[i].owned));
-                popups_.erase(popups_.begin() + long(i));
-                return;
-            }
-        }
-    }
-
     Widget* hit_test_in(Widget& w, Vec2 pos) {
         if (!w.visible) return nullptr;
         // Children are only pickable where they are painted: a clipping
@@ -888,6 +943,7 @@ private:
     // floating shell layer above popups + toast expiry tracking
     std::vector<DialogEntry> dialogs_;
     std::vector<ToastEntry> toasts_;
+    Theme seen_theme_; // theme as of the last tick (theme_changed detection)
 
     // cursor shape host callback + last-requested shape
     std::function<void(Cursor)> cursor_host_;
@@ -912,6 +968,20 @@ inline float theme_scale_of(const Context* ctx) {
 // Called from ~Widget (Context is complete here).
 inline void context_forget(Context* ctx, const Widget* w) noexcept {
     if (ctx) ctx->forget(w);
+}
+
+inline void context_attach(Context* ctx, Widget& w) {
+    if (ctx) ctx->attach_tree(w);
+}
+
+inline bool context_detach(Context* ctx, Widget& w) {
+    return ctx && ctx->detach(w);
+}
+
+inline void context_defer_destroy(Context* ctx, Widget* w) noexcept {
+    if (!w) return;
+    if (ctx) ctx->closing_.push_back(Widget::WidgetPtr(w));
+    else w->release();
 }
 
 // noexcept: runs from widget destructors. A sink's release() must not throw
@@ -940,6 +1010,8 @@ public:
     }
 
     const char* widget_type() const override { return "TooltipLabel"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
     bool stretch_cross() const override { return false; }
 
 private:

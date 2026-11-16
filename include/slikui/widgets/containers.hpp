@@ -35,7 +35,9 @@ protected:
 
     static Rect apply_cross(Rect r, const Rect& inner, CrossMode mode,
                             bool cross_vertical, bool stretch) {
-        if (!stretch) mode = CrossMode::Start;
+        // Non-stretching children can't fill the cross axis; they still
+        // honor an explicit Center/Start.
+        if (!stretch && mode == CrossMode::Stretch) mode = CrossMode::Start;
         switch (mode) {
         case CrossMode::Stretch:
             if (cross_vertical) { r.y = inner.y; r.h = inner.h; }
@@ -332,6 +334,8 @@ public:
     }
 
     const char* widget_type() const override { return "Expander"; }
+
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
 
 private:
     float header_height() const {

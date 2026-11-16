@@ -22,6 +22,7 @@ A widget implements whichever of these it needs:
 | `child_clip_rect(const Widget&)` | C++ only: extra clip for one child's subtree (e.g. per pane) |
 | `scroll_into_view(const Rect&)` | C++ only: scrolling containers bring a keyboard-focused descendant into view |
 | `attached(Context&)` | called once when the widget joins a context |
+| `theme_changed()` | the context's theme changed (UI scale/zoom, preset, palette): drop cached text layouts or theme-derived colors |
 
 Layout runs in `Context::tick` (Python `app.tick()`), not in `render`: bounds
 are zero, and `context()` is null, until the first tick after a widget is
@@ -176,7 +177,7 @@ gradient).
 
 Subclass `slikui.Widget`, implement `measure` / `paint` / `on_event` (plus
 opt-in `tick`, `stretch_cross`, `expands_main`, `focusable`, `arrange`,
-`clip_rect`, `paint_over`, `attached`, `widget_type`). Widgets read
+`clip_rect`, `paint_over`, `attached`, `theme_changed`, `widget_type`). Widgets read
 `self.bounds`, `self.focused` and `self.context` (for
 `capture_mouse`/`release_mouse`/`set_focus`), and can call
 `self.request_focus()` and `self.set_cursor(...)`:

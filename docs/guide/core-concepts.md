@@ -91,6 +91,9 @@ resizes reflow automatically - see [Layout](layout.md) and the full
 - Callbacks (`on_click`, `on_change`, ...) capture app state by
   reference/pointer - **keep captures valid** for the tree's lifetime, or
   remove the widget first.
+- `widget.remove(child)` / `clear_children()` destroy a subtree - immediately
+  between frames, or at the end of the running `handle()`/`tick()` when
+  called from a handler, so a widget may remove itself in its own callback.
 - Popup widgets are owned by the context until the end of the event that
   closes them. Menus are the exception: they are *borrowed* popups you build
   once and open many times.

@@ -25,6 +25,9 @@ enum class Key : std::uint32_t {
     // digits still arrive as TextInput as well; these exist for shortcuts
     // (Ctrl+1) and game-style key handling.
     Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+    // Remaining US-layout punctuation (appended in 0.5; keys by physical
+    // position, like the rest): = [ ] \ ; `
+    Equal, LeftBracket, RightBracket, Backslash, Semicolon, Grave,
 };
 
 enum Mod : std::uint32_t {

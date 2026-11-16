@@ -59,6 +59,18 @@ inline std::string shortcut_label(Key key, unsigned mods) {
     case Key::End: out += "End"; break;
     case Key::PageUp: out += "PgUp"; break;
     case Key::PageDown: out += "PgDn"; break;
+    case Key::Insert: out += "Ins"; break;
+    case Key::Apostrophe: out += "'"; break;
+    case Key::Comma: out += ","; break;
+    case Key::Minus: out += "-"; break;
+    case Key::Period: out += "."; break;
+    case Key::Slash: out += "/"; break;
+    case Key::Equal: out += "="; break;
+    case Key::LeftBracket: out += "["; break;
+    case Key::RightBracket: out += "]"; break;
+    case Key::Backslash: out += "\\"; break;
+    case Key::Semicolon: out += ";"; break;
+    case Key::Grave: out += "`"; break;
     default:
         if (k >= int(Key::F1) && k <= int(Key::F12))
             out += "F" + std::to_string(k - int(Key::F1) + 1);
@@ -128,10 +140,10 @@ public:
     Size measure(const Constraints& c) override {
         refresh();
         float inv = 1.f / ui_scale();
-        float w = 10 + 18 + lays_.label.size.w * inv;
-        if (!hint_.empty()) w += 16 + lays_.hint.size.w * inv;
+        float w = text_x() + lays_.label.size.w * inv;
+        if (!hint_.empty()) w += 24 + lays_.hint.size.w * inv;
         if (submenu_) w += 16;
-        w += 10;
+        w += 12;
         float h = std::fmax(lays_.label.line_height * inv, 16.f) + 9.f;
         return c.clamp({w, h});
     }
@@ -149,11 +161,11 @@ public:
             env.list.line({bounds.x + 11, cy}, {bounds.x + 15, cy + 4}, mark, 2);
             env.list.line({bounds.x + 15, cy + 4}, {bounds.x + 22, cy - 5}, mark, 2);
         }
-        float tx = bounds.x + 32;
+        float tx = bounds.x + text_x();
         paint_text(env, lays_.label, {tx, cy - lays_.label.size.h * inv * .5f},
                    enabled_ ? t.text : t.text_dim, inv);
         if (!hint_.empty()) {
-            float hx = bounds.right() - 10 - lays_.hint.size.w * inv;
+            float hx = bounds.right() - (submenu_ ? 28.f : 12.f) - lays_.hint.size.w * inv;
             paint_text(env, lays_.hint, {hx, cy - lays_.hint.size.h * inv * .5f},
                        t.text_dim.faded(enabled_ ? 1.f : .4f), inv);
         }
@@ -167,6 +179,10 @@ public:
 
     bool on_event(const Event& e) override {
         switch (e.type) {
+        case Event::Type::MouseLeave:
+            // Moves stop arriving once the pointer is over another widget.
+            hover_.target = 0.f;
+            return false;
         case Event::Type::MouseMove: {
             bool over = bounds.contains(e.pos);
             hover_.target = over && enabled_ ? 1.f : 0.f;
@@ -194,10 +210,18 @@ public:
 
     const char* widget_type() const override { return "MenuItem"; }
 
-    bool stretch_cross() const override { return false; }
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
+
+    // Rows stretch to the menu's width (stretch_cross() defaults to true): one
+    // hover-highlight width, right-aligned hints and chevrons in a column.
+
 
 private:
     friend class Menu;
+
+    // Label inset: a checkmark gutter only when some row of this menu is
+    // checkable, else plain padding. Defined after Menu.
+    float text_x() const;
 
     // Defined after Menu (Menu must be complete to convert Menu* to Widget&
     // for the Context popup-stack calls).
@@ -348,6 +372,14 @@ private:
     }
 };
 
+inline float MenuItem::text_x() const {
+    if (parent)
+        for (const auto& c : parent->children)
+            if (auto* it = dynamic_cast<const MenuItem*>(c.get()); it && it->checked_fn_)
+                return 32.f;
+    return 12.f;
+}
+
 inline void MenuItem::open_submenu() {
     if (!ctx || !submenu_) return;
     if (Menu* m = owner_menu()) {
@@ -439,6 +471,9 @@ public:
 
         bool on_event(const Event& e) override {
             switch (e.type) {
+            case Event::Type::MouseLeave:
+                hover_.target = 0.f;
+                return false;
             case Event::Type::MouseMove: {
                 bool over = bounds.contains(e.pos);
                 hover_.target = over ? 1.f : 0.f;
@@ -465,6 +500,8 @@ public:
         void tick(Time t) override { hover_.advance(t.dt); }
 
         const char* widget_type() const override { return "MenuButton"; }
+
+        void theme_changed() override { valid_ = false; } // scale/font may have changed
 
         bool stretch_cross() const override { return false; }
 

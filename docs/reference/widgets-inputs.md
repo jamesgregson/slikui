@@ -83,6 +83,22 @@ viewport heights change (including window resizes).
 
 ![scroll](../images/scroll.png)
 
+| API | Notes |
+|-----|-------|
+| `scroll_y()` / `max_scroll()` | content px above the viewport / its limit (as of the last layout) |
+| `set_scroll_y(y)`, `scroll_to_top()`, `scroll_to_bottom()` | applied and clamped at the next tick |
+| `scroll_to(rect)` / `scroll_to(widget)` | least scroll that brings it into view; returns the distance moved |
+| `remove(child)` / `clear_children()` | act on the content column |
+| `hint_w_` / `hint_h_` (Python `hint_w` / `hint_h`) | size hint; `set_expand()` to fill a Column instead |
+
+Rows inside list widgets aren't widgets: `TreeView::row_rect(i)` and
+`ListView::row_rect(i)` give a row's rect for `scroll_to`, e.g. revealing
+the selected lesson in a sidebar:
+
+```python
+scroll.scroll_to(tree.row_rect(tree.selected))
+```
+
 ## SearchBox and GroupBox
 
 These two dress up the inputs above, but they are pictured with the shells

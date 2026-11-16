@@ -70,6 +70,12 @@ inline Key map_key(SDL_Keycode k) {
     case SDLK_MINUS: return Key::Minus;
     case SDLK_PERIOD: return Key::Period;
     case SDLK_SLASH: return Key::Slash;
+    case SDLK_EQUALS: return Key::Equal;
+    case SDLK_LEFTBRACKET: return Key::LeftBracket;
+    case SDLK_RIGHTBRACKET: return Key::RightBracket;
+    case SDLK_BACKSLASH: return Key::Backslash;
+    case SDLK_SEMICOLON: return Key::Semicolon;
+    case SDLK_GRAVE: return Key::Grave;
     case SDLK_LEFT: return Key::Left;
     case SDLK_RIGHT: return Key::Right;
     case SDLK_UP: return Key::Up;

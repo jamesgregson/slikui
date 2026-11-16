@@ -168,14 +168,48 @@ TEST(toast_shows_and_expires) {
     toast->set_icon(slikui::Icon::Camera);
     f.ctx.push_toast(std::move(toast), 0.2); // expiry measured from the last tick
     f.frame();
-    CHECK(f.ctx.popup_count() == 1);
+    CHECK(f.ctx.toast_count() == 1);
+    CHECK(f.ctx.popup_count() == 0); // toasts are their own layer
     // Toast sits in the bottom-right corner.
-    auto& t = *f.ctx.popup(0);
-    CHECK(t.bounds.right() > 300.f && t.bounds.bottom() > 230.f);
+    auto& t = *f.ctx.toast(0);
+    CHECK(t.bounds.right() > 290.f && t.bounds.bottom() > 220.f); // 12 px margin
 
     // After the expiry time it is gone (tick at now=1.0 > 0.5+0.2).
     f.ctx.tick(slikui::Time{1.0, 0.016});
-    CHECK(f.ctx.popup_count() == 0);
+    CHECK(f.ctx.toast_count() == 0);
+}
+
+TEST(toasts_stack_and_let_clicks_through) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& under = root.add<slikui::Button>("under the toast");
+    int clicks = 0;
+    under.on_click([&] { ++clicks; });
+    f.frame();
+    REQUIRE(f.has_font);
+    f.ctx.push_toast(std::make_unique<slikui::Toast>("first"), 5.0);
+    f.ctx.push_toast(std::make_unique<slikui::Toast>("second"), 5.0);
+    f.frame();
+    REQUIRE(f.ctx.toast_count() == 2);
+    // Newest at the bottom, older ones above it, no overlap.
+    CHECK(f.ctx.toast(0)->bounds.bottom() <= f.ctx.toast(1)->bounds.y);
+
+    // A click elsewhere reaches its widget and leaves the toasts alone.
+    slikui::Vec2 c = under.bounds.center();
+    f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, c.x, c.y));
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, c.x, c.y));
+    CHECK(clicks == 1);
+    CHECK(f.ctx.toast_count() == 2);
+
+    // A click ON a toast passes through to what is under it.
+    slikui::Rect tb = f.ctx.toast(1)->bounds;
+    auto& host = f.ctx.set_root<slikui::Button>("fills the frame");
+    int host_clicks = 0;
+    host.on_click([&] { ++host_clicks; });
+    f.frame();
+    f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, tb.center().x, tb.center().y));
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, tb.center().x, tb.center().y));
+    CHECK(host_clicks == 1);
 }
 
 // ---------------------------------------------------------------------------

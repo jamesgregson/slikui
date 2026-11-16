@@ -232,6 +232,15 @@ struct Color {
         return Color(ch(rf), ch(gf), ch(bf), alpha);
     }
 
+    // Channels as 0..1 floats (clamped, rounded) - for code that thinks in
+    // normalized color; the stored channels stay 0..255.
+    static Color from_float(float r, float g, float b, float a = 1.f) {
+        auto q = [](float v) {
+            return std::uint8_t(v <= 0.f ? 0 : v >= 1.f ? 255 : int(v * 255.f + .5f));
+        };
+        return Color(q(r), q(g), q(b), q(a));
+    }
+
     static Color black()      { return Color(0, 0, 0); }
     static Color white()      { return Color(255, 255, 255); }
     static Color transparent(){ return Color(0, 0, 0, 0); }
@@ -280,6 +289,9 @@ enum class Key : std::uint32_t {
     // digits still arrive as TextInput as well; these exist for shortcuts
     // (Ctrl+1) and game-style key handling.
     Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+    // Remaining US-layout punctuation (appended in 0.5; keys by physical
+    // position, like the rest): = [ ] \ ; `
+    Equal, LeftBracket, RightBracket, Backslash, Semicolon, Grave,
 };
 
 enum Mod : std::uint32_t {
@@ -1061,6 +1073,8 @@ struct Theme {
     float base_font_px  = 15.f;
     float small_font_px = 12.f;
     float large_font_px = 20.f;
+
+    bool operator==(const Theme&) const = default; // change detection (Context::tick)
 
     // Derived hover/press variants so widgets stay visually consistent.
     Color hover(Color base)  const { return base.lerp(Color::white(), 0.15f); }
@@ -9888,6 +9902,15 @@ float theme_scale_of(const Context* ctx);
 void context_forget(Context* ctx, const Widget* w) noexcept;
 // Defined in context.hpp: tell the context's sink a texture id is dead.
 void context_release_texture(Context* ctx, std::uint32_t id) noexcept;
+// Defined in context.hpp: attach a subtree to `ctx` (sets ctx, calls attached()).
+void context_attach(Context* ctx, Widget& w);
+// Defined in context.hpp: drop every Context reference into a subtree that
+// was just detached; true when its destruction must wait (a handle()/tick()
+// pass is running - see Widget::remove).
+bool context_detach(Context* ctx, Widget& w);
+// Defined in context.hpp: hand a detached subtree to the Context, which
+// destroys it at the end of the running handle()/tick() pass.
+void context_defer_destroy(Context* ctx, Widget* w) noexcept;
 
 class Widget {
 public:
@@ -9911,13 +9934,52 @@ public:
         T& ref = *static_cast<T*>(child.get());
         ref.parent = this;
         children.push_back(std::move(child));
+        adopted(ref);
         return ref;
     }
 
     void add(std::unique_ptr<Widget> child) {
         if (!child) return;
         child->parent = this;
+        Widget& ref = *child;
         children.push_back(WidgetPtr(child.release()));
+        adopted(ref);
+    }
+
+private:
+    // A child added to an attached widget joins the context immediately, so
+    // children created lazily (e.g. inside measure()) can lay out text in
+    // the same frame - and inside popups/dialogs, whose trees the Context
+    // does not re-walk every tick.
+    void adopted(Widget& child) {
+        if (ctx && !ctx_alive_.expired()) context_attach(ctx, child);
+    }
+
+public:
+    // Detach and destroy a direct child with its subtree; false when `child`
+    // is not a direct child. Context references into the subtree (focus -
+    // with FocusLost - hover, mouse capture, press targets, popup anchors)
+    // are dropped at once. Safe from event handlers and callbacks (on_click,
+    // tick, Python handlers): destruction waits until the running
+    // handle()/tick() pass returns. Not from inside the parent's own
+    // measure/arrange/paint loop. Containers that own internal parts
+    // (ScrollArea forwards to its content column) override this.
+    virtual bool remove(Widget& child) {
+        for (size_t i = 0; i < children.size(); ++i) {
+            if (children[i].get() != &child) continue;
+            WidgetPtr owned = std::move(children[i]);
+            children.erase(children.begin() + long(i));
+            owned->parent = nullptr;
+            bool live = ctx && !ctx_alive_.expired();
+            if (live && context_detach(ctx, *owned))
+                context_defer_destroy(ctx, owned.release());
+            return true; // else `owned` destroys it here
+        }
+        return false;
+    }
+    // remove() every child, last first.
+    virtual void clear_children() {
+        while (!children.empty()) remove(*children.back());
     }
 
     Widget* find(const std::string& widget_id) {
@@ -9966,7 +10028,11 @@ public:
     virtual bool focusable() const { return false; }
 
     // Children marked expanding share leftover main-axis space (Spacer).
-    virtual bool expands_main() const { return false; }
+    // set_expand(true) opts any widget in - e.g. a ScrollArea or Splitter
+    // filling the rest of a Column instead of keeping its size hint.
+    virtual bool expands_main() const { return expand_; }
+    Widget& set_expand(bool on = true) { expand_ = on; return *this; }
+    bool expand() const { return expand_; }
 
     // Whether containers may stretch this widget along their cross axis.
     // Fixed-size controls (buttons, switches, ...) opt out and hug.
@@ -9993,6 +10059,19 @@ protected:
 
     // Called by Context once per widget when it enters a context.
     virtual void attached(Context&) {}
+
+public:
+    // Called by Context::tick on every widget (root tree, popups, toasts,
+    // dialogs) when Context::theme() changed since the previous tick: UI
+    // scale (zoom), palette or metrics. Widgets that cache text layouts or
+    // theme-derived colors drop them here; the next measure/paint rebuilds.
+    virtual void theme_changed() {}
+    void theme_changed_tree() {
+        theme_changed();
+        for (auto& c : children) c->theme_changed_tree();
+    }
+
+protected:
 
 public:
     // True for pure layout widgets that paint nothing (Column, Row, Spacer):
@@ -10090,6 +10169,7 @@ protected:
     std::string tooltip_;       // hover-delay tooltip text
     Widget* context_menu_ = nullptr;  // right-click target (borrowed, see above)
     Cursor hover_cursor_ = Cursor::Arrow; // requested while hovered
+    bool expand_ = false;       // set_expand: share leftover main-axis space
 
     friend class Context;
 
@@ -10101,7 +10181,8 @@ public:
 
     void tick_tree(Time t) {
         tick(t);
-        for (auto& c : children) c->tick_tree(t);
+        // By index: a tick() may remove() a sibling (the vector shrinks).
+        for (size_t i = 0; i < children.size(); ++i) children[i]->tick_tree(t);
     }
 };
 
@@ -10318,7 +10399,7 @@ public:
         inside_press_ = false;
         popups_.clear();  // popup widgets may hold callbacks
         dialogs_.clear(); // dialog entries (owned dialogs move to closing_)
-        toasts_.clear();
+        toasts_.clear();  // owned toast widgets
         root_.reset();    // the tree itself
         closing_.clear(); // widgets deferred by close_popups()
         shortcuts_.clear(); // may hold Python callables
@@ -10360,30 +10441,53 @@ public:
     // --- frame ---
 
     void tick(Time t) {
-        Busy busy(*this);
+        {
+            Busy busy(*this);
+            tick_pass(t);
+        }
+        // Widgets retired during the pass (Widget::remove, expired toasts).
+        if (busy_ == 0) closing_.clear();
+    }
+
+private:
+    void tick_pass(Time t) {
         now_ = t.now;
+        if (!(theme_ == seen_theme_)) { // zoom, preset, palette edit
+            seen_theme_ = theme_;
+            if (root_) root_->theme_changed_tree();
+            for (auto& p : popups_) p.widget->theme_changed_tree();
+            for (auto& ts : toasts_) ts.widget->theme_changed_tree();
+            for (auto& d : dialogs_) d.widget->theme_changed_tree();
+        }
         if (!root_) return;
         attach_tree(*root_);
         root_->measure(Constraints::tight({frame_.x, frame_.y}));
         root_->arrange({0, 0, frame_.x, frame_.y});
         root_->tick_tree(t);
         for (auto& p : popups_) {
+            attach_tree(*p.widget); // like root_: catch subtrees grown since push
             layout_popup(p);
             p.widget->tick_tree(t); // menus animate hover, toasts fade
         }
         for (auto& d : dialogs_) {
+            attach_tree(*d.widget);
             layout_dialog(d);
             d.widget->tick_tree(t);
         }
-        // Expired toasts leave the popup stack.
+        // Expired toasts leave (destroyed at the end of this pass).
         for (size_t i = toasts_.size(); i-- > 0;) {
             if (t.now >= toasts_[i].expires_at) {
-                close_popup_widget(toasts_[i].widget);
+                if (focused_ && inside(focused_, toasts_[i].widget.get())) set_focus(nullptr);
+                closing_.push_back(std::move(toasts_[i].widget));
                 toasts_.erase(toasts_.begin() + long(i));
             }
         }
+        layout_toasts();
+        for (auto& ts : toasts_) ts.widget->tick_tree(t);
         update_tooltip(t);
     }
+
+public:
 
     void render(bool clear = true) {
         if (!sink_) return;
@@ -10392,6 +10496,7 @@ public:
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
+        for (auto& ts : toasts_) ts.widget->paint_tree(env);
         if (Widget* modal = topmost_modal()) // dim everything under dialogs
             list.rect({0, 0, frame_.x, frame_.y}, Color::black().faded(.45f));
         for (auto& d : dialogs_) d.widget->paint_tree(env);
@@ -10530,14 +10635,21 @@ public:
 
     // --- toasts ---
     //
-    // Transient corner notices on the popup layer: pushed owned, positioned
-    // in the bottom-right corner, removed automatically after `seconds`
-    // (measured from the last tick's time).
-    void push_toast(std::unique_ptr<Widget> w, double seconds) {
-        Widget* raw = w.get();
-        push_popup(std::move(w), {frame_.x - 12, frame_.y - 12});
-        toasts_.push_back(ToastEntry{raw, now_ + seconds});
+    // Transient corner notices: pushed owned, stacked upward from the
+    // bottom-right corner (newest at the bottom), removed automatically after
+    // `seconds` (measured from the last tick's time). Toasts are their own
+    // layer - painted above popups, below dialogs - and are passive: never
+    // hit-tested, so clicks, hover and wheel pass through to what is under
+    // them, and they neither close nor are closed by the popup stack.
+    Widget& push_toast(std::unique_ptr<Widget> w, double seconds) {
+        Widget& ref = *w;
+        toasts_.push_back(ToastEntry{Widget::WidgetPtr(w.release()), now_ + seconds});
+        attach_tree(ref);
+        layout_toasts();
+        return ref;
     }
+    size_t toast_count() const { return toasts_.size(); }
+    Widget* toast(size_t i) { return toasts_[i].widget.get(); }
 
     // --- shortcuts ---
     //
@@ -10567,6 +10679,7 @@ public:
         fonts_.for_each_font([](text::Font& f) { f.mark_dirty(); });
         if (root_) root_->invalidate_tree();
         for (auto& p : popups_) p.widget->invalidate_tree();
+        for (auto& ts : toasts_) ts.widget->invalidate_tree();
         for (auto& d : dialogs_) d.widget->invalidate_tree();
     }
 
@@ -10622,9 +10735,24 @@ private:
         bool placed = false; // false until the first layout centers it
     };
     struct ToastEntry {
-        Widget* widget = nullptr;
+        Widget::WidgetPtr widget; // owned
         double expires_at = 0;
     };
+
+    void layout_toasts() {
+        const float margin = 12.f, gap = 8.f;
+        float bottom = frame_.y - margin;
+        for (size_t i = toasts_.size(); i-- > 0;) { // newest lowest
+            Widget& w = *toasts_[i].widget;
+            attach_tree(w);
+            Size s = w.measure(Constraints::loose(frame_));
+            s.w = std::fmin(s.w, std::fmax(frame_.x - 2 * margin, 40.f));
+            float x = std::fmax(frame_.x - margin - s.w, 0.f);
+            float y = std::fmax(bottom - s.h, 0.f);
+            w.arrange({x, y, s.w, s.h});
+            bottom = y - gap;
+        }
+    }
 
     struct Popup {
         Widget::WidgetPtr owned;  // null for borrowed popups
@@ -10708,8 +10836,28 @@ private:
             if (t == w) t = nullptr;
         for (auto& n : focus_notes_)
             if (n.widget == w) n.widget = nullptr;
+        // A popup anchored to it stays where it is, unanchored.
+        for (auto& p : popups_)
+            if (p.anchor == w) {
+                p.anchor = nullptr;
+                p.pos = {p.widget->bounds.x, p.widget->bounds.y};
+            }
     }
     friend void context_forget(Context* ctx, const Widget* w) noexcept;
+    friend bool context_detach(Context* ctx, Widget& w);
+    friend void context_defer_destroy(Context* ctx, Widget* w) noexcept;
+
+    // Widget::remove: `w`'s subtree just left the tree.
+    bool detach(Widget& w) {
+        if (focused_ && inside(focused_, &w)) set_focus(nullptr); // FocusLost
+        forget_tree(w);
+        return busy_ > 0;
+    }
+    void forget_tree(const Widget& w) noexcept {
+        forget(&w);
+        for (const auto& c : w.children) forget_tree(*c);
+    }
+    friend void context_attach(Context* ctx, Widget& w);
 
     static size_t key_index(Key k) { return size_t(k) & 0xFF; }
 
@@ -10812,6 +10960,7 @@ private:
         uploads_.clear();
         if (root_) root_->collect_tree(uploads_);
         for (auto& p : popups_) p.widget->collect_tree(uploads_);
+        for (auto& ts : toasts_) ts.widget->collect_tree(uploads_);
         for (auto& d : dialogs_) d.widget->collect_tree(uploads_);
         for (const auto& up : uploads_) sink_->upload(up);
     }
@@ -10902,19 +11051,6 @@ private:
             if (it->modal) return it->widget;
         return nullptr;
     }
-    // Remove one popup (used by toast expiry); moves owned storage to closing_.
-    void close_popup_widget(Widget* w) {
-        Busy busy(*this);
-        for (size_t i = 0; i < popups_.size(); ++i) {
-            if (popups_[i].widget == w) {
-                if (focused_ && inside(focused_, w)) set_focus(nullptr);
-                if (popups_[i].owned) closing_.push_back(std::move(popups_[i].owned));
-                popups_.erase(popups_.begin() + long(i));
-                return;
-            }
-        }
-    }
-
     Widget* hit_test_in(Widget& w, Vec2 pos) {
         if (!w.visible) return nullptr;
         // Children are only pickable where they are painted: a clipping
@@ -11010,6 +11146,7 @@ private:
     // floating shell layer above popups + toast expiry tracking
     std::vector<DialogEntry> dialogs_;
     std::vector<ToastEntry> toasts_;
+    Theme seen_theme_; // theme as of the last tick (theme_changed detection)
 
     // cursor shape host callback + last-requested shape
     std::function<void(Cursor)> cursor_host_;
@@ -11034,6 +11171,20 @@ inline float theme_scale_of(const Context* ctx) {
 // Called from ~Widget (Context is complete here).
 inline void context_forget(Context* ctx, const Widget* w) noexcept {
     if (ctx) ctx->forget(w);
+}
+
+inline void context_attach(Context* ctx, Widget& w) {
+    if (ctx) ctx->attach_tree(w);
+}
+
+inline bool context_detach(Context* ctx, Widget& w) {
+    return ctx && ctx->detach(w);
+}
+
+inline void context_defer_destroy(Context* ctx, Widget* w) noexcept {
+    if (!w) return;
+    if (ctx) ctx->closing_.push_back(Widget::WidgetPtr(w));
+    else w->release();
 }
 
 // noexcept: runs from widget destructors. A sink's release() must not throw
@@ -11062,6 +11213,8 @@ public:
     }
 
     const char* widget_type() const override { return "TooltipLabel"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
     bool stretch_cross() const override { return false; }
 
 private:
@@ -11331,7 +11484,9 @@ protected:
 
     static Rect apply_cross(Rect r, const Rect& inner, CrossMode mode,
                             bool cross_vertical, bool stretch) {
-        if (!stretch) mode = CrossMode::Start;
+        // Non-stretching children can't fill the cross axis; they still
+        // honor an explicit Center/Start.
+        if (!stretch && mode == CrossMode::Stretch) mode = CrossMode::Start;
         switch (mode) {
         case CrossMode::Stretch:
             if (cross_vertical) { r.y = inner.y; r.h = inner.h; }
@@ -11628,6 +11783,8 @@ public:
     }
 
     const char* widget_type() const override { return "Expander"; }
+
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
 
 private:
     float header_height() const {
@@ -11944,6 +12101,8 @@ public:
 
     const char* widget_type() const override { return "Button"; }
 
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
+
     bool stretch_cross() const override { return false; }
     bool draw_border_ = true;
 
@@ -12038,6 +12197,8 @@ public:
 
     const char* widget_type() const override { return "Radio"; }
 
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
+
     bool stretch_cross() const override { return false; }
 
 private:
@@ -12125,6 +12286,8 @@ public:
     }
 
     const char* widget_type() const override { return "Checkbox"; }
+
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
 
     bool stretch_cross() const override { return false; }
 
@@ -12314,6 +12477,8 @@ public:
 
     const char* widget_type() const override { return "Slider"; }
 
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
+
 private:
     bool shows_value() const { return !label_.empty() || fmt_set_; }
     float key_step() const { return step_ > 0 ? step_ : (max_ - min_) / 20.f; }
@@ -12363,7 +12528,7 @@ public:
         items_ = std::move(items);
         selected_ = -1;
         hovered_ = -1;
-        labels_valid_ = false;
+        widths_.clear();
         return *this;
     }
     Segmented& set_selected(long index, bool fire_callback = true) {
@@ -12378,30 +12543,64 @@ public:
     bool stretch_cross() const override { return false; }
 
     Size measure(const Constraints& c) override {
-        refresh_labels();
-        float inv = 1.f / ui_scale();
         float w = 0;
-        for (auto& l : lays_) w += l.size.w * inv + 24.f;
+        for (const auto& it : items_) w += natural(it);
         return c.clamp({std::fmax(w, 60.f), 26.f});
     }
 
+    // Segments keep their natural width (text + padding) when they fit.
+    // Narrower than that, the width is shared out so short labels stay
+    // whole and the long ones shrink (their text elides with "...").
+    void arrange(const Rect& area) override {
+        bounds = area;
+        size_t n = items_.size();
+        widths_.assign(n, 0.f);
+        float total = 0;
+        for (size_t i = 0; i < n; ++i) total += (widths_[i] = natural(items_[i]));
+        if (n == 0 || total <= area.w) return;
+        // Water-fill: segments narrower than the fair share keep their width;
+        // the rest split what's left equally.
+        std::vector<bool> fixed(n, false);
+        float avail = std::fmax(area.w, 0.f);
+        size_t open = n;
+        for (bool changed = true; changed && open > 0;) {
+            changed = false;
+            float share = avail / float(open);
+            for (size_t i = 0; i < n; ++i) {
+                if (fixed[i] || widths_[i] > share) continue;
+                fixed[i] = true;
+                avail -= widths_[i];
+                --open;
+                changed = true;
+            }
+        }
+        float share = open > 0 ? avail / float(open) : 0.f;
+        for (size_t i = 0; i < n; ++i)
+            if (!fixed[i]) widths_[i] = share;
+    }
+
     void paint(const PaintEnv& env) const override {
-        refresh_labels();
         const Theme& t = env.theme;
-        float inv = 1.f / ui_scale();
         env.list.rect(bounds, t.surface_alt, t.radius);
         float x = bounds.x;
-        for (size_t i = 0; i < items_.size(); ++i) {
-            float w = lays_[i].size.w * inv + 24.f;
+        for (size_t i = 0; i < items_.size() && i < widths_.size(); ++i) {
+            float w = widths_[i];
             Rect seg{x, bounds.y, w, bounds.h};
-            float ty = seg.center().y - lays_[i].size.h * inv * .5f;
+            Color txt;
             if (long(i) == selected_) {
                 env.list.rect(seg, t.accent, t.radius);
-                paint_text(env, lays_[i], {x + 12, ty}, t.accent_text, inv);
+                txt = t.accent_text;
             } else {
-                Color txt = long(i) == hovered_ && enabled ? t.text : t.text_dim;
-                paint_text(env, lays_[i], {x + 12, ty}, txt, inv);
+                txt = long(i) == hovered_ && enabled ? t.text : t.text_dim;
             }
+            float pad = std::fmin(12.f, w * .2f);
+            Rect box{seg.x + pad, seg.y, std::fmax(w - 2 * pad, 0.f), seg.h};
+            TextOpts o;
+            o.color = txt;
+            o.align = TextAlign::Center;
+            o.valign = TextVAlign::Middle;
+            o.overflow = TextOverflow::Ellipsis;
+            env.text_in(box, items_[i], o);
             x += w;
         }
     }
@@ -12412,7 +12611,7 @@ public:
             hovered_ = -1;
             return false;
         case Event::Type::MouseMove:
-            hovered_ = index_at(e.pos.x);
+            hovered_ = bounds.contains(e.pos) ? index_at(e.pos.x) : -1;
             return false;
         case Event::Type::MousePress:
             if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
@@ -12429,28 +12628,24 @@ public:
     const char* widget_type() const override { return "Segmented"; }
 
 private:
+    // Text width + 12 px padding each side (logical px). Context caches the
+    // layout per raster size, so this follows UI-scale changes.
+    float natural(const std::string& item) const {
+        return (ctx ? ctx->text_size(item).w : 0.f) + 24.f;
+    }
     long index_at(float x) const {
-        float inv = 1.f / ui_scale();
         float acc = bounds.x;
-        for (size_t i = 0; i < items_.size(); ++i) {
-            acc += lays_[i].size.w * inv + 24.f;
+        for (size_t i = 0; i < widths_.size(); ++i) {
+            acc += widths_[i];
             if (x < acc) return long(i);
         }
         return -1;
-    }
-    void refresh_labels() const {
-        if (labels_valid_ || !ctx) return;
-        const Theme& t = ctx->theme();
-        lays_.clear();
-        for (auto& it : items_) lays_.push_back(ctx->font().layout(it, t.s(t.base_font_px)));
-        labels_valid_ = true;
     }
 
     std::vector<std::string> items_;
     long selected_ = -1, hovered_ = -1;
     std::function<void(size_t)> on_select_;
-    mutable std::vector<text::TextLayout> lays_;
-    mutable bool labels_valid_ = false;
+    std::vector<float> widths_; // per segment, set by arrange
 };
 
 // ---------------------------------------------------------------------------
@@ -13216,11 +13411,17 @@ public:
                                       : (c.is_bounded_x() ? c.max.x : 0.f);
         refresh(avail);
         float inv = 1.f / sc();
-        // +2 raster px: layout size is the ink extent, but wrapping decides
-        // on ADVANCE width, which can be a hair wider. Without the slack a
-        // parent sized exactly to the ink width makes the label re-wrap in
-        // arrange (text wider than its box).
-        return c.clamp({(cached_.size.w + 2.f) * inv, cached_.size.h * inv});
+        // Layout size is the INK extent, but wrapping decides on ADVANCE
+        // width (TextLine::width), which can be several raster px wider at
+        // large raster sizes (high UI scale). Report whichever is wider, or a
+        // parent sized exactly to the result makes the label re-wrap in
+        // arrange (last word dropped onto a second line, outside its box).
+        // +2 keeps the historical slack; the +.05 absorbs the logical-px
+        // round trip (w * inv * sc) in arrange.
+        float advance = 0;
+        for (const auto& ln : cached_.lines) advance = std::fmax(advance, ln.width);
+        float w = std::fmax(cached_.size.w + 2.f, advance + .05f);
+        return c.clamp({w * inv, cached_.size.h * inv});
     }
 
     void arrange(const Rect& area) override {
@@ -13238,6 +13439,8 @@ public:
     }
 
     const char* widget_type() const override { return "Label"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
 
 private:
     float sc() const { return ctx ? ctx->theme().scale : 1.f; }
@@ -13309,6 +13512,26 @@ public:
         return content_->add<T>(std::forward<Args>(args)...);
     }
     Column& content() { return *content_; }
+
+    // Children live in the content column (like add): never remove that.
+    bool remove(Widget& child) override { return content_->remove(child); }
+    void clear_children() override { content_->clear_children(); }
+
+    // --- scroll position (logical px of content above the viewport) ---
+    //
+    // Setters take effect at the next arrange (Context::tick), which clamps
+    // to [0, max_scroll()]; max_scroll() is as of the last arrange.
+    float scroll_y() const { return std::clamp(scroll_y_, 0.f, max_scroll_); }
+    float max_scroll() const { return max_scroll_; }
+    ScrollArea& set_scroll_y(float y) { scroll_y_ = std::fmax(y, 0.f); return *this; }
+    ScrollArea& scroll_to_top() { scroll_y_ = 0; return *this; }
+    ScrollArea& scroll_to_bottom() { scroll_y_ = kInfinite; return *this; }
+    // Scroll the least distance that brings `r` (absolute, current layout)
+    // into view; a target taller than the view aligns its top. Returns how
+    // far the content moves up (negative = down).
+    float scroll_to(const Rect& r) { return scroll_into_view(r); }
+    // Reveal a laid-out descendant (or a row rect: TreeView::row_rect).
+    float scroll_to(const Widget& w) { return scroll_into_view(w.bounds); }
 
     Size measure(const Constraints& c) override { return c.clamp({hint_w_, hint_h_}); }
 
@@ -13441,33 +13664,35 @@ public:
     long selected() const { return selected_; }
     ListView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
 
+    // Absolute rect of item `index` in the current layout (empty if out of
+    // range) - e.g. ScrollArea::scroll_to(list.row_rect(i)).
+    Rect row_rect(size_t index) const {
+        if (index >= items_.size() || line_height_ <= 0) return {};
+        return {bounds.x, bounds.y + float(index) * row_height(), bounds.w, row_height()};
+    }
+
     Size measure(const Constraints& c) override {
         refresh_metrics();
-        float inv = 1.f / ui_scale();
-        return c.clamp({natural_w_ * inv, float(items_.size()) * row_height()});
+        return c.clamp({natural_w_, float(items_.size()) * row_height()});
     }
 
     void paint(const PaintEnv& env) const override {
         refresh_metrics();
         const Theme& t = env.theme;
-        float sc = ui_scale(), inv = 1.f / sc;
         float y = bounds.y;
+        TextOpts o;
+        o.color = t.text;
+        o.valign = TextVAlign::Middle;
+        o.overflow = TextOverflow::Ellipsis; // long items stay inside the list
         for (size_t i = 0; i < items_.size(); ++i) {
             Rect row{bounds.x, y, bounds.w, row_height()};
             if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
             else if (i == hovered_ && enabled)
                 env.list.rect(row, t.surface_alt, 4);
 
-            const text::TextLayout& lay = layouts_[i];
-            float text_h = lay.size.h * inv;
-            for (const auto& pg : lay.glyphs) {
-                const text::Glyph& g = *pg.glyph;
-                if (g.uv.empty()) continue;
-                env.list.glyph({row.x + 8 + pg.pos.x * inv,
-                                row.y + (row_height() - text_h) * .5f + pg.pos.y * inv,
-                                g.size.w * inv, g.size.h * inv},
-                               g.tex_id, g.uv, t.text);
-            }
+            if (line_height_ > 0)
+                env.text_in({row.x + 8, row.y, std::fmax(row.w - 16.f, 0.f), row.h},
+                            items_[i], o);
             y += row_height();
         }
     }
@@ -13494,42 +13719,35 @@ public:
 
     const char* widget_type() const override { return "ListView"; }
 
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
+
 private:
-    float sc() const { return ctx ? ctx->theme().scale : 1.f; }
     // Row height in logical px.
-    float row_height() const { return (cached_line_height_ + ctx->theme().s(10.f)) / sc(); }
+    float row_height() const { return line_height_ + 10.f; }
     long row_at(float y) const {
-        if (cached_line_height_ <= 0 || y < bounds.y || y >= bounds.bottom()) return -1;
+        if (line_height_ <= 0 || y < bounds.y || y >= bounds.bottom()) return -1;
         long idx = long((y - bounds.y) / row_height());
         return idx < long(items_.size()) ? idx : -1;
     }
+    // Line height and natural width (logical px), recomputed when the
+    // items or the UI scale change. Fontless: rows stay 10 px, no text.
     void refresh_metrics() const {
-        if (valid_ || !ctx) return;
-        if (!ctx->font().valid()) {
-            // Fontless: paint() indexes layouts_[i] per item, so keep one
-            // (empty) layout per row. valid_ stays false so a font loaded
-            // later still rebuilds real layouts.
-            if (layouts_.size() != items_.size()) layouts_.assign(items_.size(), {});
-            return;
-        }
-        const Theme& t = ctx->theme();
-        float px = t.s(t.base_font_px);
-        cached_line_height_ = ctx->font().line_height(px);
-        layouts_.clear();
+        if (!ctx) return;
+        float sc = ctx->theme().scale;
+        if (valid_ && valid_scale_ == sc) return;
+        if (!ctx->font().valid()) return; // valid_ stays false: a later font rebuilds
+        line_height_ = ctx->text_metrics().line_height;
         natural_w_ = 0;
-        for (const auto& it : items_) {
-            text::TextLayout lay = ctx->font().layout(it, px);
-            natural_w_ = std::fmax(natural_w_, lay.size.w + t.s(16.f));
-            layouts_.push_back(std::move(lay));
-        }
+        for (const auto& it : items_)
+            natural_w_ = std::fmax(natural_w_, ctx->text_size(it).w + 16.f);
         valid_ = true;
+        valid_scale_ = sc;
     }
 
     std::vector<std::string> items_;
-    mutable std::vector<text::TextLayout> layouts_;
     long selected_ = -1;
     size_t hovered_ = size_t(-1);
-    mutable float cached_line_height_ = 0, natural_w_ = 100;
+    mutable float line_height_ = 0, natural_w_ = 100, valid_scale_ = 0;
     mutable bool valid_ = false;
     std::function<void(size_t)> on_select_;
 };
@@ -13602,6 +13820,8 @@ public:
     }
 
     const char* widget_type() const override { return "Tabs"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
 
 private:
     float sc() const { return ctx ? ctx->theme().scale : 1.f; }
@@ -13702,6 +13922,8 @@ public:
     }
 
     const char* widget_type() const override { return "Dropdown"; }
+
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
 
 private:
     void refresh_label() const {
@@ -13896,6 +14118,8 @@ public:
 
     const char* widget_type() const override { return "Plot"; }
 
+    void theme_changed() override { labels_valid_ = false; } // scale/font may have changed
+
 private:
     struct SeriesData {
         std::vector<Vec2> pts;
@@ -14077,6 +14301,7 @@ public:
         rows_ = std::move(rows);
         expanded_.assign(rows_.size(), true);
         selected_ = -1;
+        metrics_valid_ = false; // natural width
         visible_valid_ = false;
         return *this;
     }
@@ -14098,18 +14323,26 @@ public:
     }
     TreeView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
 
+    // Absolute rect of row `index` in the current layout; empty when it is
+    // hidden under a collapsed ancestor or out of range - e.g.
+    // ScrollArea::scroll_to(tree.row_rect(i)).
+    Rect row_rect(size_t index) const {
+        refresh_visible();
+        for (size_t vi = 0; vi < visible_.size(); ++vi)
+            if (visible_[vi] == index)
+                return {bounds.x, bounds.y + float(vi) * row_height(), bounds.w, row_height()};
+        return {};
+    }
+
     Size measure(const Constraints& c) override {
         refresh_metrics();
         refresh_visible();
-        return c.clamp({natural_w_ * ui_scale_inv(),
-                        float(visible_.size()) * row_height()});
+        return c.clamp({natural_w_, float(visible_.size()) * row_height()});
     }
 
     void paint(const PaintEnv& env) const override {
-        refresh_metrics();
         refresh_visible();
         const Theme& t = env.theme;
-        float inv = ui_scale_inv();
         float y = bounds.y;
         for (size_t vi = 0; vi < visible_.size(); ++vi) {
             size_t i = visible_[vi];
@@ -14124,24 +14357,22 @@ public:
                 // chevron right (closed) / down (open)
                 float cy = row.y + row_height() * .5f;
                 Color mark = t.text_dim;
-                if (expanded_[i]) {
-                    env.list.line({indent, cy - 2}, {indent + 4, cy + 2}, mark, 2);
-                    env.list.line({indent + 4, cy + 2}, {indent, cy + 6}, mark, 2);
-                } else {
+                if (expanded_[i]) { // chevron down: v
+                    env.list.line({indent - 2, cy - 2}, {indent + 2, cy + 2}, mark, 2);
+                    env.list.line({indent + 2, cy + 2}, {indent + 6, cy - 2}, mark, 2);
+                } else {            // chevron right: >
                     env.list.line({indent, cy - 4}, {indent + 4, cy}, mark, 2);
                     env.list.line({indent + 4, cy}, {indent, cy + 4}, mark, 2);
                 }
             }
             float tx = indent + (r.expandable ? 16.f : 4.f);
-            float text_h = lays_[i].size.h * inv;
-            for (const auto& pg : lays_[i].glyphs) {
-                const text::Glyph& g = *pg.glyph;
-                if (g.uv.empty()) continue;
-                env.list.glyph({tx + pg.pos.x * inv,
-                                row.y + (row_height() - text_h) * .5f + pg.pos.y * inv,
-                                g.size.w * inv, g.size.h * inv},
-                               g.tex_id, g.uv, t.text);
-            }
+            // Elide to the row: long labels must not run past the tree.
+            Rect box{tx, row.y, std::fmax(bounds.right() - 4.f - tx, 0.f), row_height()};
+            TextOpts o;
+            o.color = t.text;
+            o.valign = TextVAlign::Middle;
+            o.overflow = TextOverflow::Ellipsis;
+            env.text_in(box, r.label, o);
             y += row_height();
         }
     }
@@ -14174,28 +14405,30 @@ public:
 
     const char* widget_type() const override { return "TreeView"; }
 
+    void theme_changed() override { metrics_valid_ = false; } // scale/font may have changed
+
 private:
     float row_height() const { return 24.f; }
-    float ui_scale_inv() const { return 1.f / ui_scale(); }
     long row_at(float y) const {
         long r = long(std::floor((y - bounds.y) / row_height()));
         return (r >= 0 && r < long(visible_.size())) ? r : -1;
     }
 
+    // Natural width (logical px): widest indent + label. Recomputed when
+    // the rows or the UI scale change.
     void refresh_metrics() const {
-        if (metrics_valid_ || !ctx) return;
-        const Theme& t = ctx->theme();
-        lays_.assign(rows_.size(), text::TextLayout{});
+        if (!ctx) return;
+        float sc = ui_scale();
+        if (metrics_valid_ && metrics_scale_ == sc) return;
         natural_w_ = 40.f + (rows_.empty() ? 0.f
                                            : float(rows_.back().depth) * 16.f);
-        for (size_t i = 0; i < rows_.size(); ++i) {
-            lays_[i] = ctx->font().layout(rows_[i].label, t.s(t.base_font_px));
+        for (const auto& r : rows_)
             natural_w_ = std::fmax(natural_w_,
-                                   6.f + float(rows_[i].depth) * 16.f +
-                                       (rows_[i].expandable ? 16.f : 4.f) +
-                                       lays_[i].size.w);
-        }
+                                   6.f + float(r.depth) * 16.f +
+                                       (r.expandable ? 16.f : 4.f) +
+                                       ctx->text_size(r.label).w);
         metrics_valid_ = true;
+        metrics_scale_ = sc;
     }
 
     // Rows whose every ancestor is expanded, in display order.
@@ -14219,8 +14452,7 @@ private:
     std::vector<Row> rows_;
     std::vector<bool> expanded_;
     mutable std::vector<size_t> visible_;
-    mutable std::vector<text::TextLayout> lays_;
-    mutable float natural_w_ = 0;
+    mutable float natural_w_ = 0, metrics_scale_ = 0;
     mutable bool metrics_valid_ = false, visible_valid_ = false;
     long selected_ = -1;
     long hovered_ = -1;
@@ -14307,6 +14539,8 @@ public:
     }
 
     const char* widget_type() const override { return "Table"; }
+
+    void theme_changed() override { metrics_valid_ = false; } // scale/font may have changed
 
 private:
     float row_height() const { return 24.f; }
@@ -14630,6 +14864,8 @@ public:
     }
 
     const char* widget_type() const override { return "DragValue"; }
+
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
 
 private:
     float scrub_speed() const {
@@ -23388,6 +23624,18 @@ inline std::string shortcut_label(Key key, unsigned mods) {
     case Key::End: out += "End"; break;
     case Key::PageUp: out += "PgUp"; break;
     case Key::PageDown: out += "PgDn"; break;
+    case Key::Insert: out += "Ins"; break;
+    case Key::Apostrophe: out += "'"; break;
+    case Key::Comma: out += ","; break;
+    case Key::Minus: out += "-"; break;
+    case Key::Period: out += "."; break;
+    case Key::Slash: out += "/"; break;
+    case Key::Equal: out += "="; break;
+    case Key::LeftBracket: out += "["; break;
+    case Key::RightBracket: out += "]"; break;
+    case Key::Backslash: out += "\\"; break;
+    case Key::Semicolon: out += ";"; break;
+    case Key::Grave: out += "`"; break;
     default:
         if (k >= int(Key::F1) && k <= int(Key::F12))
             out += "F" + std::to_string(k - int(Key::F1) + 1);
@@ -23457,10 +23705,10 @@ public:
     Size measure(const Constraints& c) override {
         refresh();
         float inv = 1.f / ui_scale();
-        float w = 10 + 18 + lays_.label.size.w * inv;
-        if (!hint_.empty()) w += 16 + lays_.hint.size.w * inv;
+        float w = text_x() + lays_.label.size.w * inv;
+        if (!hint_.empty()) w += 24 + lays_.hint.size.w * inv;
         if (submenu_) w += 16;
-        w += 10;
+        w += 12;
         float h = std::fmax(lays_.label.line_height * inv, 16.f) + 9.f;
         return c.clamp({w, h});
     }
@@ -23478,11 +23726,11 @@ public:
             env.list.line({bounds.x + 11, cy}, {bounds.x + 15, cy + 4}, mark, 2);
             env.list.line({bounds.x + 15, cy + 4}, {bounds.x + 22, cy - 5}, mark, 2);
         }
-        float tx = bounds.x + 32;
+        float tx = bounds.x + text_x();
         paint_text(env, lays_.label, {tx, cy - lays_.label.size.h * inv * .5f},
                    enabled_ ? t.text : t.text_dim, inv);
         if (!hint_.empty()) {
-            float hx = bounds.right() - 10 - lays_.hint.size.w * inv;
+            float hx = bounds.right() - (submenu_ ? 28.f : 12.f) - lays_.hint.size.w * inv;
             paint_text(env, lays_.hint, {hx, cy - lays_.hint.size.h * inv * .5f},
                        t.text_dim.faded(enabled_ ? 1.f : .4f), inv);
         }
@@ -23496,6 +23744,10 @@ public:
 
     bool on_event(const Event& e) override {
         switch (e.type) {
+        case Event::Type::MouseLeave:
+            // Moves stop arriving once the pointer is over another widget.
+            hover_.target = 0.f;
+            return false;
         case Event::Type::MouseMove: {
             bool over = bounds.contains(e.pos);
             hover_.target = over && enabled_ ? 1.f : 0.f;
@@ -23523,10 +23775,18 @@ public:
 
     const char* widget_type() const override { return "MenuItem"; }
 
-    bool stretch_cross() const override { return false; }
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
+
+    // Rows stretch to the menu's width (stretch_cross() defaults to true): one
+    // hover-highlight width, right-aligned hints and chevrons in a column.
+
 
 private:
     friend class Menu;
+
+    // Label inset: a checkmark gutter only when some row of this menu is
+    // checkable, else plain padding. Defined after Menu.
+    float text_x() const;
 
     // Defined after Menu (Menu must be complete to convert Menu* to Widget&
     // for the Context popup-stack calls).
@@ -23677,6 +23937,14 @@ private:
     }
 };
 
+inline float MenuItem::text_x() const {
+    if (parent)
+        for (const auto& c : parent->children)
+            if (auto* it = dynamic_cast<const MenuItem*>(c.get()); it && it->checked_fn_)
+                return 32.f;
+    return 12.f;
+}
+
 inline void MenuItem::open_submenu() {
     if (!ctx || !submenu_) return;
     if (Menu* m = owner_menu()) {
@@ -23768,6 +24036,9 @@ public:
 
         bool on_event(const Event& e) override {
             switch (e.type) {
+            case Event::Type::MouseLeave:
+                hover_.target = 0.f;
+                return false;
             case Event::Type::MouseMove: {
                 bool over = bounds.contains(e.pos);
                 hover_.target = over ? 1.f : 0.f;
@@ -23794,6 +24065,8 @@ public:
         void tick(Time t) override { hover_.advance(t.dt); }
 
         const char* widget_type() const override { return "MenuButton"; }
+
+        void theme_changed() override { valid_ = false; } // scale/font may have changed
 
         bool stretch_cross() const override { return false; }
 
@@ -24413,6 +24686,8 @@ public:
 
     const char* widget_type() const override { return "LogView"; }
 
+    void theme_changed() override { lays_valid_ = false; } // scale/font may have changed
+
 private:
     struct Line {
         std::string text;
@@ -24607,6 +24882,8 @@ public:
     }
 
     const char* widget_type() const override { return "Toast"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
 
     bool stretch_cross() const override { return false; }
 
@@ -25111,8 +25388,14 @@ public:
                         .intersect(clips_.back());
         Vec2 d{b.x - a.x, b.y - a.y};
         float len2 = dot(d, d);
+        // The loop bounds are inclusive (they cover the antialiased fringe),
+        // so they reach one px past the clip - and a line entirely outside
+        // it collapses `bounds` onto the clip edge. Test each pixel against
+        // the clip, the same rule as fill_rect.
+        const Rect clip = clips_.back();
         for (int y = int(bounds.y); y <= int(std::ceil(bounds.bottom())); ++y) {
             for (int x = int(bounds.x); x <= int(std::ceil(bounds.right())); ++x) {
+                if (!clip.contains({float(x), float(y)})) continue;
                 Vec2 p{x + .5f, y + .5f};
                 float t = len2 > 0 ? dot(p - a, d) / len2 : 0;
                 t = detail::clamp01(t);
@@ -25518,6 +25801,12 @@ inline Key map_key(int glfw_key) {
     case GLFW_KEY_MINUS: return Key::Minus;
     case GLFW_KEY_PERIOD: return Key::Period;
     case GLFW_KEY_SLASH: return Key::Slash;
+    case GLFW_KEY_EQUAL: return Key::Equal;
+    case GLFW_KEY_LEFT_BRACKET: return Key::LeftBracket;
+    case GLFW_KEY_RIGHT_BRACKET: return Key::RightBracket;
+    case GLFW_KEY_BACKSLASH: return Key::Backslash;
+    case GLFW_KEY_SEMICOLON: return Key::Semicolon;
+    case GLFW_KEY_GRAVE_ACCENT: return Key::Grave;
     case GLFW_KEY_LEFT: return Key::Left;
     case GLFW_KEY_RIGHT: return Key::Right;
     case GLFW_KEY_UP: return Key::Up;
@@ -26060,6 +26349,12 @@ inline Key map_key(SDL_Keycode k) {
     case SDLK_MINUS: return Key::Minus;
     case SDLK_PERIOD: return Key::Period;
     case SDLK_SLASH: return Key::Slash;
+    case SDLK_EQUALS: return Key::Equal;
+    case SDLK_LEFTBRACKET: return Key::LeftBracket;
+    case SDLK_RIGHTBRACKET: return Key::RightBracket;
+    case SDLK_BACKSLASH: return Key::Backslash;
+    case SDLK_SEMICOLON: return Key::Semicolon;
+    case SDLK_GRAVE: return Key::Grave;
     case SDLK_LEFT: return Key::Left;
     case SDLK_RIGHT: return Key::Right;
     case SDLK_UP: return Key::Up;

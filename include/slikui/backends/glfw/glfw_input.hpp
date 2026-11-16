@@ -68,6 +68,12 @@ inline Key map_key(int glfw_key) {
     case GLFW_KEY_MINUS: return Key::Minus;
     case GLFW_KEY_PERIOD: return Key::Period;
     case GLFW_KEY_SLASH: return Key::Slash;
+    case GLFW_KEY_EQUAL: return Key::Equal;
+    case GLFW_KEY_LEFT_BRACKET: return Key::LeftBracket;
+    case GLFW_KEY_RIGHT_BRACKET: return Key::RightBracket;
+    case GLFW_KEY_BACKSLASH: return Key::Backslash;
+    case GLFW_KEY_SEMICOLON: return Key::Semicolon;
+    case GLFW_KEY_GRAVE_ACCENT: return Key::Grave;
     case GLFW_KEY_LEFT: return Key::Left;
     case GLFW_KEY_RIGHT: return Key::Right;
     case GLFW_KEY_UP: return Key::Up;

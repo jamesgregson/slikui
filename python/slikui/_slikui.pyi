@@ -67,6 +67,10 @@ class Color:
     @staticmethod
     def from_hex(rgb: int, alpha: int = 255) -> Color: ...
 
+    @staticmethod
+    def from_float(r: float, g: float, b: float, a: float = 1.0) -> Color:
+        """Channels as 0..1 floats (Color() itself takes 0..255 ints)."""
+
     def with_alpha(self, alpha: float) -> Color: ...
 
     def faded(self, f: float) -> Color: ...
@@ -250,7 +254,11 @@ class Size:
     def __repr__(self) -> str: ...
 
 class Constraints:
+    @overload
     def __init__(self) -> None: ...
+
+    @overload
+    def __init__(self, min: Vec2, max: Vec2) -> None: ...
 
     @property
     def min(self) -> Vec2: ...
@@ -418,6 +426,18 @@ class Key(enum.Enum):
     Num8 = 68
 
     Num9 = 69
+
+    Equal = 70
+
+    LeftBracket = 71
+
+    RightBracket = 72
+
+    Backslash = 73
+
+    Semicolon = 74
+
+    Grave = 75
 
 class Mod(enum.IntEnum):
     ModNone = 0
@@ -963,6 +983,11 @@ class Context:
     def has_popups(self) -> bool: ...
 
     @property
+    def toast_count(self) -> int: ...
+
+    def toast(self, index: int) -> Widget: ...
+
+    @property
     def popup_count(self) -> int: ...
 
     def popup(self, index: int) -> Widget: ...
@@ -1020,7 +1045,12 @@ class Widget:
 
     def attached(self, context: Context) -> None:
         """
-        Override: called once when the widget joins a Context (on the first tick after it was added).
+        Override: called once when the widget joins a Context (when it is added to an attached parent, else on the next tick).
+        """
+
+    def theme_changed(self) -> None:
+        """
+        Override: called on the tick after Context.theme changed (UI scale, preset, palette or metrics); drop theme-derived caches.
         """
 
     def on_event(self, event: Event) -> bool:
@@ -1036,6 +1066,14 @@ class Widget:
     def stretch_cross(self) -> bool: ...
 
     def expands_main(self) -> bool: ...
+
+    def set_expand(self, value: bool = True) -> Widget:
+        """
+        Share leftover main-axis space in a Column/Row (like Spacer) - e.g. a ScrollArea filling the rest of a Column. Builder kwarg: expand=True.
+        """
+
+    @property
+    def expand(self) -> bool: ...
 
     def mouse_transparent(self) -> bool:
         """
@@ -1099,6 +1137,14 @@ class Widget:
     def children(self) -> list: ...
 
     def find(self, id: str) -> Widget: ...
+
+    def remove(self, child: Widget) -> bool:
+        """
+        Detach and destroy a direct child and its subtree (ScrollArea: a child of its content). False if `child` is not a direct child. Safe from event handlers and callbacks. Afterwards, handles to removed built-in widgets are invalid - drop them; a removed custom widget object survives (empty) and may be added again.
+        """
+
+    def clear_children(self) -> None:
+        """remove() every child."""
 
     def set_context_menu(self, menu: Menu) -> Widget:
         """
@@ -1530,6 +1576,11 @@ class TreeView(Widget):
 
     def on_select(self, value: Callable[[int], None]) -> TreeView: ...
 
+    def row_rect(self, index: int) -> Rect:
+        """
+        Absolute rect of row `index` (current layout); empty when hidden under a collapsed parent or out of range.
+        """
+
     def set_rows(self, rows: Sequence[TreeView.Row]) -> TreeView: ...
 
     def set_expanded(self, index: int, open: bool) -> TreeView: ...
@@ -1914,6 +1965,29 @@ class ScrollArea(Widget):
     @property
     def content(self) -> Column: ...
 
+    @property
+    def scroll_y(self) -> float: ...
+
+    @property
+    def max_scroll(self) -> float: ...
+
+    def set_scroll_y(self, y: float) -> ScrollArea:
+        """Content px above the viewport; applied (and clamped) at the next tick."""
+
+    def scroll_to_top(self) -> ScrollArea: ...
+
+    def scroll_to_bottom(self) -> ScrollArea: ...
+
+    @overload
+    def scroll_to(self, rect: Rect) -> float:
+        """
+        Least scroll that brings `rect` (absolute, current layout) into view, e.g. tree.row_rect(i). Returns how far the content moves up.
+        """
+
+    @overload
+    def scroll_to(self, widget: Widget) -> float:
+        """Reveal a laid-out descendant."""
+
 class ListView(Widget):
     def set_items(self, value: Sequence[str]) -> ListView: ...
 
@@ -1923,6 +1997,9 @@ class ListView(Widget):
 
     @property
     def selected(self) -> int: ...
+
+    def row_rect(self, index: int) -> Rect:
+        """Absolute rect of item `index` (current layout); empty if out of range."""
 
 class Tabs(Widget):
     def set_tabs(self, value: Sequence[str]) -> Tabs: ...

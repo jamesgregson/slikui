@@ -464,8 +464,11 @@ TEST(shortcut_label_format) {
     CHECK(slikui::shortcut_label(slikui::Key::Left, slikui::ModAlt) == "Alt+Left");
     CHECK(slikui::shortcut_label(slikui::Key::Num1, slikui::ModCtrl) == "Ctrl+1");
     CHECK(slikui::shortcut_label(slikui::Key::F5, 0) == "F5");
+    CHECK(slikui::shortcut_label(slikui::Key::Equal, slikui::ModCtrl) == "Ctrl+=");
+    CHECK(slikui::shortcut_label(slikui::Key::LeftBracket, 0) == "[");
+    CHECK(slikui::shortcut_label(slikui::Key::Backslash, 0) == "\\");
     for (unsigned mods = 0; mods < 16; ++mods)
-        for (int k = 1; k <= int(slikui::Key::Num9); ++k)
+        for (int k = 1; k <= int(slikui::Key::Grave); ++k)
             for (char c : slikui::shortcut_label(slikui::Key(k), mods))
                 CHECK((unsigned char)c < 0x80);
 }

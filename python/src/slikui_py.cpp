@@ -463,6 +463,8 @@ struct PyWidget : slikui::Widget {
 
     void tick(Time t) override { NB_OVERRIDE(tick, t); }
 
+    void theme_changed() override { NB_OVERRIDE(theme_changed); }
+
     bool stretch_cross() const override { NB_OVERRIDE(stretch_cross); }
 
     bool expands_main() const override { NB_OVERRIDE(expands_main); }
@@ -546,6 +548,9 @@ NB_MODULE(_slikui, m) {
         .def_static("from_hex",
                     [](std::uint32_t rgb, std::uint8_t alpha) { return Color::from_hex(rgb, alpha); },
                     nb::arg("rgb"), nb::arg("alpha") = 255)
+        .def_static("from_float", &Color::from_float, nb::arg("r"), nb::arg("g"),
+                    nb::arg("b"), nb::arg("a") = 1.f,
+                    "Channels as 0..1 floats (Color() itself takes 0..255 ints).")
         .def("with_alpha", &Color::with_alpha, nb::arg("alpha"))
         .def("faded", &Color::faded, nb::arg("f"))
         .def("lerp", &Color::lerp, nb::arg("other"), nb::arg("t"))
@@ -653,6 +658,9 @@ NB_MODULE(_slikui, m) {
 
     nb::class_<Constraints>(m, "Constraints")
         .def(nb::init<>())
+        .def("__init__",
+             [](Constraints* c, Vec2 min, Vec2 max) { new (c) Constraints{min, max}; },
+             nb::arg("min"), nb::arg("max"))
         .def_rw("min", &Constraints::min)
         .def_rw("max", &Constraints::max)
         .def_static("loose",
@@ -738,7 +746,13 @@ NB_MODULE(_slikui, m) {
         .value("Num6", Key::Num6)
         .value("Num7", Key::Num7)
         .value("Num8", Key::Num8)
-        .value("Num9", Key::Num9);
+        .value("Num9", Key::Num9)
+        .value("Equal", Key::Equal)
+        .value("LeftBracket", Key::LeftBracket)
+        .value("RightBracket", Key::RightBracket)
+        .value("Backslash", Key::Backslash)
+        .value("Semicolon", Key::Semicolon)
+        .value("Grave", Key::Grave);
 
     nb::enum_<Mod>(m, "Mod", nb::is_arithmetic())
         .value("ModNone", ModNone)
@@ -1302,6 +1316,12 @@ NB_MODULE(_slikui, m) {
              "Host routing: should key events go to the UI? (a widget has focus, "
              "or a modal dialog is open)")
         .def_prop_ro("has_popups", &Context::has_popups)
+        .def_prop_ro("toast_count", &Context::toast_count)
+        .def("toast",
+             [](Context& c, std::size_t i) -> Widget* {
+                 return i < c.toast_count() ? c.toast(i) : nullptr;
+             },
+             nb::arg("index"), nb::rv_policy::reference)
         .def_prop_ro("popup_count", &Context::popup_count)
         .def("popup",
              [](Context& c, std::size_t i) -> Widget* {
@@ -1392,8 +1412,11 @@ NB_MODULE(_slikui, m) {
                  if (auto* pw = dynamic_cast<PyWidget*>(&w)) pw->base_attached(c);
              },
              nb::arg("context"),
-             "Override: called once when the widget joins a Context (on the "
-             "first tick after it was added).")
+             "Override: called once when the widget joins a Context (when it "
+             "is added to an attached parent, else on the next tick).")
+        .def("theme_changed", [](Widget&) {},
+             "Override: called on the tick after Context.theme changed (UI "
+             "scale, preset, palette or metrics); drop theme-derived caches.")
         .def("on_event",
              [](Widget& w, const Event& e) { return w.on_event(e); },
              nb::arg("event"),
@@ -1413,6 +1436,13 @@ NB_MODULE(_slikui, m) {
              "Use this clock, not wall time, for animation.")
         .def("stretch_cross", [](Widget& w) { return w.stretch_cross(); })
         .def("expands_main", [](Widget& w) { return w.expands_main(); })
+        .def("set_expand",
+             [](Widget& w, bool on) -> Widget& { return w.set_expand(on); },
+             nb::arg("value") = true, nb::rv_policy::reference,
+             "Share leftover main-axis space in a Column/Row (like Spacer) - "
+             "e.g. a ScrollArea filling the rest of a Column. Builder kwarg: "
+             "expand=True.")
+        .def_prop_ro("expand", [](const Widget& w) { return w.expand(); })
         .def("mouse_transparent", [](Widget& w) { return w.mouse_transparent(); },
              "True for pure layout that paints nothing: Context.wants_mouse lets "
              "the pointer through it to the host's scene. Override to return True "
@@ -1460,6 +1490,15 @@ NB_MODULE(_slikui, m) {
         .def("find",
              [](Widget& w, const std::string& widget_id) -> Widget* { return w.find(widget_id); },
              nb::arg("id"), nb::rv_policy::reference)
+        .def("remove", [](Widget& w, Widget& child) { return w.remove(child); },
+             nb::arg("child"),
+             "Detach and destroy a direct child and its subtree (ScrollArea: a "
+             "child of its content). False if `child` is not a direct child. "
+             "Safe from event handlers and callbacks. Afterwards, handles to "
+             "removed built-in widgets are invalid - drop them; a removed custom "
+             "widget object survives (empty) and may be added again.")
+        .def("clear_children", [](Widget& w) { w.clear_children(); },
+             "remove() every child.")
         .def("set_context_menu",
              [](Widget& w, Menu& m) -> Widget& { return w.set_context_menu(&m); },
              nb::arg("menu"), nb::rv_policy::reference,
@@ -1817,6 +1856,9 @@ NB_MODULE(_slikui, m) {
         .def_rw("depth", &TreeView::Row::depth)
         .def_rw("expandable", &TreeView::Row::expandable);
     def_setter(treeview, "on_select", &TreeView::on_select);
+    treeview.def("row_rect", &TreeView::row_rect, nb::arg("index"),
+                 "Absolute rect of row `index` (current layout); empty when hidden "
+                 "under a collapsed parent or out of range.");
     treeview.def(nb::init<std::string>(), nb::arg("id") = "")
         .def("set_rows",
              [](TreeView& t, std::vector<TreeView::Row> rows) -> TreeView& {
@@ -1935,12 +1977,25 @@ NB_MODULE(_slikui, m) {
     scroll.def_prop_ro("content",
                        [](ScrollArea& s) -> Column& { return s.content(); },
                        nb::rv_policy::reference);
+    scroll.def_prop_ro("scroll_y", &ScrollArea::scroll_y)
+        .def_prop_ro("max_scroll", &ScrollArea::max_scroll)
+        .def("set_scroll_y", &ScrollArea::set_scroll_y, nb::arg("y"), nb::rv_policy::reference,
+             "Content px above the viewport; applied (and clamped) at the next tick.")
+        .def("scroll_to_top", &ScrollArea::scroll_to_top, nb::rv_policy::reference)
+        .def("scroll_to_bottom", &ScrollArea::scroll_to_bottom, nb::rv_policy::reference)
+        .def("scroll_to", nb::overload_cast<const Rect&>(&ScrollArea::scroll_to), nb::arg("rect"),
+             "Least scroll that brings `rect` (absolute, current layout) into view, "
+             "e.g. tree.row_rect(i). Returns how far the content moves up.")
+        .def("scroll_to", nb::overload_cast<const Widget&>(&ScrollArea::scroll_to),
+             nb::arg("widget"), "Reveal a laid-out descendant.");
 
     auto listview = nb::class_<ListView, Widget>(m, "ListView");
     def_setter(listview, "set_items", &ListView::set_items);
     def_setter(listview, "set_selected", &ListView::set_selected);
     def_setter(listview, "on_select", &ListView::on_select);
     listview.def_prop_ro("selected", &ListView::selected);
+    listview.def("row_rect", &ListView::row_rect, nb::arg("index"),
+                 "Absolute rect of item `index` (current layout); empty if out of range.");
 
     auto tabs = nb::class_<Tabs, Widget>(m, "Tabs");
     def_setter(tabs, "set_tabs", &Tabs::set_tabs);

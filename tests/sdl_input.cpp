@@ -73,6 +73,12 @@ void mapping() {
     EXPECT(sdl::map_button(SDL_BUTTON_X1) == 3 && sdl::map_button(SDL_BUTTON_X2) == 4);
     EXPECT(sdl::map_key(SDLK_A) == Key::A && sdl::map_key(SDLK_Z) == Key::Z);
     EXPECT(sdl::map_key(SDLK_0) == Key::Num0 && sdl::map_key(SDLK_9) == Key::Num9);
+    EXPECT(sdl::map_key(SDLK_EQUALS) == Key::Equal &&
+           sdl::map_key(SDLK_LEFTBRACKET) == Key::LeftBracket &&
+           sdl::map_key(SDLK_RIGHTBRACKET) == Key::RightBracket &&
+           sdl::map_key(SDLK_BACKSLASH) == Key::Backslash &&
+           sdl::map_key(SDLK_SEMICOLON) == Key::Semicolon &&
+           sdl::map_key(SDLK_GRAVE) == Key::Grave);
     EXPECT(sdl::map_key(SDLK_KP_ENTER) == Key::Enter && sdl::map_key(SDLK_RETURN) == Key::Enter);
     EXPECT(sdl::map_key(SDLK_PAGEDOWN) == Key::PageDown && sdl::map_key(SDLK_F12) == Key::F12);
     EXPECT(sdl::map_key(SDLK_F13) == Key::Unknown);

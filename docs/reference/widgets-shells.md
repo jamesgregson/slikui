@@ -46,7 +46,8 @@ app and traps presses outside it. Escape or the X button closes.
 
 Auto-dismissing corner notices: `ctx.push_toast(std::make_unique<Toast>("Saved"), 3.0)`
 - the second argument is the lifetime in seconds. `set_icon(Icon)` adds a
-procedural icon.
+procedural icon. Toasts never take input: clicks pass through to whatever is
+under them, and open menus/popups are unaffected. Several stack upward.
 
 === "Python"
 

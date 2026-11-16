@@ -101,6 +101,15 @@ struct Color {
         return Color(ch(rf), ch(gf), ch(bf), alpha);
     }
 
+    // Channels as 0..1 floats (clamped, rounded) - for code that thinks in
+    // normalized color; the stored channels stay 0..255.
+    static Color from_float(float r, float g, float b, float a = 1.f) {
+        auto q = [](float v) {
+            return std::uint8_t(v <= 0.f ? 0 : v >= 1.f ? 255 : int(v * 255.f + .5f));
+        };
+        return Color(q(r), q(g), q(b), q(a));
+    }
+
     static Color black()      { return Color(0, 0, 0); }
     static Color white()      { return Color(255, 255, 255); }
     static Color transparent(){ return Color(0, 0, 0, 0); }

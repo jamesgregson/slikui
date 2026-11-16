@@ -387,6 +387,8 @@ public:
 
     const char* widget_type() const override { return "LogView"; }
 
+    void theme_changed() override { lays_valid_ = false; } // scale/font may have changed
+
 private:
     struct Line {
         std::string text;
@@ -581,6 +583,8 @@ public:
     }
 
     const char* widget_type() const override { return "Toast"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
 
     bool stretch_cross() const override { return false; }
 

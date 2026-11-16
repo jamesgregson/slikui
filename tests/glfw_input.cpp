@@ -49,6 +49,12 @@ int main() {
     EXPECT(glfw::map_button(GLFW_MOUSE_BUTTON_MIDDLE) == MouseMiddle);
     EXPECT(glfw::map_button(GLFW_MOUSE_BUTTON_4) == GLFW_MOUSE_BUTTON_4);
     EXPECT(glfw::map_mods(GLFW_MOD_SHIFT | GLFW_MOD_SUPER) == (ModShift | ModSuper));
+    EXPECT(glfw::map_key(GLFW_KEY_EQUAL) == Key::Equal &&
+           glfw::map_key(GLFW_KEY_LEFT_BRACKET) == Key::LeftBracket &&
+           glfw::map_key(GLFW_KEY_RIGHT_BRACKET) == Key::RightBracket &&
+           glfw::map_key(GLFW_KEY_BACKSLASH) == Key::Backslash &&
+           glfw::map_key(GLFW_KEY_SEMICOLON) == Key::Semicolon &&
+           glfw::map_key(GLFW_KEY_GRAVE_ACCENT) == Key::Grave);
     {
         Event k = glfw::key_event(GLFW_KEY_A, 0, GLFW_REPEAT, GLFW_MOD_CONTROL);
         EXPECT(k.type == Event::Type::KeyPress && k.repeat && k.key == Key::A &&

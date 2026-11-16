@@ -32,6 +32,26 @@ public:
     }
     Column& content() { return *content_; }
 
+    // Children live in the content column (like add): never remove that.
+    bool remove(Widget& child) override { return content_->remove(child); }
+    void clear_children() override { content_->clear_children(); }
+
+    // --- scroll position (logical px of content above the viewport) ---
+    //
+    // Setters take effect at the next arrange (Context::tick), which clamps
+    // to [0, max_scroll()]; max_scroll() is as of the last arrange.
+    float scroll_y() const { return std::clamp(scroll_y_, 0.f, max_scroll_); }
+    float max_scroll() const { return max_scroll_; }
+    ScrollArea& set_scroll_y(float y) { scroll_y_ = std::fmax(y, 0.f); return *this; }
+    ScrollArea& scroll_to_top() { scroll_y_ = 0; return *this; }
+    ScrollArea& scroll_to_bottom() { scroll_y_ = kInfinite; return *this; }
+    // Scroll the least distance that brings `r` (absolute, current layout)
+    // into view; a target taller than the view aligns its top. Returns how
+    // far the content moves up (negative = down).
+    float scroll_to(const Rect& r) { return scroll_into_view(r); }
+    // Reveal a laid-out descendant (or a row rect: TreeView::row_rect).
+    float scroll_to(const Widget& w) { return scroll_into_view(w.bounds); }
+
     Size measure(const Constraints& c) override { return c.clamp({hint_w_, hint_h_}); }
 
     void arrange(const Rect& area) override {
@@ -163,33 +183,35 @@ public:
     long selected() const { return selected_; }
     ListView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
 
+    // Absolute rect of item `index` in the current layout (empty if out of
+    // range) - e.g. ScrollArea::scroll_to(list.row_rect(i)).
+    Rect row_rect(size_t index) const {
+        if (index >= items_.size() || line_height_ <= 0) return {};
+        return {bounds.x, bounds.y + float(index) * row_height(), bounds.w, row_height()};
+    }
+
     Size measure(const Constraints& c) override {
         refresh_metrics();
-        float inv = 1.f / ui_scale();
-        return c.clamp({natural_w_ * inv, float(items_.size()) * row_height()});
+        return c.clamp({natural_w_, float(items_.size()) * row_height()});
     }
 
     void paint(const PaintEnv& env) const override {
         refresh_metrics();
         const Theme& t = env.theme;
-        float sc = ui_scale(), inv = 1.f / sc;
         float y = bounds.y;
+        TextOpts o;
+        o.color = t.text;
+        o.valign = TextVAlign::Middle;
+        o.overflow = TextOverflow::Ellipsis; // long items stay inside the list
         for (size_t i = 0; i < items_.size(); ++i) {
             Rect row{bounds.x, y, bounds.w, row_height()};
             if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
             else if (i == hovered_ && enabled)
                 env.list.rect(row, t.surface_alt, 4);
 
-            const text::TextLayout& lay = layouts_[i];
-            float text_h = lay.size.h * inv;
-            for (const auto& pg : lay.glyphs) {
-                const text::Glyph& g = *pg.glyph;
-                if (g.uv.empty()) continue;
-                env.list.glyph({row.x + 8 + pg.pos.x * inv,
-                                row.y + (row_height() - text_h) * .5f + pg.pos.y * inv,
-                                g.size.w * inv, g.size.h * inv},
-                               g.tex_id, g.uv, t.text);
-            }
+            if (line_height_ > 0)
+                env.text_in({row.x + 8, row.y, std::fmax(row.w - 16.f, 0.f), row.h},
+                            items_[i], o);
             y += row_height();
         }
     }
@@ -216,42 +238,35 @@ public:
 
     const char* widget_type() const override { return "ListView"; }
 
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
+
 private:
-    float sc() const { return ctx ? ctx->theme().scale : 1.f; }
     // Row height in logical px.
-    float row_height() const { return (cached_line_height_ + ctx->theme().s(10.f)) / sc(); }
+    float row_height() const { return line_height_ + 10.f; }
     long row_at(float y) const {
-        if (cached_line_height_ <= 0 || y < bounds.y || y >= bounds.bottom()) return -1;
+        if (line_height_ <= 0 || y < bounds.y || y >= bounds.bottom()) return -1;
         long idx = long((y - bounds.y) / row_height());
         return idx < long(items_.size()) ? idx : -1;
     }
+    // Line height and natural width (logical px), recomputed when the
+    // items or the UI scale change. Fontless: rows stay 10 px, no text.
     void refresh_metrics() const {
-        if (valid_ || !ctx) return;
-        if (!ctx->font().valid()) {
-            // Fontless: paint() indexes layouts_[i] per item, so keep one
-            // (empty) layout per row. valid_ stays false so a font loaded
-            // later still rebuilds real layouts.
-            if (layouts_.size() != items_.size()) layouts_.assign(items_.size(), {});
-            return;
-        }
-        const Theme& t = ctx->theme();
-        float px = t.s(t.base_font_px);
-        cached_line_height_ = ctx->font().line_height(px);
-        layouts_.clear();
+        if (!ctx) return;
+        float sc = ctx->theme().scale;
+        if (valid_ && valid_scale_ == sc) return;
+        if (!ctx->font().valid()) return; // valid_ stays false: a later font rebuilds
+        line_height_ = ctx->text_metrics().line_height;
         natural_w_ = 0;
-        for (const auto& it : items_) {
-            text::TextLayout lay = ctx->font().layout(it, px);
-            natural_w_ = std::fmax(natural_w_, lay.size.w + t.s(16.f));
-            layouts_.push_back(std::move(lay));
-        }
+        for (const auto& it : items_)
+            natural_w_ = std::fmax(natural_w_, ctx->text_size(it).w + 16.f);
         valid_ = true;
+        valid_scale_ = sc;
     }
 
     std::vector<std::string> items_;
-    mutable std::vector<text::TextLayout> layouts_;
     long selected_ = -1;
     size_t hovered_ = size_t(-1);
-    mutable float cached_line_height_ = 0, natural_w_ = 100;
+    mutable float line_height_ = 0, natural_w_ = 100, valid_scale_ = 0;
     mutable bool valid_ = false;
     std::function<void(size_t)> on_select_;
 };
@@ -324,6 +339,8 @@ public:
     }
 
     const char* widget_type() const override { return "Tabs"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
 
 private:
     float sc() const { return ctx ? ctx->theme().scale : 1.f; }
@@ -424,6 +441,8 @@ public:
     }
 
     const char* widget_type() const override { return "Dropdown"; }
+
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
 
 private:
     void refresh_label() const {

@@ -40,6 +40,8 @@ struct Theme {
     float small_font_px = 12.f;
     float large_font_px = 20.f;
 
+    bool operator==(const Theme&) const = default; // change detection (Context::tick)
+
     // Derived hover/press variants so widgets stay visually consistent.
     Color hover(Color base)  const { return base.lerp(Color::white(), 0.15f); }
     Color press(Color base)  const { return base.lerp(Color::black(), 0.25f); }

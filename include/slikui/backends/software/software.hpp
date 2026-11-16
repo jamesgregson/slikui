@@ -213,8 +213,14 @@ public:
                         .intersect(clips_.back());
         Vec2 d{b.x - a.x, b.y - a.y};
         float len2 = dot(d, d);
+        // The loop bounds are inclusive (they cover the antialiased fringe),
+        // so they reach one px past the clip - and a line entirely outside
+        // it collapses `bounds` onto the clip edge. Test each pixel against
+        // the clip, the same rule as fill_rect.
+        const Rect clip = clips_.back();
         for (int y = int(bounds.y); y <= int(std::ceil(bounds.bottom())); ++y) {
             for (int x = int(bounds.x); x <= int(std::ceil(bounds.right())); ++x) {
+                if (!clip.contains({float(x), float(y)})) continue;
                 Vec2 p{x + .5f, y + .5f};
                 float t = len2 > 0 ? dot(p - a, d) / len2 : 0;
                 t = detail::clamp01(t);

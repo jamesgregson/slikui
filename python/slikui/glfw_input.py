@@ -58,7 +58,9 @@ def _g():
 
 # slikui.Key name -> GLFW KEY_<NAME>, where the spelling differs.
 _KEY_NAMES = {"PageUp": "PAGE_UP", "PageDown": "PAGE_DOWN",
-              "CapsLock": "CAPS_LOCK", **{f"Num{d}": str(d) for d in range(10)}}
+              "CapsLock": "CAPS_LOCK", "LeftBracket": "LEFT_BRACKET",
+              "RightBracket": "RIGHT_BRACKET", "Grave": "GRAVE_ACCENT",
+              **{f"Num{d}": str(d) for d in range(10)}}
 _key_map = None
 
 

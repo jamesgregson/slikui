@@ -186,6 +186,8 @@ public:
 
     const char* widget_type() const override { return "DragValue"; }
 
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
+
 private:
     float scrub_speed() const {
         if (speed_ >= 0) return speed_;

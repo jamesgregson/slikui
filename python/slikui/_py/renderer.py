@@ -256,7 +256,9 @@ class CanvasSink(RenderSink):
         dist = np.sqrt((px - proj_x) * (px - proj_x) +
                        (py - proj_y) * (py - proj_y))
         cov = _clamp01((half + _F32(0.5)) - dist)
-        mask = cov > _F32(0)
+        # Inclusive grid overshoots the clip by a pixel: test per pixel
+        # (software::Sink::stroke_line does the same).
+        mask = (cov > _F32(0)) & self._clip_mask(X, Y)
         sa = self._faded_alpha(color.a, cov).astype(_U32)
         self._blend(X, Y, mask, _U32(color.r), _U32(color.g), _U32(color.b), sa)
 
