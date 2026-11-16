@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Custom widgets draw text** (C++ and Python): `env.text(pos, str, opts)`
+  and `env.text_in(rect, str, opts)` draw in the theme font, size and color
+  unless told otherwise, and return the rect the text occupies. Options
+  (`TextOpts`) cover font family, size, color, bold, italic, underline,
+  strikethrough, alignment, vertical anchor (top/middle/baseline/bottom),
+  wrapping and overflow (clip/ellipsis). Python takes them as keyword
+  arguments. Layouts are cached by the context, so per-frame calls are cheap.
+- `Context::text_size`, `text_metrics` and `text_layout` (a kept
+  `TextBlock` with `hit_test`, `caret_rect` and `selection_rects`, drawn with
+  `env.draw`).
+- **Font families**: `Context::add_font(family, path, style, face)` /
+  `add_font_memory`, with roles `"body"`, `"heading"`, `"mono"` and custom
+  names. Missing bold/italic faces are synthesized. `.ttc` collections load
+  any face (`face = -1` picks it by style). `find_system_font_face(role,
+  style)` finds installed sans/mono faces.
+- `Label::set_bold`, `set_italic`, `set_underline`, `set_strike` and
+  `set_font(family)`.
+- `utf8_encode` / `utf8_append` in `core/utf8.hpp`.
+- Text examples: `python -m slikui.examples.text` and its C++ twin
+  `examples/07_text` (Label styles, font families, text-drawing custom
+  widgets, drag-to-select on a `TextBlock`).
+
+### Fixed
+
+- **Glyphs no longer vanish when the font atlas fills**: the atlas grows by
+  512x512 pages (each its own texture) instead of silently dropping glyphs.
+- Font sizes that differed by less than 1 px (e.g. 15.2 and 15.6) shared one
+  glyph raster; the cache now keys on 1/4-px size steps. Text at fractional
+  HiDPI scales can shift by up to 1/8 px as a result.
+- `utf8_next` rejects overlong encodings, surrogates, values above U+10FFFF
+  and sequences truncated at the end of the string (all decode as U+FFFD).
+
 ## 0.4.1
 
 ### Fixed

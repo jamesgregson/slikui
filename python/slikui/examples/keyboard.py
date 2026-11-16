@@ -196,7 +196,7 @@ def build(app):
     row = tour.add(slikui.Row, gap=10)
     field = row.add(slikui.TextField, placeholder="type here")
     chips = []
-    for n in "ABC":  # custom widgets draw no text: a Label names each chip
+    for n in "ABC":  # a Label names each chip
         col = row.add(slikui.Column, gap=2)
         chips.append(col.add(Chip, n))
         col.add(slikui.Label, f"chip {n}").set_color(muted)

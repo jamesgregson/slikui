@@ -653,7 +653,108 @@ class DrawList:
 
     def __iter__(self) -> object: ...
 
+class FontStyle(enum.Enum):
+    Regular = 0
+
+    Bold = 1
+
+    Italic = 2
+
+    BoldItalic = 3
+
+class TextAlign(enum.Enum):
+    Left = 0
+
+    Center = 1
+
+    Right = 2
+
+class TextVAlign(enum.Enum):
+    Top = 0
+
+    Middle = 1
+
+    Baseline = 2
+
+    Bottom = 3
+
+class TextOverflow(enum.Enum):
+    Visible = 0
+
+    Clip = 1
+
+    Ellipsis = 2
+
+class TextMetrics:
+    @property
+    def ascent(self) -> float: ...
+
+    @property
+    def descent(self) -> float: ...
+
+    @property
+    def line_height(self) -> float: ...
+
+    def __repr__(self) -> str: ...
+
+class TextBlock:
+    @property
+    def size(self) -> Size: ...
+
+    @property
+    def line_count(self) -> int: ...
+
+    @property
+    def line_height(self) -> float: ...
+
+    @property
+    def text(self) -> str: ...
+
+    @property
+    def empty(self) -> bool: ...
+
+    @property
+    def align(self) -> TextAlign: ...
+
+    @property
+    def color(self) -> Color: ...
+
+    def hit_test(self, pos: Vec2) -> int:
+        """Index of the caret position nearest `pos` (block-local)."""
+
+    def caret_rect(self, index: int) -> Rect:
+        """Caret rectangle before str index `index` (block-local)."""
+
+    def selection_rects(self, start: int, end: int) -> list[Rect]:
+        """Highlight rectangles for str indices [start, end), one per line."""
+
+class SystemFont:
+    @property
+    def path(self) -> str: ...
+
+    @property
+    def face(self) -> int: ...
+
+    def __bool__(self) -> bool: ...
+
+    def __repr__(self) -> str: ...
+
 class PaintEnv:
+    def text(self, pos: Vec2, text: str, *, font: str = '', size: float = 0.0, color: Color | None = None, bold: bool = False, italic: bool = False, underline: bool = False, strike: bool = False, align: TextAlign | str = TextAlign.Left, valign: TextVAlign | str = TextVAlign.Top, wrap: bool = False, max_width: float = 0.0, overflow: TextOverflow | str = TextOverflow.Visible) -> Rect:
+        """
+        Draw `text` anchored at `pos` (top-left by default; align/valign
+        move the anchor). Returns the Rect the text occupies.
+        """
+
+    def text_in(self, rect: Rect, text: str, *, font: str = '', size: float = 0.0, color: Color | None = None, bold: bool = False, italic: bool = False, underline: bool = False, strike: bool = False, align: TextAlign | str = TextAlign.Left, valign: TextVAlign | str = TextVAlign.Top, wrap: bool = False, max_width: float = 0.0, overflow: TextOverflow | str = TextOverflow.Visible) -> Rect:
+        """
+        Draw `text` inside `rect`, aligned per align/valign; wrap=True wraps
+        to the rect width. Returns the Rect the text occupies.
+        """
+
+    def draw(self, block: TextBlock, pos: Vec2, color: Color | None = None) -> None:
+        """Draw a kept TextBlock with its top-left at `pos`."""
+
     @property
     def list(self) -> DrawList: ...
 
@@ -754,6 +855,28 @@ class Context:
 
     def load_default_font(self) -> bool:
         """Load the bundled DejaVu Sans subset (always available)."""
+
+    def add_font(self, family: str, path: str, style: FontStyle = FontStyle.Regular, face: int = 0) -> bool:
+        """
+        Register a font face under a family name ("body", "heading",
+        "mono" or your own). face picks a .ttc face; -1 matches `style`.
+        """
+
+    def add_font_memory(self, family: str, data: bytes, style: FontStyle = FontStyle.Regular, face: int = 0) -> bool: ...
+
+    def has_font(self, family: str) -> bool: ...
+
+    def text_size(self, text: str, *, font: str = '', size: float = 0.0, color: Color | None = None, bold: bool = False, italic: bool = False, underline: bool = False, strike: bool = False, align: TextAlign | str = TextAlign.Left, valign: TextVAlign | str = TextVAlign.Top, wrap: bool = False, max_width: float = 0.0, overflow: TextOverflow | str = TextOverflow.Visible) -> Size:
+        """Logical size of `text` drawn with these options (for measure())."""
+
+    def text_metrics(self, *, font: str = '', size: float = 0.0, color: Color | None = None, bold: bool = False, italic: bool = False, underline: bool = False, strike: bool = False, align: TextAlign | str = TextAlign.Left, valign: TextVAlign | str = TextVAlign.Top, wrap: bool = False, max_width: float = 0.0, overflow: TextOverflow | str = TextOverflow.Visible) -> TextMetrics:
+        """Ascent, descent and line height for a style."""
+
+    def text_layout(self, text: str, wrap_width: float = 0.0, *, font: str = '', size: float = 0.0, color: Color | None = None, bold: bool = False, italic: bool = False, underline: bool = False, strike: bool = False, align: TextAlign | str = TextAlign.Left, valign: TextVAlign | str = TextVAlign.Top, wrap: bool = False, max_width: float = 0.0, overflow: TextOverflow | str = TextOverflow.Visible) -> TextBlock:
+        """
+        A kept TextBlock: draw with env.draw(); hit_test / caret_rect /
+        selection_rects for interactive widgets.
+        """
 
     def set_root_column(self) -> Column: ...
 
@@ -1137,8 +1260,33 @@ class Label(Widget):
 
     def set_wrap_width(self, value: float) -> Label: ...
 
+    def set_font(self, value: str) -> Label: ...
+
+    def set_bold(self, value: bool = True) -> Label: ...
+
+    def set_italic(self, value: bool = True) -> Label: ...
+
+    def set_underline(self, value: bool = True) -> Label: ...
+
+    def set_strike(self, value: bool = True) -> Label: ...
+
     @property
     def text(self) -> str: ...
+
+    @property
+    def bold(self) -> bool: ...
+
+    @property
+    def italic(self) -> bool: ...
+
+    @property
+    def underline(self) -> bool: ...
+
+    @property
+    def strike(self) -> bool: ...
+
+    @property
+    def font(self) -> str: ...
 
 class Button(Widget):
     def set_text(self, value: str) -> Button: ...
@@ -2430,3 +2578,9 @@ def shortcut_label(key: Key, mods: int, context: Context | None = None) -> str:
 
 def find_system_font() -> str:
     """First system TTF that opens (best-effort; '' if none)."""
+
+def find_system_font_face(role: str = 'sans', style: FontStyle = FontStyle.Regular) -> SystemFont:
+    """
+    Installed font for a role ("sans" or "mono") and style; falsy if none.
+    Pass it on: ctx.add_font("mono", f.path, style, f.face).
+    """

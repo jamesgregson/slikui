@@ -9,8 +9,8 @@ import slikui
 
 class RadialGauge(slikui.Widget):
     """A 270-degree arc gauge built from line segments (no arc primitive -
-    draw the circle you need). The gap sits at the bottom; text lives in a
-    Label beside the gauge."""
+    draw the circle you need). The gap sits at the bottom; the value is
+    printed centered in the hub with ``env.text_in``."""
 
     START, SWEEP = 135.0, 270.0  # degrees, 0 deg at 3 o'clock, clockwise
 
@@ -46,4 +46,6 @@ class RadialGauge(slikui.Widget):
             env.list.line(self._pt(cx, cy, r, i / n), self._pt(cx, cy, r, (i + 1) / n),
                           th.accent, 4.0)
         env.list.circle(slikui.Vec2(cx, cy), r * 0.55, th.surface)
+        env.text_in(b, f"{round(self.value * 100)}", size=13, bold=True,
+                    align="center", valign="middle")
 ```

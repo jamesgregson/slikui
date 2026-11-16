@@ -27,6 +27,7 @@
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
+#include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 
 #include <slikui/slikui.hpp>
@@ -42,6 +43,7 @@
 #include <type_traits>
 #include <string>
 #include <utility>
+#include <variant>
 
 namespace nb = nanobind;
 using namespace slikui;
@@ -60,6 +62,90 @@ template <typename W, typename... Bs, typename V>
 void def_setter(nb::class_<W, Bs...>& cls, const char* name, W& (W::*f)(V)) {
     cls.def(name, [f](W& w, V v) -> W& { return (w.*f)(std::move(v)); },
             nb::rv_policy::reference, nb::arg("value"));
+}
+
+// ---------------------------------------------------------------------- //
+// Text options: TextOpts as typed keyword-only arguments. align / valign /
+// overflow take the enum or its lowercase name ("center", "ellipsis", ...).
+// ---------------------------------------------------------------------- //
+
+using AlignArg = std::variant<TextAlign, std::string>;
+using VAlignArg = std::variant<TextVAlign, std::string>;
+using OverflowArg = std::variant<TextOverflow, std::string>;
+
+template <class E, size_t N>
+E parse_enum_arg(const std::variant<E, std::string>& v, const char* what,
+                 const std::pair<const char*, E> (&names)[N]) {
+    if (const E* e = std::get_if<E>(&v)) return *e;
+    const std::string& s = std::get<std::string>(v);
+    std::string valid;
+    for (const auto& [name, value] : names) {
+        if (s == name) return value;
+        valid += valid.empty() ? "" : ", ";
+        valid += std::string("'") + name + "'";
+    }
+    throw nb::value_error((std::string(what) + " must be one of " + valid + " (got '" + s + "')").c_str());
+}
+
+TextOpts make_text_opts(const std::string& font, float size, const std::optional<Color>& color,
+                        bool bold, bool italic, bool underline, bool strike,
+                        const AlignArg& align, const VAlignArg& valign, bool wrap, float max_width,
+                        const OverflowArg& overflow) {
+    static const std::pair<const char*, TextAlign> aligns[] = {
+        {"left", TextAlign::Left}, {"center", TextAlign::Center}, {"right", TextAlign::Right}};
+    static const std::pair<const char*, TextVAlign> valigns[] = {
+        {"top", TextVAlign::Top}, {"middle", TextVAlign::Middle},
+        {"baseline", TextVAlign::Baseline}, {"bottom", TextVAlign::Bottom}};
+    static const std::pair<const char*, TextOverflow> overflows[] = {
+        {"visible", TextOverflow::Visible}, {"clip", TextOverflow::Clip},
+        {"ellipsis", TextOverflow::Ellipsis}};
+    TextOpts o;
+    o.font = font; // string_view: `font` outlives the call using these opts
+    o.size = size;
+    if (color) o.color = *color;
+    o.bold = bold;
+    o.italic = italic;
+    o.underline = underline;
+    o.strike = strike;
+    o.align = parse_enum_arg(align, "align", aligns);
+    o.valign = parse_enum_arg(valign, "valign", valigns);
+    o.wrap = wrap;
+    o.max_width = max_width;
+    o.overflow = parse_enum_arg(overflow, "overflow", overflows);
+    return o;
+}
+
+#define SLIKUI_TEXT_PARAMS                                                              \
+    const std::string &font, float size, std::optional<Color> color, bool bold,         \
+        bool italic, bool underline, bool strike, AlignArg align, VAlignArg valign,     \
+        bool wrap, float max_width, OverflowArg overflow
+#define SLIKUI_TEXT_OPTS                                                                \
+    make_text_opts(font, size, color, bold, italic, underline, strike, align, valign,   \
+                   wrap, max_width, overflow)
+#define SLIKUI_TEXT_ARGS                                                                \
+    nb::kw_only(), nb::arg("font") = "", nb::arg("size") = 0.f,                         \
+        nb::arg("color").none() = nb::none(), nb::arg("bold") = false,                  \
+        nb::arg("italic") = false, nb::arg("underline") = false,                        \
+        nb::arg("strike") = false, nb::arg("align") = TextAlign::Left,                  \
+        nb::arg("valign") = TextVAlign::Top, nb::arg("wrap") = false,                   \
+        nb::arg("max_width") = 0.f, nb::arg("overflow") = TextOverflow::Visible
+
+// TextBlock speaks UTF-8 byte offsets; Python speaks str indices (codepoints).
+size_t byte_to_char(const std::string& s, size_t byte) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.size() && i < byte; ++i)
+        if ((std::uint8_t(s[i]) & 0xC0) != 0x80) ++n;
+    return n;
+}
+size_t char_to_byte(const std::string& s, size_t index) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if ((std::uint8_t(s[i]) & 0xC0) != 0x80) {
+            if (n == index) return i;
+            ++n;
+        }
+    }
+    return s.size();
 }
 
 // Vec2Edit/Vec3Edit/Vec4Edit share one API; bind it once per instantiation.
@@ -848,10 +934,99 @@ NB_MODULE(_slikui, m) {
         .def("__iter__",
              [](const DrawList& l) { return nb::cast(l.commands()).attr("__iter__")(); });
 
+    // ------------------------------------------------------------------ //
+    // Text: styles, metrics, kept blocks
+    // ------------------------------------------------------------------ //
+
+    nb::enum_<text::FontStyle>(m, "FontStyle")
+        .value("Regular", text::FontStyle::Regular)
+        .value("Bold", text::FontStyle::Bold)
+        .value("Italic", text::FontStyle::Italic)
+        .value("BoldItalic", text::FontStyle::BoldItalic);
+
+    nb::enum_<TextAlign>(m, "TextAlign")
+        .value("Left", TextAlign::Left)
+        .value("Center", TextAlign::Center)
+        .value("Right", TextAlign::Right);
+
+    nb::enum_<TextVAlign>(m, "TextVAlign")
+        .value("Top", TextVAlign::Top)
+        .value("Middle", TextVAlign::Middle)
+        .value("Baseline", TextVAlign::Baseline)
+        .value("Bottom", TextVAlign::Bottom);
+
+    nb::enum_<TextOverflow>(m, "TextOverflow")
+        .value("Visible", TextOverflow::Visible)
+        .value("Clip", TextOverflow::Clip)
+        .value("Ellipsis", TextOverflow::Ellipsis);
+
+    nb::class_<TextMetrics>(m, "TextMetrics")
+        .def_ro("ascent", &TextMetrics::ascent)
+        .def_ro("descent", &TextMetrics::descent)
+        .def_ro("line_height", &TextMetrics::line_height)
+        .def("__repr__", [](const TextMetrics& t) {
+            return "TextMetrics(ascent=" + fmt_float(t.ascent) + ", descent=" +
+                   fmt_float(t.descent) + ", line_height=" + fmt_float(t.line_height) + ")";
+        });
+
+    // TextBlock - a kept layout (Context.text_layout). Positions are logical
+    // px relative to the block's top-left; indices are str indices.
+    nb::class_<TextBlock>(m, "TextBlock")
+        .def_prop_ro("size", &TextBlock::size)
+        .def_prop_ro("line_count", &TextBlock::line_count)
+        .def_prop_ro("line_height", &TextBlock::line_height)
+        .def_prop_ro("text", [](const TextBlock& b) { return b.text(); })
+        .def_prop_ro("empty", &TextBlock::empty)
+        .def_prop_ro("align", &TextBlock::align)
+        .def_prop_ro("color", &TextBlock::color)
+        .def("hit_test",
+             [](const TextBlock& b, Vec2 pos) { return byte_to_char(b.text(), b.hit_test(pos)); },
+             nb::arg("pos"), "Index of the caret position nearest `pos` (block-local).")
+        .def("caret_rect",
+             [](const TextBlock& b, size_t index) {
+                 return b.caret_rect(char_to_byte(b.text(), index));
+             },
+             nb::arg("index"), "Caret rectangle before str index `index` (block-local).")
+        .def("selection_rects",
+             [](const TextBlock& b, size_t start, size_t end) {
+                 return b.selection_rects(char_to_byte(b.text(), start),
+                                          char_to_byte(b.text(), end));
+             },
+             nb::arg("start"), nb::arg("end"),
+             "Highlight rectangles for str indices [start, end), one per line.");
+
+    nb::class_<SystemFont>(m, "SystemFont")
+        .def_ro("path", &SystemFont::path)
+        .def_ro("face", &SystemFont::face)
+        .def("__bool__", [](const SystemFont& f) { return bool(f); })
+        .def("__repr__", [](const SystemFont& f) {
+            return "SystemFont(path='" + f.path + "', face=" + std::to_string(f.face) + ")";
+        });
+
     // PaintEnv - the environment a paint() override receives: the frame's
-    // draw list and the active theme. A view over context state, valid only
-    // during the call (no font in v1: text needs Font/TextLayout bindings).
+    // draw list, the active theme and text drawing. A view over context
+    // state, valid only during the call.
     nb::class_<PaintEnv>(m, "PaintEnv")
+        .def("text",
+             [](PaintEnv& e, Vec2 pos, const std::string& s, SLIKUI_TEXT_PARAMS) {
+                 return e.text(pos, s, SLIKUI_TEXT_OPTS);
+             },
+             nb::arg("pos"), nb::arg("text"), SLIKUI_TEXT_ARGS,
+             "Draw `text` anchored at `pos` (top-left by default; align/valign\n"
+             "move the anchor). Returns the Rect the text occupies.")
+        .def("text_in",
+             [](PaintEnv& e, Rect box, const std::string& s, SLIKUI_TEXT_PARAMS) {
+                 return e.text_in(box, s, SLIKUI_TEXT_OPTS);
+             },
+             nb::arg("rect"), nb::arg("text"), SLIKUI_TEXT_ARGS,
+             "Draw `text` inside `rect`, aligned per align/valign; wrap=True wraps\n"
+             "to the rect width. Returns the Rect the text occupies.")
+        .def("draw",
+             [](PaintEnv& e, const TextBlock& b, Vec2 pos, std::optional<Color> color) {
+                 e.draw(b, pos, color.value_or(Color::transparent()));
+             },
+             nb::arg("block"), nb::arg("pos"), nb::arg("color").none() = nb::none(),
+             "Draw a kept TextBlock with its top-left at `pos`.")
         .def_prop_ro("list",
                      [](PaintEnv& e) -> DrawList& { return e.list; },
                      nb::rv_policy::reference_internal)
@@ -993,6 +1168,40 @@ NB_MODULE(_slikui, m) {
                                            slikui::text::default_font_size());
              },
              "Load the bundled DejaVu Sans subset (always available).")
+        .def("add_font",
+             [](Context& c, const std::string& family, const std::string& path,
+                text::FontStyle style, int face) { return c.add_font(family, path, style, face); },
+             nb::arg("family"), nb::arg("path"), nb::arg("style") = text::FontStyle::Regular,
+             nb::arg("face") = 0,
+             "Register a font face under a family name (\"body\", \"heading\",\n"
+             "\"mono\" or your own). face picks a .ttc face; -1 matches `style`.")
+        .def("add_font_memory",
+             [](Context& c, const std::string& family, nb::bytes data, text::FontStyle style,
+                int face) {
+                 return c.add_font_memory(family,
+                                          reinterpret_cast<const std::uint8_t*>(data.c_str()),
+                                          data.size(), style, face);
+             },
+             nb::arg("family"), nb::arg("data"), nb::arg("style") = text::FontStyle::Regular,
+             nb::arg("face") = 0)
+        .def("has_font", [](const Context& c, const std::string& family) { return c.has_font(family); },
+             nb::arg("family"))
+        .def("text_size",
+             [](Context& c, const std::string& s, SLIKUI_TEXT_PARAMS) {
+                 return c.text_size(s, SLIKUI_TEXT_OPTS);
+             },
+             nb::arg("text"), SLIKUI_TEXT_ARGS,
+             "Logical size of `text` drawn with these options (for measure()).")
+        .def("text_metrics",
+             [](Context& c, SLIKUI_TEXT_PARAMS) { return c.text_metrics(SLIKUI_TEXT_OPTS); },
+             SLIKUI_TEXT_ARGS, "Ascent, descent and line height for a style.")
+        .def("text_layout",
+             [](Context& c, const std::string& s, float wrap_width, SLIKUI_TEXT_PARAMS) {
+                 return c.text_layout(s, wrap_width, SLIKUI_TEXT_OPTS);
+             },
+             nb::arg("text"), nb::arg("wrap_width") = 0.f, SLIKUI_TEXT_ARGS,
+             "A kept TextBlock: draw with env.draw(); hit_test / caret_rect /\n"
+             "selection_rects for interactive widgets.")
         .def("set_root_column", [](Context& c) -> Column& { return c.set_root<Column>(); },
              nb::rv_policy::reference_internal)
         .def("set_root_row", [](Context& c) -> Row& { return c.set_root<Row>(); },
@@ -1322,7 +1531,19 @@ NB_MODULE(_slikui, m) {
     def_setter(label, "set_font_size", &Label::set_font_size);
     def_setter(label, "set_color", &Label::set_color);
     def_setter(label, "set_wrap_width", &Label::set_wrap_width);
+    def_setter(label, "set_font", &Label::set_font);
+    for (auto [name, fn] : {std::pair{"set_bold", &Label::set_bold},
+                            std::pair{"set_italic", &Label::set_italic},
+                            std::pair{"set_underline", &Label::set_underline},
+                            std::pair{"set_strike", &Label::set_strike}})
+        label.def(name, [fn](Label& l, bool on) -> Label& { return (l.*fn)(on); },
+                  nb::arg("value") = true, nb::rv_policy::reference);
     label.def_prop_ro("text", [](Label& l) { return l.text(); });
+    label.def_prop_ro("bold", &Label::bold);
+    label.def_prop_ro("italic", &Label::italic);
+    label.def_prop_ro("underline", &Label::underline);
+    label.def_prop_ro("strike", &Label::strike);
+    label.def_prop_ro("font", [](Label& l) { return l.font(); });
 
     auto button = nb::class_<Button, Widget>(m, "Button");
     def_setter(button, "set_text", &Button::set_text);
@@ -2054,4 +2275,11 @@ NB_MODULE(_slikui, m) {
           "on every platform. ``context`` is accepted for compatibility and unused.");
     m.def("find_system_font", &find_system_font,
           "First system TTF that opens (best-effort; '' if none).");
+    m.def("find_system_font_face",
+          [](const std::string& role, text::FontStyle style) {
+              return find_system_font_face(role, style);
+          },
+          nb::arg("role") = "sans", nb::arg("style") = text::FontStyle::Regular,
+          "Installed font for a role (\"sans\" or \"mono\") and style; falsy if none.\n"
+          "Pass it on: ctx.add_font(\"mono\", f.path, style, f.face).");
 }

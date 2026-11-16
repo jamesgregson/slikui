@@ -393,30 +393,64 @@ inline double clamp_dt(double dt, double max = 0.1) {
 // ============================================================================
 // slikui/core/utf8.hpp
 // ============================================================================
-// slikui/core/utf8.hpp - minimal UTF-8 decoding for text widgets.
+// slikui/core/utf8.hpp - minimal UTF-8 decoding/encoding for text widgets.
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace slikui {
 
+// Decodes the codepoint at s[i] and advances i past it. Malformed input -
+// an invalid lead byte, a missing or bad continuation byte, an overlong
+// form, a surrogate, or a value above U+10FFFF - yields U+FFFD and advances
+// past the bytes consumed so far (never past a byte that could start the
+// next sequence). Returns 0 at the end of the string.
 inline std::uint32_t utf8_next(std::string_view s, size_t& i) {
     if (i >= s.size()) return 0;
     auto lead = std::uint8_t(s[i++]);
     if (lead < 0x80) return lead;
-    std::uint32_t cp = 0;
+    std::uint32_t cp = 0, min = 0;
     int extra = 0;
-    if ((lead & 0xE0) == 0xC0) { cp = lead & 0x1F; extra = 1; }
-    else if ((lead & 0xF0) == 0xE0) { cp = lead & 0x0F; extra = 2; }
-    else if ((lead & 0xF8) == 0xF0) { cp = lead & 0x07; extra = 3; }
-    else { return 0xFFFD; } // invalid lead byte
-    for (int k = 0; k < extra && i < s.size(); ++k) {
+    if ((lead & 0xE0) == 0xC0) { cp = lead & 0x1F; extra = 1; min = 0x80; }
+    else if ((lead & 0xF0) == 0xE0) { cp = lead & 0x0F; extra = 2; min = 0x800; }
+    else if ((lead & 0xF8) == 0xF0) { cp = lead & 0x07; extra = 3; min = 0x10000; }
+    else { return 0xFFFD; } // invalid lead byte (stray continuation, 0xF8+)
+    for (int k = 0; k < extra; ++k) {
+        if (i >= s.size()) return 0xFFFD; // truncated at the end of the string
         auto cont = std::uint8_t(s[i]);
         if ((cont & 0xC0) != 0x80) return 0xFFFD;
         cp = (cp << 6) | (cont & 0x3F);
         ++i;
     }
-    return cp ? cp : 0xFFFD;
+    if (cp < min || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return 0xFFFD;
+    return cp;
+}
+
+// Appends the UTF-8 encoding of `cp` (U+FFFD for surrogates / out of range).
+inline void utf8_append(std::string& out, std::uint32_t cp) {
+    if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
+    if (cp < 0x80) {
+        out += char(cp);
+    } else if (cp < 0x800) {
+        out += char(0xC0 | (cp >> 6));
+        out += char(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        out += char(0xE0 | (cp >> 12));
+        out += char(0x80 | ((cp >> 6) & 0x3F));
+        out += char(0x80 | (cp & 0x3F));
+    } else {
+        out += char(0xF0 | (cp >> 18));
+        out += char(0x80 | ((cp >> 12) & 0x3F));
+        out += char(0x80 | ((cp >> 6) & 0x3F));
+        out += char(0x80 | (cp & 0x3F));
+    }
+}
+
+inline std::string utf8_encode(std::uint32_t cp) {
+    std::string out;
+    utf8_append(out, cp);
+    return out;
 }
 
 } // namespace slikui
@@ -1238,23 +1272,31 @@ struct Anim {
 // ============================================================================
 // slikui/text/font.hpp
 // ============================================================================
-// slikui/text/font.hpp - TrueType font, glyph atlas, measure/wrap/layout.
+// slikui/text/font.hpp - TrueType font face, glyph atlas, measure/wrap/layout.
 //
 // Vendored stb_truetype + stb_rect_pack are compiled with STB*_STATIC into
 // this header: every TU including slikui gets its own private copy, so the
 // library stays header-only with no link requirements.
 //
-// Fonts load from memory or file; glyphs rasterize on demand into a 512x512
-// alpha8 atlas page owned by the Font. Context pushes atlas pages to the
-// sink (texture ids come from Context::next_texture_id()).
+// A Font is one face (one TTF/OTF, or one face of a TTC collection). Glyphs
+// rasterize on demand into the font's GlyphAtlas: alpha8 pages of 512x512
+// that grow one page at a time as they fill. Context pushes dirty pages to
+// the sink (texture ids come from Context::next_texture_id()).
+//
+// Missing bold/italic faces are synthesized per glyph (SynthBold smears the
+// coverage horizontally, SynthItalic shears the outline before rasterizing);
+// the synthesis flags are part of the glyph cache key.
 
 // (already included above: slikui/core/math.hpp)
 // (already included above: slikui/core/utf8.hpp)
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -6977,6 +7019,25 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 namespace slikui::text {
 
 constexpr int kAtlasPage = 512;
+constexpr int kMaxAtlasPages = 32; // 8 MB of alpha8: a hard stop, not a budget
+
+// Which face of a family a Font is (Context font registration).
+enum class FontStyle : std::uint8_t { Regular = 0, Bold = 1, Italic = 2, BoldItalic = 3 };
+
+inline constexpr bool is_bold(FontStyle s) { return (int(s) & 1) != 0; }
+inline constexpr bool is_italic(FontStyle s) { return (int(s) & 2) != 0; }
+inline constexpr FontStyle make_style(bool bold, bool italic) {
+    return FontStyle((bold ? 1 : 0) | (italic ? 2 : 0));
+}
+
+// Layout flags: synthesis (applied to glyph rasters) + decorations.
+enum StyleFlag : std::uint8_t {
+    SynthBold = 1,   // embolden glyphs (no real bold face)
+    SynthItalic = 2, // slant glyphs (no real italic face)
+    Underline = 4,
+    Strike = 8,
+};
+constexpr std::uint8_t kSynthMask = SynthBold | SynthItalic;
 
 struct Glyph {
     std::uint32_t tex_id = 0; // atlas page texture
@@ -6991,40 +7052,167 @@ struct PlacedGlyph {
     const Glyph* glyph = nullptr;
     Vec2 pos = Vec2::zero();  // bitmap top-left in layout space
     float advance = 0;
+    float pen = 0;            // pen x (glyph origin) in layout space
+    std::uint32_t byte = 0;   // offset of this codepoint in the source text
+    std::uint32_t line = 0;   // index into TextLayout::lines
+};
+
+// One laid-out line. Glyphs [first, last) belong to it; it covers source
+// bytes [byte_begin, byte_end) - including a terminating '\n', if any.
+struct TextLine {
+    float baseline = 0;       // y of the baseline in layout space
+    float width = 0;          // advance width, trailing spaces excluded
+    std::uint32_t first = 0, last = 0;
+    std::uint32_t byte_begin = 0, byte_end = 0;
+};
+
+// An underline / strikethrough bar, in layout space, for one line.
+struct TextDecoration {
+    Rect rect = {};
+    std::uint32_t line = 0;
 };
 
 struct TextLayout {
     std::vector<PlacedGlyph> glyphs;
+    std::vector<TextLine> lines;
+    std::vector<TextDecoration> decorations;
     Size size = {};          // block width x height
     float line_height = 0;
+    float ascent = 0;        // first baseline below the block top
+    float descent = 0;       // positive, below each baseline
 };
+
+// Growable set of alpha8 atlas pages. Page texture ids come from an id
+// source (Context::next_texture_id); page 0 can be given a fixed id.
+class GlyphAtlas {
+public:
+    struct Page {
+        std::uint32_t tex_id = 0;
+        std::vector<std::uint8_t> pixels;
+        stbrp_context packer{};
+        std::vector<stbrp_node> nodes;
+        bool dirty = true;
+    };
+
+    void set_id_source(std::function<std::uint32_t()> f) { id_source_ = std::move(f); }
+
+    // Fixed id for page 0 (created on demand, so this also works first).
+    void set_first_id(std::uint32_t id) {
+        first_id_ = id;
+        if (!pages_.empty()) pages_[0]->tex_id = id;
+    }
+    std::uint32_t first_id() const { return pages_.empty() ? first_id_ : pages_[0]->tex_id; }
+
+    // Drops every page (a font reload): page 0 keeps its id.
+    void reset() {
+        if (!pages_.empty()) first_id_ = pages_[0]->tex_id;
+        pages_.clear();
+        add_page();
+    }
+
+    // Packs a w x h coverage bitmap; fills g.uv / g.tex_id. False when every
+    // page (up to kMaxAtlasPages) is full - the glyph then draws as blank.
+    bool add(const std::uint8_t* bmp, int w, int h, Glyph& g) {
+        if (pages_.empty()) add_page();
+        if (pack_into(*pages_.back(), bmp, w, h, g)) return true;
+        if (int(pages_.size()) >= kMaxAtlasPages || w + 1 > kAtlasPage || h + 1 > kAtlasPage)
+            return false;
+        add_page();
+        return pack_into(*pages_.back(), bmp, w, h, g);
+    }
+
+    const std::vector<std::unique_ptr<Page>>& pages() const { return pages_; }
+    std::vector<std::unique_ptr<Page>>& pages() { return pages_; }
+
+    bool dirty() const {
+        for (const auto& p : pages_)
+            if (p->dirty) return true;
+        return false;
+    }
+    void mark_dirty() {
+        for (auto& p : pages_) p->dirty = true;
+    }
+    void clear_dirty() {
+        for (auto& p : pages_) p->dirty = false;
+    }
+
+private:
+    void add_page() {
+        auto p = std::make_unique<Page>();
+        if (pages_.empty()) p->tex_id = first_id_ ? first_id_ : (id_source_ ? id_source_() : 0);
+        else p->tex_id = id_source_ ? id_source_() : 0;
+        if (pages_.empty()) first_id_ = p->tex_id;
+        p->pixels.assign(size_t(kAtlasPage) * kAtlasPage, 0);
+        p->nodes.resize(kAtlasPage + 1);
+        stbrp_init_target(&p->packer, kAtlasPage, kAtlasPage, p->nodes.data(), kAtlasPage + 1);
+        p->dirty = true;
+        pages_.push_back(std::move(p));
+    }
+
+    static bool pack_into(Page& p, const std::uint8_t* bmp, int w, int h, Glyph& g) {
+        stbrp_rect r{0, w + 1, h + 1, 0, 0, 0};
+        if (!stbrp_pack_rects(&p.packer, &r, 1) || r.was_packed == 0) return false;
+        int x = r.x, y = r.y;
+        for (int dy = 0; dy < h; ++dy)
+            for (int dx = 0; dx < w; ++dx)
+                p.pixels[size_t(y + dy) * kAtlasPage + (x + dx)] = bmp[dy * w + dx];
+        g.uv = {float(x), float(y), float(w), float(h)};
+        g.tex_id = p.tex_id;
+        p.dirty = true;
+        return true;
+    }
+
+    std::vector<std::unique_ptr<Page>> pages_;
+    std::function<std::uint32_t()> id_source_;
+    std::uint32_t first_id_ = 0;
+};
+
+// Faux-italic slant (x += y * kSlant in font units, sheared about the
+// baseline so pen positions are unchanged): about 11 degrees.
+constexpr float kSynthSlant = 0.2f;
+
+// Faux-bold smear width in raster px for a given size.
+inline float synth_bold_px(float px) { return std::fmax(1.f, px / 16.f); }
+
+// Font sizes quantize to 1/4 px: one glyph raster per quarter pixel.
+inline float quantize_px(float px) { return std::round(px * 4.f) / 4.f; }
 
 class Font {
 public:
     Font() = default;
+    Font(const Font&) = delete;
+    Font& operator=(const Font&) = delete;
 
-    bool load_memory(const std::uint8_t* data, size_t len) {
+    // `face` picks a face inside a TrueType collection (.ttc); 0 otherwise.
+    bool load_memory(const std::uint8_t* data, size_t len, int face = 0) {
         data_.assign(data, data + len);
-        return init();
+        return init(face);
     }
 
-    bool load_file(const std::string& path) {
+    bool load_file(const std::string& path, int face = 0) {
         std::FILE* f = std::fopen(path.c_str(), "rb");
         if (!f) return false;
         std::fseek(f, 0, SEEK_END);
         long n = std::ftell(f);
         std::fseek(f, 0, SEEK_SET);
+        if (n <= 0) {
+            std::fclose(f);
+            return false;
+        }
         data_.resize(size_t(n));
         size_t rd = std::fread(data_.data(), 1, size_t(n), f);
         std::fclose(f);
         if (rd != size_t(n)) return false;
-        return init();
+        return init(face);
     }
 
     bool valid() const { return ok_; }
 
-    void set_texture_id(std::uint32_t id) { atlas_id_ = id; }
-    std::uint32_t atlas_id() const { return atlas_id_; }
+    // --- atlas texture ids (Context wires these) ---
+
+    void set_texture_id(std::uint32_t id) { atlas_.set_first_id(id); }
+    void set_texture_source(std::function<std::uint32_t()> f) { atlas_.set_id_source(std::move(f)); }
+    std::uint32_t atlas_id() const { return atlas_.first_id(); }
 
     // --- metrics ---
 
@@ -7032,64 +7220,66 @@ public:
     // metrics come back zero and glyphs are whitespace, so a fontless UI
     // degrades to text-less layout instead of crashing - e.g. minimal Linux
     // containers have no system fonts (find_system_font() returns "").
-    float scale(float px) const { return ok_ ? stbtt_ScaleForPixelHeight(&info_, px) : 0.f; }
+    float scale(float px) const {
+        return ok_ ? stbtt_ScaleForPixelHeight(&info_, quantize_px(px)) : 0.f;
+    }
 
     float line_height(float px) const {
         if (!ok_) return 0;
-        int asc = 0, desc = 0, gap = 0;
-        stbtt_GetFontVMetrics(&info_, &asc, &desc, &gap);
-        return float(asc - desc + gap) * scale(px);
+        return float(asc_ - desc_ + gap_) * scale(px);
     }
+    float ascent(float px) const { return ok_ ? float(asc_) * scale(px) : 0.f; }
+    float descent(float px) const { return ok_ ? float(-desc_) * scale(px) : 0.f; }
 
     float kern(std::uint32_t prev, std::uint32_t cp, float px) const {
         if (!ok_) return 0;
-        return float(stbtt_GetCodepointKernAdvance(&info_, int(prev), int(cp))) * scale(px);
+        return float(stbtt_GetGlyphKernAdvance(&info_, index(prev), index(cp))) * scale(px);
     }
 
     // True if the font has an outline for `cp` (false for an invalid font).
     // Missing codepoints otherwise render as the font's .notdef box.
-    bool has_glyph(std::uint32_t cp) const {
-        return ok_ && stbtt_FindGlyphIndex(&info_, int(cp)) != 0;
+    bool has_glyph(std::uint32_t cp) const { return ok_ && index(cp) != 0; }
+
+    // Underline / strikethrough placement for `px`: offsets are measured
+    // DOWN from the baseline (strike_offset is negative: above it).
+    struct Decor {
+        float underline_offset = 0, underline_thickness = 0;
+        float strike_offset = 0, strike_thickness = 0;
+    };
+    Decor decor(float px) const {
+        Decor d;
+        if (!ok_) return d;
+        float sc = scale(px);
+        float fallback_thick = std::fmax(1.f, quantize_px(px) / 14.f);
+        d.underline_thickness = upos_thick_ > 0 ? float(upos_thick_) * sc : fallback_thick;
+        d.underline_offset = upos_ != 0 ? float(-upos_) * sc : float(-desc_) * sc * .35f;
+        d.strike_thickness = strike_thick_ > 0 ? float(strike_thick_) * sc : d.underline_thickness;
+        d.strike_offset = strike_pos_ > 0 ? -float(strike_pos_) * sc : -float(asc_) * sc * .3f;
+        d.underline_thickness = std::fmax(1.f, d.underline_thickness);
+        d.strike_thickness = std::fmax(1.f, d.strike_thickness);
+        return d;
     }
 
     // --- glyph access (rasterizes on miss) ---
 
-    const Glyph& glyph(std::uint32_t cp, float px) {
+    // `synth` is SynthBold | SynthItalic (other bits are ignored).
+    const Glyph& glyph(std::uint32_t cp, float px, std::uint8_t synth = 0) {
         if (!ok_) {
             static const Glyph empty;
             return empty;
         }
-        std::uint64_t key = (std::uint64_t(cp) << 20) | std::uint64_t(std::uint32_t(px) & 0xFFFFF);
-        auto it = cache_.find(key);
-        if (it != cache_.end()) return it->second;
-
-        float sc = scale(px);
-        int adv = 0, lsb = 0;
-        stbtt_GetCodepointHMetrics(&info_, int(cp), &adv, &lsb);
-
-        Glyph g;
-        g.size_px = px;
-        g.tex_id = atlas_id_;
-        g.advance = float(adv) * sc;
-
-        int w = 0, h = 0;
-        std::uint8_t* bmp = stbtt_GetCodepointBitmap(&info_, sc, sc, int(cp), &w, &h, nullptr, nullptr);
-        if (bmp && w > 0 && h > 0) {
-            int ix0 = 0, iy0 = 0, ix1 = 0, iy1 = 0;
-            stbtt_GetCodepointBitmapBox(&info_, int(cp), sc, sc, &ix0, &iy0, &ix1, &iy1);
-            g.size = {float(w), float(h)};
-            g.bearing = {float(ix0), float(iy0)}; // y-down: iy0 < 0 above baseline
-            pack_and_copy(g, bmp, w, h);
-            stbtt_FreeBitmap(bmp, nullptr);
-        }
-        return cache_.emplace(key, g).first->second;
+        return glyph_index(index(cp), px, synth);
     }
 
     // --- layout: measure, wrap, and place glyphs ---
 
-    TextLayout layout(std::string_view text, float px, float max_width = 0) const {
+    // `flags` is any StyleFlag combination: synthesis + decorations.
+    TextLayout layout(std::string_view text, float px, float max_width = 0,
+                      std::uint8_t flags = 0) const {
         TextLayout out;
         if (!ok_) return out; // before any metrics call - see the class comment
+        Font& self = const_cast<Font&>(*this); // glyph cache is a mutable detail
+        std::uint8_t synth = flags & kSynthMask;
         out.line_height = line_height(px);
 
         // Tight metrics: the first line's baseline sits on its ASCENT, not a
@@ -7098,73 +7288,89 @@ public:
         // up visibly below center.
         float ascent = 0, descent = 0;
         {
-            int asc = 0, desc = 0, gap = 0;
-            stbtt_GetFontVMetrics(&info_, &asc, &desc, &gap);
             float sc = scale(px);
-            ascent = float(asc) * sc;
-            descent = float(-desc) * sc;
+            ascent = float(asc_) * sc;
+            descent = float(-desc_) * sc;
         }
+        out.ascent = ascent;
+        out.descent = descent;
 
         float pen_x = 0;
         float baseline = ascent;
         size_t line_start = 0;
         size_t last_space = size_t(-1);
-        std::uint32_t prev = 0; // kerning state (local: layout() is const)
+        int prev = 0; // kerning state: previous glyph index (0 = none)
 
-        auto place = [&](std::uint32_t cp) {
-            if (prev && cp != ' ') pen_x += const_cast<Font*>(this)->kern(prev, cp, px);
-            const Glyph& g = const_cast<Font*>(this)->glyph(cp, px);
-            out.glyphs.push_back({&g, {pen_x + g.bearing.x, baseline + g.bearing.y}, g.advance});
+        out.lines.push_back({baseline, 0, 0, 0, 0, 0});
+
+        auto place = [&](std::uint32_t cp, int gi, std::uint32_t byte) {
+            if (prev && cp != ' ') pen_x += self.kern_index(prev, gi, px);
+            const Glyph& g = self.glyph_index(gi, px, synth);
+            out.glyphs.push_back({&g, {pen_x + g.bearing.x, baseline + g.bearing.y}, g.advance,
+                                  pen_x, byte, std::uint32_t(out.lines.size() - 1)});
             pen_x += g.advance;
             if (cp == ' ') last_space = out.glyphs.size() - 1;
-            prev = cp;
+            prev = gi;
         };
 
-        auto newline = [&] {
+        auto newline = [&](std::uint32_t next_byte) {
             baseline += out.line_height;
             pen_x = 0;
             line_start = out.glyphs.size();
             last_space = size_t(-1);
             prev = 0;
+            out.lines.push_back({baseline, 0, 0, 0, next_byte, 0});
         };
 
-        auto wrap = [&] {
+        auto wrap = [&](std::uint32_t byte) {
             if (last_space == size_t(-1) || last_space < line_start) {
-                newline(); // no space: hard wrap
+                newline(byte); // no space: hard wrap
                 return;
             }
             // Move glyphs after the last space onto the new line.
             float offset = out.glyphs[last_space].pos.x + out.glyphs[last_space].advance;
+            float pen_offset = out.glyphs[last_space].pen + out.glyphs[last_space].advance;
+            std::uint32_t next_line = std::uint32_t(out.lines.size());
             for (size_t k = last_space + 1; k < out.glyphs.size(); ++k) {
                 out.glyphs[k].pos.x -= offset;
+                out.glyphs[k].pen -= pen_offset;
                 // Their baseline moves down too: pos.y was placed with the
                 // previous line's baseline and must follow, or the wrapped
                 // words paint on top of the first line.
                 out.glyphs[k].pos.y += out.line_height;
+                out.glyphs[k].line = next_line;
             }
+            std::uint32_t begin = last_space + 1 < out.glyphs.size()
+                                      ? out.glyphs[last_space + 1].byte
+                                      : byte;
             line_start = last_space + 1;
             last_space = size_t(-1);
             baseline += out.line_height;
             pen_x = 0;
             for (size_t k = line_start; k < out.glyphs.size(); ++k) pen_x = out.glyphs[k].pos.x + out.glyphs[k].advance;
             prev = 0;
+            out.lines.push_back({baseline, 0, 0, 0, begin, 0});
         };
 
         size_t i = 0;
         while (i < text.size()) {
+            std::uint32_t byte = std::uint32_t(i);
             std::uint32_t cp = utf8_next(text, i);
-            if (cp == '\n') { newline(); continue; }
+            if (cp == '\n') { newline(std::uint32_t(i)); continue; }
             if (cp == '\r') continue;
+            int gi = index(cp);
 
             float next_x = pen_x;
-            if (prev) next_x += const_cast<Font*>(this)->kern(prev, cp, px);
-            next_x += const_cast<Font*>(this)->glyph_advance(cp, px);
+            if (prev) next_x += self.kern_index(prev, gi, px);
+            next_x += self.glyph_index(gi, px, synth).advance;
 
             if (max_width > 0 && next_x > max_width && cp != ' ' && pen_x > 0) {
-                wrap();
+                wrap(byte);
             }
-            place(cp);
+            place(cp, gi, byte);
         }
+
+        finish_lines(out, text);
 
         float max_right = 0;
         for (const auto& pg : out.glyphs)
@@ -7172,35 +7378,41 @@ public:
         // Tight height: last baseline + real descender + a hair for antialiasing.
         float pad = std::fmax(2.f, out.line_height * .04f);
         out.size = {max_right, baseline + descent + pad};
+
+        if (flags & (Underline | Strike)) add_decorations(out, px, flags);
         return out;
     }
 
-    float measure_width(std::string_view text, float px) const {
+    float measure_width(std::string_view text, float px, std::uint8_t synth = 0) const {
         if (!ok_) return 0;
+        Font& self = const_cast<Font&>(*this);
         float w = 0;
-        std::uint32_t prev = 0;
+        int prev = 0;
         size_t i = 0;
         while (i < text.size()) {
             std::uint32_t cp = utf8_next(text, i);
             if (cp == '\n') { prev = 0; continue; }
-            if (prev && !is_separator(cp)) w += kern(prev, cp, px);
-            w += const_cast<Font*>(this)->glyph_advance(cp, px);
-            prev = cp;
+            int gi = index(cp);
+            if (prev) w += self.kern_index(prev, gi, px);
+            w += self.glyph_index(gi, px, synth & kSynthMask).advance;
+            prev = gi;
         }
         return w;
     }
 
     // Width of the first `n` codepoints - caret hit-testing in text fields.
-    float advance_upto(std::string_view text, size_t n, float px) const {
+    float advance_upto(std::string_view text, size_t n, float px, std::uint8_t synth = 0) const {
         if (!ok_) return 0;
+        Font& self = const_cast<Font&>(*this);
         float w = 0;
-        std::uint32_t prev = 0;
+        int prev = 0;
         size_t i = 0, count = 0;
         while (i < text.size() && count < n) {
             std::uint32_t cp = utf8_next(text, i);
-            if (prev) w += kern(prev, cp, px);
-            w += const_cast<Font*>(this)->glyph_advance(cp, px);
-            prev = cp;
+            int gi = index(cp);
+            if (prev) w += self.kern_index(prev, gi, px);
+            w += self.glyph_index(gi, px, synth & kSynthMask).advance;
+            prev = gi;
             ++count;
         }
         return w;
@@ -7208,61 +7420,738 @@ public:
 
     // --- atlas ---
 
-    const std::vector<std::uint8_t>& atlas_pixels() const { return atlas_; }
+    GlyphAtlas& atlas() { return atlas_; }
+    const GlyphAtlas& atlas() const { return atlas_; }
+
+    // Page-0 accessors (single-page compatibility).
+    const std::vector<std::uint8_t>& atlas_pixels() const {
+        static const std::vector<std::uint8_t> none;
+        return atlas_.pages().empty() ? none : atlas_.pages()[0]->pixels;
+    }
     int atlas_width() const { return kAtlasPage; }
     int atlas_height() const { return kAtlasPage; }
-    bool atlas_dirty() const { return atlas_dirty_; }
-    void clear_dirty() { atlas_dirty_ = false; }
-    void mark_dirty() { atlas_dirty_ = true; }
+    bool atlas_dirty() const { return atlas_.dirty(); }
+    void clear_dirty() { atlas_.clear_dirty(); }
+    void mark_dirty() { atlas_.mark_dirty(); }
+
+    // Style bits of face `face` in a font file, from head.macStyle
+    // (bit 0 bold, bit 1 italic); Regular when the face is unreadable.
+    static FontStyle face_style(const std::uint8_t* data, size_t len, int face) {
+        if (!data || len < 12) return FontStyle::Regular;
+        int off = stbtt_GetFontOffsetForIndex(data, face);
+        if (off < 0) return FontStyle::Regular;
+        stbtt_uint32 head = stbtt__find_table(const_cast<std::uint8_t*>(data), stbtt_uint32(off), "head");
+        if (!head || head + 46 > len) return FontStyle::Regular;
+        int mac_style = (data[head + 44] << 8) | data[head + 45];
+        return make_style(mac_style & 1, mac_style & 2);
+    }
+
+    // Number of faces in a font file (1 for a plain TTF/OTF, 0 if invalid).
+    static int face_count(const std::uint8_t* data, size_t len) {
+        if (!data || len < 12) return 0;
+        int n = stbtt_GetNumberOfFonts(data);
+        return n < 0 ? 0 : n;
+    }
+
+    // The TTC face whose head.macStyle matches `style` best; 0 if none.
+    static int find_face(const std::uint8_t* data, size_t len, FontStyle style) {
+        int n = face_count(data, len);
+        for (int f = 0; f < n; ++f)
+            if (face_style(data, len, f) == style) return f;
+        return 0;
+    }
+
+    const std::vector<std::uint8_t>& data() const { return data_; }
 
 private:
-    static bool is_separator(std::uint32_t) { return false; } // kerning across spaces is fine
+    int index(std::uint32_t cp) const { return stbtt_FindGlyphIndex(&info_, int(cp)); }
 
-    float glyph_advance(std::uint32_t cp, float px) {
-        return glyph(cp, px).advance;
+    float kern_index(int a, int b, float px) const {
+        return float(stbtt_GetGlyphKernAdvance(&info_, a, b)) * scale(px);
     }
-    float glyph_advance(std::uint32_t cp, float px) const {
+
+    const Glyph& glyph_index(int gi, float px, std::uint8_t synth) {
+        synth &= kSynthMask;
+        float q = quantize_px(px);
+        std::uint64_t key = (std::uint64_t(std::uint32_t(gi)) << 32) |
+                            (std::uint64_t(std::uint32_t(q * 4.f) & 0xFFFFFF) << 8) | synth;
+        auto it = cache_.find(key);
+        if (it != cache_.end()) return it->second;
+
+        float sc = stbtt_ScaleForPixelHeight(&info_, q);
         int adv = 0, lsb = 0;
-        stbtt_GetCodepointHMetrics(&info_, int(cp), &adv, &lsb);
-        return float(adv) * scale(px);
+        stbtt_GetGlyphHMetrics(&info_, gi, &adv, &lsb);
+
+        Glyph g;
+        g.size_px = q;
+        g.tex_id = atlas_.first_id();
+        g.advance = float(adv) * sc;
+
+        int w = 0, h = 0, x0 = 0, y0 = 0;
+        std::vector<std::uint8_t> bmp;
+        if (synth & SynthItalic) {
+            raster_slanted(gi, sc, bmp, w, h, x0, y0);
+        } else if (std::uint8_t* b = stbtt_GetGlyphBitmap(&info_, sc, sc, gi, &w, &h, &x0, &y0)) {
+            if (w > 0 && h > 0) bmp.assign(b, b + size_t(w) * h);
+            stbtt_FreeBitmap(b, nullptr);
+        }
+        if (synth & SynthBold) {
+            float e = synth_bold_px(q);
+            g.advance += e;
+            if (!bmp.empty()) embolden(bmp, w, h, e);
+        }
+        if (!bmp.empty() && w > 0 && h > 0) {
+            g.size = {float(w), float(h)};
+            g.bearing = {float(x0), float(y0)}; // y-down: y0 < 0 above baseline
+            atlas_.add(bmp.data(), w, h, g);
+        }
+        return cache_.emplace(key, g).first->second;
     }
 
-    bool init() {
-        if (!stbtt_InitFont(&info_, data_.data(), 0)) {
+    // Outline sheared about the baseline, rasterized with stb's scanline
+    // rasterizer (the same call stbtt_GetGlyphBitmap makes).
+    void raster_slanted(int gi, float sc, std::vector<std::uint8_t>& out, int& w, int& h,
+                        int& x0, int& y0) const {
+        stbtt_vertex* v = nullptr;
+        int n = stbtt_GetGlyphShape(&info_, gi, &v);
+        w = h = x0 = y0 = 0;
+        if (n <= 0 || !v) {
+            if (v) STBTT_free(v, info_.userdata);
+            return;
+        }
+        auto shear = [](stbtt_vertex_type x, stbtt_vertex_type y) {
+            float s = float(x) + float(y) * kSynthSlant;
+            s = std::fmax(-32768.f, std::fmin(32767.f, std::round(s)));
+            return stbtt_vertex_type(s);
+        };
+        float minx = 1e9f, miny = 1e9f, maxx = -1e9f, maxy = -1e9f;
+        auto grow = [&](float x, float y) {
+            minx = std::fmin(minx, x); maxx = std::fmax(maxx, x);
+            miny = std::fmin(miny, y); maxy = std::fmax(maxy, y);
+        };
+        for (int k = 0; k < n; ++k) {
+            v[k].x = shear(v[k].x, v[k].y);
+            v[k].cx = shear(v[k].cx, v[k].cy);
+            v[k].cx1 = shear(v[k].cx1, v[k].cy1);
+            grow(v[k].x, v[k].y);
+            if (v[k].type == STBTT_vcurve || v[k].type == STBTT_vcubic) grow(v[k].cx, v[k].cy);
+            if (v[k].type == STBTT_vcubic) grow(v[k].cx1, v[k].cy1);
+        }
+        int ix0 = int(std::floor(minx * sc)), iy0 = int(std::floor(-maxy * sc));
+        int ix1 = int(std::ceil(maxx * sc)), iy1 = int(std::ceil(-miny * sc));
+        w = ix1 - ix0;
+        h = iy1 - iy0;
+        x0 = ix0;
+        y0 = iy0;
+        if (w > 0 && h > 0) {
+            out.assign(size_t(w) * h, 0);
+            stbtt__bitmap gbm{w, h, w, out.data()};
+            stbtt_Rasterize(&gbm, 0.35f, v, n, sc, sc, 0, 0, ix0, iy0, 1, info_.userdata);
+        } else {
+            w = h = 0;
+        }
+        STBTT_free(v, info_.userdata);
+    }
+
+    // Horizontal max-filter `e` px wide (fractional tail blended): the
+    // classic double-strike faux bold. Grows the bitmap by ceil(e) columns.
+    static void embolden(std::vector<std::uint8_t>& bmp, int& w, int h, float e) {
+        int whole = int(std::floor(e));
+        float frac = e - float(whole);
+        int grow = int(std::ceil(e));
+        int nw = w + grow;
+        std::vector<std::uint8_t> out(size_t(nw) * h, 0);
+        for (int y = 0; y < h; ++y) {
+            const std::uint8_t* src = &bmp[size_t(y) * w];
+            std::uint8_t* dst = &out[size_t(y) * nw];
+            for (int x = 0; x < nw; ++x) {
+                int best = 0;
+                for (int k = 0; k <= whole; ++k) {
+                    int sx = x - k;
+                    if (sx >= 0 && sx < w) best = std::max<int>(best, src[sx]);
+                }
+                int tail = x - whole - 1;
+                if (frac > 0 && tail >= 0 && tail < w)
+                    best = std::max(best, int(float(src[tail]) * frac + .5f));
+                dst[x] = std::uint8_t(best);
+            }
+        }
+        bmp.swap(out);
+        w = nw;
+    }
+
+    // Per-line glyph ranges, byte ranges and advance widths.
+    // Glyph line indices never decrease in glyph order, so one forward pass
+    // assigns contiguous [first, last) ranges; an empty line gets an empty
+    // range positioned at the next line's first glyph.
+    static void finish_lines(TextLayout& out, std::string_view text) {
+        auto& lines = out.lines;
+        const auto n = std::uint32_t(out.glyphs.size());
+        std::uint32_t k = 0;
+        for (size_t l = 0; l < lines.size(); ++l) {
+            TextLine& ln = lines[l];
+            ln.first = k;
+            while (k < n && out.glyphs[k].line == l) ++k;
+            ln.last = k;
+            ln.byte_end = l + 1 < lines.size() ? lines[l + 1].byte_begin : std::uint32_t(text.size());
+            std::uint32_t e = ln.last; // trailing spaces don't count toward the width
+            while (e > ln.first && text[out.glyphs[e - 1].byte] == ' ') --e;
+            ln.width = e > ln.first ? out.glyphs[e - 1].pen + out.glyphs[e - 1].advance : 0.f;
+        }
+    }
+
+    void add_decorations(TextLayout& out, float px, std::uint8_t flags) const {
+        Decor d = decor(px);
+        for (size_t l = 0; l < out.lines.size(); ++l) {
+            const TextLine& ln = out.lines[l];
+            if (ln.width <= 0) continue;
+            auto bar = [&](float offset, float thick) {
+                float t = std::fmax(1.f, std::round(thick));
+                float y = std::round(ln.baseline + offset - t * .5f);
+                out.decorations.push_back({{0, y, ln.width, t}, std::uint32_t(l)});
+                out.size.h = std::fmax(out.size.h, y + t);
+            };
+            if (flags & Underline) bar(d.underline_offset, d.underline_thickness);
+            if (flags & Strike) bar(d.strike_offset, d.strike_thickness);
+        }
+    }
+
+    static int be16(const std::uint8_t* p) { return std::int16_t((p[0] << 8) | p[1]); }
+
+    bool init(int face) {
+        int off = stbtt_GetFontOffsetForIndex(data_.data(), face);
+        if (off < 0 || !stbtt_InitFont(&info_, data_.data(), off)) {
             ok_ = false;
             return false;
         }
-        atlas_.assign(size_t(kAtlasPage) * kAtlasPage, 0);
-        stbrp_init_target(&packer_, kAtlasPage, kAtlasPage, nodes_, kAtlasPage + 1);
+        stbtt_GetFontVMetrics(&info_, &asc_, &desc_, &gap_);
+        upos_ = upos_thick_ = strike_pos_ = strike_thick_ = 0;
+        size_t len = data_.size();
+        if (stbtt_uint32 post = stbtt__find_table(data_.data(), stbtt_uint32(off), "post");
+            post && post + 12 <= len) {
+            upos_ = be16(&data_[post + 8]);
+            upos_thick_ = be16(&data_[post + 10]);
+        }
+        if (stbtt_uint32 os2 = stbtt__find_table(data_.data(), stbtt_uint32(off), "OS/2");
+            os2 && os2 + 30 <= len) {
+            strike_thick_ = be16(&data_[os2 + 26]);
+            strike_pos_ = be16(&data_[os2 + 28]);
+        }
+        atlas_.reset();
         ok_ = true;
-        atlas_dirty_ = true;
-        return true;
-    }
-
-    bool pack_and_copy(Glyph& g, const std::uint8_t* bmp, int w, int h) {
-        stbrp_rect r{0, w + 1, h + 1, 0, 0, 0};
-        if (!stbrp_pack_rects(&packer_, &r, 1) || r.was_packed == 0) return false;
-        int x = r.x, y = r.y;
-        for (int dy = 0; dy < h; ++dy)
-            for (int dx = 0; dx < w; ++dx)
-                atlas_[size_t(y + dy) * kAtlasPage + (x + dx)] = bmp[dy * w + dx];
-        g.uv = {float(x), float(y), float(w), float(h)};
-        atlas_dirty_ = true;
         return true;
     }
 
     stbtt_fontinfo info_{};
-    stbrp_context packer_{};
-    stbrp_node nodes_[kAtlasPage + 1]{};
     std::vector<std::uint8_t> data_;
-    std::vector<std::uint8_t> atlas_;
+    GlyphAtlas atlas_;
     std::map<std::uint64_t, Glyph> cache_;
-    std::uint32_t atlas_id_ = 0;
+    int asc_ = 0, desc_ = 0, gap_ = 0;
+    int upos_ = 0, upos_thick_ = 0, strike_pos_ = 0, strike_thick_ = 0;
     bool ok_ = false;
-    bool atlas_dirty_ = true;
 };
 
 } // namespace slikui::text
+
+
+// ============================================================================
+// slikui/text/text.hpp
+// ============================================================================
+// slikui/text/text.hpp - the text API: TextOpts, FontLibrary, TextBlock.
+//
+// Everything here is in LOGICAL px: theme scale is applied internally, so
+// callers never convert between raster and logical space.
+//
+//   env.text({x, y}, "Hello");                                // theme defaults
+//   env.text_in(bounds, "42%", {.size = 20, .bold = true,
+//                               .align = TextAlign::Center,
+//                               .valign = TextVAlign::Middle});
+//   Size s = ctx.text_size("42%", {.size = 20, .bold = true}); // measure()
+//
+// TextOpts fields default to the theme; designated initializers must follow
+// declaration order (font, size, color, bold, italic, underline, strike,
+// align, valign, wrap, max_width, overflow).
+
+// (already included above: slikui/core/color.hpp)
+// (already included above: slikui/core/math.hpp)
+// (already included above: slikui/render/draw_list.hpp)
+// (already included above: slikui/style/theme.hpp)
+// (already included above: slikui/text/font.hpp)
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <iterator>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+namespace slikui {
+
+enum class TextAlign : std::uint8_t { Left, Center, Right };
+
+// Vertical placement. Point form (env.text): what the point's y is.
+// Rect form (env.text_in): Top / Middle / Bottom of the rect; Baseline puts
+// the first baseline on the rect's top edge.
+enum class TextVAlign : std::uint8_t { Top, Middle, Baseline, Bottom };
+
+// Text wider than the available width (rect width, or TextOpts::max_width).
+// Ellipsis applies to single-line, non-wrapping text.
+enum class TextOverflow : std::uint8_t { Visible, Clip, Ellipsis };
+
+struct TextOpts {
+    std::string_view font = {};           // family or role: "" / "body", "heading", "mono", ...
+    float size = 0;                       // logical px; 0 = theme base_font_px
+    Color color = Color::transparent();   // alpha 0 = theme text color
+    bool bold = false;
+    bool italic = false;
+    bool underline = false;
+    bool strike = false;
+    TextAlign align = TextAlign::Left;
+    TextVAlign valign = TextVAlign::Top;
+    bool wrap = false;                    // wrap to the available width
+    float max_width = 0;                  // point form: available width (0 = none)
+    TextOverflow overflow = TextOverflow::Visible;
+};
+
+// Vertical metrics for one line of a style, in logical px.
+struct TextMetrics {
+    float ascent = 0;      // baseline below the line top
+    float descent = 0;     // below the baseline (positive)
+    float line_height = 0; // baseline-to-baseline distance
+};
+
+inline float text_align_factor(TextAlign a) {
+    return a == TextAlign::Center ? .5f : a == TextAlign::Right ? 1.f : 0.f;
+}
+
+namespace text {
+
+// Widest line of a layout, raster px. The last line counts its trailing
+// spaces (so "Status: " chains into the next run); earlier lines don't (a
+// wrapped line's trailing space would overhang the wrap width).
+inline float layout_advance(const TextLayout& lay) {
+    float w = 0;
+    for (size_t l = 0; l < lay.lines.size(); ++l) {
+        const TextLine& ln = lay.lines[l];
+        if (l + 1 < lay.lines.size() || ln.last == ln.first) {
+            w = std::fmax(w, ln.width);
+            continue;
+        }
+        const PlacedGlyph& g = lay.glyphs[ln.last - 1];
+        w = std::fmax(w, g.pen + g.advance);
+    }
+    return w;
+}
+
+// Emits a layout's glyphs and decorations at `top_left` (logical). Lines are
+// aligned inside a box `box` raster px wide by factor `f` (0 left, .5 center,
+// 1 right); f = 0 emits every glyph exactly where the layout placed it.
+inline void emit_layout(DrawList& list, const TextLayout& lay, Vec2 top_left, float inv,
+                        Color col, float box = 0, float f = 0) {
+    auto offset = [&](std::uint32_t line) {
+        if (f == 0 || line >= lay.lines.size()) return 0.f;
+        return (box - lay.lines[line].width) * f;
+    };
+    for (const auto& pg : lay.glyphs) {
+        const Glyph& g = *pg.glyph;
+        if (g.uv.empty()) continue;
+        float ox = offset(pg.line);
+        list.glyph({top_left.x + (pg.pos.x + ox) * inv, top_left.y + pg.pos.y * inv,
+                    g.size.w * inv, g.size.h * inv},
+                   g.tex_id, g.uv, col);
+    }
+    for (const auto& d : lay.decorations) {
+        float ox = offset(d.line);
+        list.rect({top_left.x + (d.rect.x + ox) * inv, top_left.y + d.rect.y * inv,
+                   d.rect.w * inv, d.rect.h * inv},
+                  col);
+    }
+}
+
+// Lays out `s` with an ellipsis when it is wider than `ellipsis_w` (raster
+// px; 0 = never). Single-line text only; wrapped text is returned as is.
+inline TextLayout layout_fitted(const Font& font, std::string_view s, float px, float wrap,
+                                float ellipsis_w, std::uint8_t flags) {
+    TextLayout lay = font.layout(s, px, wrap, flags);
+    if (ellipsis_w <= 0 || wrap > 0 || lay.lines.size() != 1 || lay.lines[0].width <= ellipsis_w)
+        return lay;
+    std::string_view ell = font.has_glyph(0x2026) ? std::string_view("\xE2\x80\xA6") : "...";
+    float ew = font.measure_width(ell, px, flags);
+    size_t cut = 0;
+    while (cut < lay.glyphs.size() &&
+           lay.glyphs[cut].pen + lay.glyphs[cut].advance + ew <= ellipsis_w)
+        ++cut;
+    while (cut > 0 && s[lay.glyphs[cut - 1].byte] == ' ') --cut;
+    size_t cut_byte = cut < lay.glyphs.size() ? lay.glyphs[cut].byte : s.size();
+    std::string t(s.substr(0, cut_byte));
+    t += ell;
+    return font.layout(t, px, 0, flags);
+}
+
+} // namespace text
+
+class TextBlock;
+
+namespace text {
+
+// A Context's fonts: families of faces by name, plus the immediate-mode
+// layout cache behind env.text() / Context::text_size().
+class FontLibrary {
+public:
+    FontLibrary() { families_.push_back(Family{"body", {&body_, nullptr, nullptr, nullptr}}); }
+    FontLibrary(const FontLibrary&) = delete;
+    FontLibrary& operator=(const FontLibrary&) = delete;
+
+    Font& body() { return body_; }
+    const Font& body() const { return body_; }
+
+    // Texture ids for atlas pages of every face (Context::next_texture_id).
+    void set_texture_source(std::function<std::uint32_t()> f) {
+        id_source_ = std::move(f);
+        for_each_font([&](Font& font) { font.set_texture_source(id_source_); });
+    }
+
+    // See Context::add_font.
+    bool add_font(std::string_view family, const std::string& path,
+                  FontStyle style = FontStyle::Regular, int face = 0) {
+        if (face < 0) {
+            Font probe;
+            if (!probe.load_file(path)) return false;
+            face = Font::find_face(probe.data().data(), probe.data().size(), style);
+        }
+        return slot(family, style)->load_file(path, face);
+    }
+    bool add_font_memory(std::string_view family, const std::uint8_t* data, size_t len,
+                         FontStyle style = FontStyle::Regular, int face = 0) {
+        if (face < 0) face = Font::find_face(data, len, style);
+        return slot(family, style)->load_memory(data, len, face);
+    }
+
+    // True when `family` has a loaded face (any style).
+    bool has_font(std::string_view family) const {
+        const Family* fam = find(family);
+        if (!fam) return false;
+        for (const Font* f : fam->faces)
+            if (f && f->valid()) return true;
+        return false;
+    }
+
+    struct Resolved {
+        Font* font = nullptr;
+        std::uint8_t synth = 0; // SynthBold / SynthItalic for what the face lacks
+    };
+
+    // The closest loaded face of `family` (unknown families fall back to
+    // "body"), plus synthesis flags for the style bits that face lacks.
+    // Never null: the body font, possibly invalid, is the last resort.
+    Resolved resolve(std::string_view family, bool bold = false, bool italic = false) {
+        const Family* fam = find(family);
+        if (!fam || !has_font(family)) fam = find("body");
+        const bool tries[4][2] = {{bold, italic}, {bold, false}, {false, italic}, {false, false}};
+        for (const auto& t : tries) {
+            Font* f = fam->faces[int(make_style(t[0], t[1]))];
+            if (f && f->valid()) {
+                std::uint8_t synth = std::uint8_t((bold && !t[0] ? SynthBold : 0) |
+                                                  (italic && !t[1] ? SynthItalic : 0));
+                return {f, synth};
+            }
+        }
+        return {&body_, std::uint8_t((bold ? SynthBold : 0) | (italic ? SynthItalic : 0))};
+    }
+
+    template <class F>
+    void for_each_font(F&& fn) {
+        fn(body_);
+        for (auto& f : extra_) fn(*f);
+    }
+
+    // --- immediate-mode layout ---
+
+    // A TextOpts resolved against a theme: face, layout flags, raster px.
+    struct Request {
+        Font* font = nullptr;
+        std::uint8_t flags = 0;
+        float px = 0;
+    };
+    Request request(const TextOpts& o, const Theme& theme) {
+        Resolved r = resolve(o.font, o.bold, o.italic);
+        return {r.font, flags_of(o, r.synth), theme.s(o.size > 0 ? o.size : theme.base_font_px)};
+    }
+
+    static std::uint8_t flags_of(const TextOpts& o, std::uint8_t synth) {
+        return std::uint8_t(synth | (o.underline ? Underline : 0) | (o.strike ? Strike : 0));
+    }
+
+    // Cached layout of `s` (raster space). The reference stays valid until
+    // the next end_frame().
+    const TextLayout& layout(std::string_view s, const Request& rq, float wrap = 0,
+                             float ellipsis_w = 0) {
+        std::string key;
+        key.reserve(sizeof(void*) + 1 + 3 * sizeof(float) + s.size());
+        auto put = [&](const void* p, size_t n) { key.append(static_cast<const char*>(p), n); };
+        put(&rq.font, sizeof rq.font);
+        put(&rq.flags, 1);
+        put(&rq.px, sizeof(float));
+        put(&wrap, sizeof(float));
+        put(&ellipsis_w, sizeof(float));
+        key.append(s);
+        auto it = cache_.find(key);
+        if (it == cache_.end()) {
+            if (cache_.size() >= kMaxCache) evict(frame_); // runaway text: drop all but this frame
+            it = cache_.emplace(std::move(key),
+                                Entry{layout_fitted(*rq.font, s, rq.px, wrap, ellipsis_w, rq.flags), 0})
+                     .first;
+        }
+        it->second.used = frame_;
+        return it->second.lay;
+    }
+
+    // Called once per rendered frame: layouts unused for a while are dropped.
+    void end_frame() {
+        ++frame_;
+        if (frame_ > kKeepFrames) evict(frame_ - kKeepFrames);
+    }
+    size_t cache_size() const { return cache_.size(); }
+
+private:
+    static constexpr size_t kMaxCache = 4096;
+    static constexpr std::uint64_t kKeepFrames = 120;
+
+    struct Family {
+        std::string name;
+        Font* faces[4] = {}; // indexed by FontStyle
+    };
+    struct Entry {
+        TextLayout lay;
+        std::uint64_t used = 0;
+    };
+
+    const Family* find(std::string_view name) const {
+        if (name.empty()) name = "body";
+        for (const auto& f : families_)
+            if (f.name == name) return &f;
+        return nullptr;
+    }
+
+    // The Font `family`/`style` loads into, created on first use. The body
+    // family's Regular face is body_ itself.
+    Font* slot(std::string_view family, FontStyle style) {
+        if (family.empty()) family = "body";
+        Family* fam = nullptr;
+        for (auto& f : families_)
+            if (f.name == family) fam = &f;
+        if (!fam) {
+            families_.push_back(Family{std::string(family), {}});
+            fam = &families_.back();
+        }
+        Font*& s = fam->faces[int(style)];
+        if (!s) {
+            extra_.push_back(std::make_unique<Font>());
+            s = extra_.back().get();
+            if (id_source_) s->set_texture_source(id_source_);
+        }
+        return s;
+    }
+
+    void evict(std::uint64_t older_than) {
+        for (auto it = cache_.begin(); it != cache_.end();)
+            it = it->second.used < older_than ? cache_.erase(it) : std::next(it);
+    }
+
+    Font body_;
+    std::vector<std::unique_ptr<Font>> extra_;
+    std::vector<Family> families_;
+    std::function<std::uint32_t()> id_source_;
+    std::unordered_map<std::string, Entry> cache_;
+    std::uint64_t frame_ = 0;
+};
+
+} // namespace text
+
+// A laid-out block of text kept by the caller: draw it many times, and
+// query it for interactive widgets (hit-testing, carets, selections).
+// Built by Context::text_layout(); drawn with PaintEnv::draw(). All
+// coordinates are logical px relative to the block's top-left. Rebuild it
+// when the theme scale changes (it is rasterized for one scale).
+class TextBlock {
+public:
+    TextBlock() = default;
+
+    // Natural size: widest line advance x block height.
+    Size size() const { return {text::layout_advance(lay_) * inv_, lay_.size.h * inv_}; }
+    size_t line_count() const { return lay_.lines.size(); }
+    float line_height() const { return lay_.line_height * inv_; }
+    const std::string& text() const { return text_; }
+    bool empty() const { return lay_.glyphs.empty(); }
+
+    // Caret byte offset nearest to `p` (block-local).
+    size_t hit_test(Vec2 p) const {
+        if (lay_.lines.empty()) return 0;
+        size_t l = line_at(p.y);
+        const text::TextLine& ln = lay_.lines[l];
+        float x = p.x / inv_ - offset(l);
+        for (std::uint32_t k = ln.first; k < ln.last; ++k) {
+            const text::PlacedGlyph& g = lay_.glyphs[k];
+            if (x < g.pen + g.advance * .5f) return g.byte;
+        }
+        return line_end(l);
+    }
+
+    // Caret rectangle (1 logical px wide) before the codepoint at `byte`.
+    Rect caret_rect(size_t byte) const {
+        if (lay_.lines.empty()) return {0, 0, 1, lay_.line_height * inv_};
+        size_t l = line_of(byte);
+        const text::TextLine& ln = lay_.lines[l];
+        float x = offset(l) + caret_x(l, byte);
+        return {x * inv_, (ln.baseline - lay_.ascent) * inv_, 1.f, lay_.line_height * inv_};
+    }
+
+    // Highlight rectangles for the byte range [a, b), one per line touched.
+    std::vector<Rect> selection_rects(size_t a, size_t b) const {
+        std::vector<Rect> out;
+        if (a > b) std::swap(a, b);
+        if (a == b) return out;
+        for (size_t l = 0; l < lay_.lines.size(); ++l) {
+            const text::TextLine& ln = lay_.lines[l];
+            size_t lo = std::max<size_t>(a, ln.byte_begin), hi = std::min<size_t>(b, ln.byte_end);
+            bool last_line = l + 1 == lay_.lines.size();
+            if (lo >= hi) continue;
+            float x0 = caret_x(l, lo);
+            float x1 = caret_x(l, hi);
+            if (hi >= ln.byte_end && !last_line) x1 += lay_.line_height * .25f; // the line break
+            float ox = offset(l);
+            out.push_back({(ox + x0) * inv_, (ln.baseline - lay_.ascent) * inv_,
+                           std::fmax(x1 - x0, 1.f) * inv_, lay_.line_height * inv_});
+        }
+        return out;
+    }
+
+    // Raster-space layout (glyph pointers, lines) for custom drawing.
+    const text::TextLayout& layout() const { return lay_; }
+    float inv_scale() const { return inv_; }
+    TextAlign align() const { return align_; }
+    Color color() const { return color_; }
+
+    // Internal: Context::text_layout builds blocks through this.
+    static TextBlock make(text::TextLayout lay, std::string text, float inv, float box,
+                          TextAlign align, Color color) {
+        TextBlock b;
+        b.lay_ = std::move(lay);
+        b.text_ = std::move(text);
+        b.inv_ = inv;
+        b.box_ = box > 0 ? box : text::layout_advance(b.lay_);
+        b.align_ = align;
+        b.color_ = color;
+        return b;
+    }
+
+    // Emits the block at `top_left` (logical). Alpha-0 `color` = block color.
+    void emit(DrawList& list, Vec2 top_left, Color color = Color::transparent()) const {
+        text::emit_layout(list, lay_, top_left, inv_, color.a > 0 ? color : color_, box_,
+                          text_align_factor(align_));
+    }
+
+private:
+    float offset(size_t l) const {
+        float f = text_align_factor(align_);
+        return f == 0 ? 0.f : (box_ - lay_.lines[l].width) * f;
+    }
+    size_t line_at(float y) const {
+        float lh = lay_.line_height > 0 ? lay_.line_height : 1.f;
+        long l = long(std::floor(y / inv_ / lh));
+        return size_t(std::clamp<long>(l, 0, long(lay_.lines.size()) - 1));
+    }
+    size_t line_of(size_t byte) const {
+        for (size_t l = 0; l < lay_.lines.size(); ++l)
+            if (byte < lay_.lines[l].byte_end) return l;
+        return lay_.lines.size() - 1;
+    }
+    // Caret position at the end of line l: before its '\n', if it has one.
+    size_t line_end(size_t l) const {
+        size_t e = lay_.lines[l].byte_end;
+        if (e > lay_.lines[l].byte_begin && e <= text_.size() && text_[e - 1] == '\n') --e;
+        return e;
+    }
+    float caret_x(size_t l, size_t byte) const {
+        const text::TextLine& ln = lay_.lines[l];
+        for (std::uint32_t k = ln.first; k < ln.last; ++k)
+            if (lay_.glyphs[k].byte >= byte) return lay_.glyphs[k].pen;
+        if (ln.last > ln.first) {
+            const text::PlacedGlyph& g = lay_.glyphs[ln.last - 1];
+            return g.pen + g.advance;
+        }
+        return 0.f;
+    }
+
+    text::TextLayout lay_;
+    std::string text_;
+    float inv_ = 1;
+    float box_ = 0; // raster width lines align within
+    TextAlign align_ = TextAlign::Left;
+    Color color_ = Color::transparent();
+};
+
+namespace text {
+
+// Shared by PaintEnv::text / text_in. `lib` may be null (a PaintEnv built by
+// hand): `fallback` is then used, uncached, with synthesized styles.
+inline Rect draw_text(DrawList& list, const Theme& theme, FontLibrary* lib, const Font& fallback,
+                      bool in_rect, Rect box, std::string_view s, const TextOpts& o) {
+    FontLibrary::Request rq;
+    if (lib) {
+        rq = lib->request(o, theme);
+    } else {
+        rq.font = const_cast<Font*>(&fallback);
+        rq.flags = FontLibrary::flags_of(
+            o, std::uint8_t((o.bold ? SynthBold : 0) | (o.italic ? SynthItalic : 0)));
+        rq.px = theme.s(o.size > 0 ? o.size : theme.base_font_px);
+    }
+    if (!rq.font || !rq.font->valid()) return {box.x, box.y, 0, 0};
+
+    float avail = in_rect ? box.w : o.max_width;
+    float wrap = (o.wrap && avail > 0) ? theme.s(avail) : 0.f;
+    float ell = (o.overflow == TextOverflow::Ellipsis && !o.wrap && avail > 0) ? theme.s(avail) : 0.f;
+    TextLayout local;
+    const TextLayout& lay = lib ? lib->layout(s, rq, wrap, ell)
+                                : (local = layout_fitted(*rq.font, s, rq.px, wrap, ell, rq.flags));
+
+    float inv = 1.f / theme.scale;
+    float f = text_align_factor(o.align);
+    float box_r = layout_advance(lay);
+    float bw = box_r * inv, h = lay.size.h * inv, asc = lay.ascent * inv;
+    float ax = in_rect ? box.x + box.w * f : box.x;
+    float left = ax - bw * f;
+    float ref = box.y;
+    if (in_rect) {
+        if (o.valign == TextVAlign::Middle) ref = box.y + box.h * .5f;
+        else if (o.valign == TextVAlign::Bottom) ref = box.bottom();
+    }
+    float top = ref;
+    switch (o.valign) {
+        case TextVAlign::Top: break;
+        case TextVAlign::Middle: top = ref - h * .5f; break;
+        case TextVAlign::Baseline: top = ref - asc; break;
+        case TextVAlign::Bottom: top = ref - h; break;
+    }
+
+    bool clip = o.overflow == TextOverflow::Clip && avail > 0;
+    if (clip) {
+        Rect c = in_rect ? box : Rect{ax - avail * f, top, avail, h};
+        list.push_clip(c);
+    }
+    emit_layout(list, lay, {left, top}, inv, o.color.a > 0 ? o.color : theme.text, box_r, f);
+    if (clip) list.pop_clip();
+    return {left, top, bw, h};
+}
+
+} // namespace text
+
+} // namespace slikui
 
 
 // ============================================================================
@@ -8770,8 +9659,11 @@ inline constexpr std::size_t default_font_size() noexcept { return sizeof(detail
 // Not part of the rendering contract: production apps ship or load their own
 // fonts. This just makes examples work out of the box.
 
+// (already included above: slikui/text/font.hpp)
+
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace slikui {
@@ -8806,6 +9698,96 @@ inline std::string find_system_font() {
     return "";
 }
 
+// A font file plus the face to use inside it (-1: pick by style bits, for
+// .ttc collections - Context::add_font resolves it).
+struct SystemFont {
+    std::string path;
+    int face = 0;
+    explicit operator bool() const { return !path.empty(); }
+};
+
+// The first installed font for a role and style: role "sans" (or "body",
+// "heading") or "mono". Empty when nothing matches - callers then keep the
+// family's other faces and synthesize the style.
+//
+//   if (auto f = find_system_font_face("mono"))
+//       ctx.add_font("mono", f.path, text::FontStyle::Regular, f.face);
+inline SystemFont find_system_font_face(std::string_view role = "sans",
+                                        text::FontStyle style = text::FontStyle::Regular) {
+    struct Cand {
+        const char* path;
+        int face;
+    };
+    static const std::vector<Cand> sans[4] = {
+        // Regular: same order as font_candidates()
+        {{"/System/Library/Fonts/Supplemental/Arial.ttf", 0},
+         {"/Library/Fonts/Arial.ttf", 0},
+         {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0},
+         {"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 0},
+         {"/usr/share/fonts/TTF/DejaVuSans.ttf", 0},
+         {"C:/Windows/Fonts/arial.ttf", 0},
+         {"C:/Windows/Fonts/segoeui.ttf", 0}},
+        // Bold
+        {{"/System/Library/Fonts/Supplemental/Arial Bold.ttf", 0},
+         {"/Library/Fonts/Arial Bold.ttf", 0},
+         {"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0},
+         {"/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", 0},
+         {"/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", 0},
+         {"C:/Windows/Fonts/arialbd.ttf", 0},
+         {"C:/Windows/Fonts/segoeuib.ttf", 0}},
+        // Italic
+        {{"/System/Library/Fonts/Supplemental/Arial Italic.ttf", 0},
+         {"/Library/Fonts/Arial Italic.ttf", 0},
+         {"/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf", 0},
+         {"/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf", 0},
+         {"/usr/share/fonts/TTF/DejaVuSans-Oblique.ttf", 0},
+         {"C:/Windows/Fonts/ariali.ttf", 0},
+         {"C:/Windows/Fonts/segoeuii.ttf", 0}},
+        // BoldItalic
+        {{"/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf", 0},
+         {"/Library/Fonts/Arial Bold Italic.ttf", 0},
+         {"/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf", 0},
+         {"/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf", 0},
+         {"/usr/share/fonts/TTF/DejaVuSans-BoldOblique.ttf", 0},
+         {"C:/Windows/Fonts/arialbi.ttf", 0},
+         {"C:/Windows/Fonts/segoeuiz.ttf", 0}},
+    };
+    static const std::vector<Cand> mono[4] = {
+        {{"/System/Library/Fonts/Menlo.ttc", -1},
+         {"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 0},
+         {"/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", 0},
+         {"/usr/share/fonts/TTF/DejaVuSansMono.ttf", 0},
+         {"C:/Windows/Fonts/consola.ttf", 0},
+         {"C:/Windows/Fonts/cour.ttf", 0}},
+        {{"/System/Library/Fonts/Menlo.ttc", -1},
+         {"/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", 0},
+         {"/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf", 0},
+         {"/usr/share/fonts/TTF/DejaVuSansMono-Bold.ttf", 0},
+         {"C:/Windows/Fonts/consolab.ttf", 0},
+         {"C:/Windows/Fonts/courbd.ttf", 0}},
+        {{"/System/Library/Fonts/Menlo.ttc", -1},
+         {"/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf", 0},
+         {"/usr/share/fonts/truetype/liberation/LiberationMono-Italic.ttf", 0},
+         {"/usr/share/fonts/TTF/DejaVuSansMono-Oblique.ttf", 0},
+         {"C:/Windows/Fonts/consolai.ttf", 0},
+         {"C:/Windows/Fonts/couri.ttf", 0}},
+        {{"/System/Library/Fonts/Menlo.ttc", -1},
+         {"/usr/share/fonts/truetype/dejavu/DejaVuSansMono-BoldOblique.ttf", 0},
+         {"/usr/share/fonts/truetype/liberation/LiberationMono-BoldItalic.ttf", 0},
+         {"/usr/share/fonts/TTF/DejaVuSansMono-BoldOblique.ttf", 0},
+         {"C:/Windows/Fonts/consolaz.ttf", 0},
+         {"C:/Windows/Fonts/courbi.ttf", 0}},
+    };
+    const auto& table = role == "mono" ? mono : sans;
+    for (const Cand& c : table[int(style) & 3]) {
+        if (std::FILE* f = std::fopen(c.path, "rb")) {
+            std::fclose(f);
+            return {c.path, c.face};
+        }
+    }
+    return {};
+}
+
 } // namespace slikui
 
 
@@ -8816,27 +9798,49 @@ inline std::string find_system_font() {
 
 // (already included above: slikui/style/theme.hpp)
 // (already included above: slikui/text/font.hpp)
+// (already included above: slikui/text/text.hpp)
 // (already included above: slikui/render/draw_list.hpp)
+
+#include <string_view>
 
 namespace slikui {
 
 struct PaintEnv {
     DrawList& list;
     const Theme& theme;
-    const text::Font& font;
+    const text::Font& font;            // body font, regular face
+    text::FontLibrary* fonts = nullptr; // set by Context::render (null: hand-built env)
+
+    // Draws `s` anchored at `pos` (logical px) and returns the rect it
+    // occupies. With default options `pos` is the top-left corner; align /
+    // valign make it the center, right edge, baseline, ... instead.
+    //   env.text({x, y}, "Hello");
+    //   env.text({cx, cy}, "42%", {.size = 20, .bold = true,
+    //            .align = TextAlign::Center, .valign = TextVAlign::Middle});
+    Rect text(Vec2 pos, std::string_view s, const TextOpts& o = {}) const {
+        return text::draw_text(list, theme, fonts, font, false, {pos.x, pos.y, 0, 0}, s, o);
+    }
+
+    // Draws `s` inside `box`, aligned per o.align / o.valign; wraps to the
+    // box width with o.wrap, and o.overflow handles text wider than the box.
+    //   env.text_in(bounds, "OK", {.align = TextAlign::Center, .valign = TextVAlign::Middle});
+    Rect text_in(Rect box, std::string_view s, const TextOpts& o = {}) const {
+        return text::draw_text(list, theme, fonts, font, true, box, s, o);
+    }
+
+    // Draws a kept TextBlock (Context::text_layout) with its top-left at
+    // `top_left`; an alpha-0 color uses the block's own color.
+    void draw(const TextBlock& block, Vec2 top_left, Color color = Color::transparent()) const {
+        block.emit(list, top_left, color);
+    }
 };
 
 // Draws a laid-out text block with `top_left` as the block's top-left corner.
 // `inv` converts the raster-space layout back to logical px (1 / theme scale).
+// Underline / strikethrough bars in the layout draw in the same color.
 inline void paint_text(const PaintEnv& env, const text::TextLayout& lay, Vec2 top_left,
                        Color col, float inv) {
-    for (const auto& pg : lay.glyphs) {
-        const text::Glyph& g = *pg.glyph;
-        if (g.uv.empty()) continue;
-        env.list.glyph({top_left.x + pg.pos.x * inv, top_left.y + pg.pos.y * inv,
-                        g.size.w * inv, g.size.h * inv},
-                       g.tex_id, g.uv, col);
-    }
+    text::emit_layout(env.list, lay, top_left, inv, col);
 }
 
 } // namespace slikui
@@ -9130,6 +10134,7 @@ inline bool hit(const Widget& w, Vec2 p) {
 // (already included above: slikui/render/sink.hpp)
 // (already included above: slikui/style/theme.hpp)
 // (already included above: slikui/text/font.hpp)
+// (already included above: slikui/text/text.hpp)
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
 
@@ -9157,7 +10162,8 @@ void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos);
 class Context {
 public:
     explicit Context(IRenderSink& sink) : sink_(&sink) {
-        font_.set_texture_id(next_texture_id());
+        fonts_.body().set_texture_id(next_texture_id());
+        fonts_.set_texture_source([this] { return next_texture_id(); });
     }
     // Expire the liveness token first: borrowed widgets (Menu, Dialog) that
     // outlive this Context must not call back into it from their destructor.
@@ -9172,11 +10178,77 @@ public:
 
     Theme& theme() { return theme_; }
     const Theme& theme() const { return theme_; }
-    text::Font& font() { return font_; }
 
-    bool load_font_file(const std::string& path) { return font_.load_file(path); }
+    // The body font's regular face (what load_font_file loads).
+    text::Font& font() { return fonts_.body(); }
+
+    bool load_font_file(const std::string& path) { return fonts_.body().load_file(path); }
     bool load_font_memory(const std::uint8_t* data, size_t len) {
-        return font_.load_memory(data, len);
+        return fonts_.body().load_memory(data, len);
+    }
+
+    // --- font families ---
+    //
+    // Fonts are registered by family name, one face per style. Three names
+    // are roles every text call understands: "body" (the default - the font
+    // load_font_file/load_font_memory load), "heading" and "mono". Asking
+    // for an unregistered family falls back to "body"; asking for a style
+    // the family lacks synthesizes it from the closest face.
+    //
+    //   ctx.add_font("mono", "/path/JetBrainsMono-Regular.ttf");
+    //   ctx.add_font("body", "/path/Inter-Bold.ttf", text::FontStyle::Bold);
+    //
+    // `face` selects a face inside a .ttc collection; -1 picks the face whose
+    // style bits (head.macStyle) match `style`. False when the file can't be
+    // loaded; the family then keeps using its other faces.
+    bool add_font(std::string_view family, const std::string& path,
+                  text::FontStyle style = text::FontStyle::Regular, int face = 0) {
+        return fonts_.add_font(family, path, style, face);
+    }
+    bool add_font_memory(std::string_view family, const std::uint8_t* data, size_t len,
+                         text::FontStyle style = text::FontStyle::Regular, int face = 0) {
+        return fonts_.add_font_memory(family, data, len, style, face);
+    }
+    bool has_font(std::string_view family) const { return fonts_.has_font(family); }
+
+    text::FontLibrary& fonts() { return fonts_; }
+
+    // --- text (logical px; see slikui/text/text.hpp) ---
+
+    // Size of `s` drawn with `o`: widest line advance x block height. Wraps
+    // when o.wrap and o.max_width > 0. Use it from measure().
+    Size text_size(std::string_view s, const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        if (!rq.font->valid()) return {};
+        float avail = o.max_width > 0 ? theme_.s(o.max_width) : 0.f;
+        const text::TextLayout& lay =
+            fonts_.layout(s, rq, o.wrap ? avail : 0.f,
+                          o.overflow == TextOverflow::Ellipsis && !o.wrap ? avail : 0.f);
+        float inv = 1.f / theme_.scale;
+        return {text::layout_advance(lay) * inv, lay.size.h * inv};
+    }
+
+    TextMetrics text_metrics(const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        float inv = 1.f / theme_.scale;
+        return {rq.font->ascent(rq.px) * inv, rq.font->descent(rq.px) * inv,
+                rq.font->line_height(rq.px) * inv};
+    }
+
+    // A block to keep: draw with env.draw(block, pos), hit-test, caret and
+    // selection queries. Wraps to `wrap_width` when > 0 (lines align inside
+    // it per o.align); o.wrap / o.max_width are ignored here, except that
+    // TextOverflow::Ellipsis truncates to o.max_width.
+    TextBlock text_layout(std::string_view s, float wrap_width = 0, const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        float inv = 1.f / theme_.scale;
+        Color col = o.color.a > 0 ? o.color : theme_.text;
+        if (!rq.font->valid()) return TextBlock::make({}, std::string(s), inv, 0, o.align, col);
+        float wrap = wrap_width > 0 ? theme_.s(wrap_width) : 0.f;
+        float ell = o.overflow == TextOverflow::Ellipsis && wrap <= 0 && o.max_width > 0
+                        ? theme_.s(o.max_width) : 0.f;
+        text::TextLayout lay = text::layout_fitted(*rq.font, s, rq.px, wrap, ell, rq.flags);
+        return TextBlock::make(std::move(lay), std::string(s), inv, wrap, o.align, col);
     }
 
     void set_frame_size(Vec2 size) { frame_ = size; }
@@ -9316,7 +10388,7 @@ public:
     void render(bool clear = true) {
         if (!sink_) return;
         DrawList list;
-        const PaintEnv env{list, theme_, font_};
+        const PaintEnv env{list, theme_, fonts_.body(), &fonts_};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
@@ -9328,6 +10400,7 @@ public:
         // must see them this frame, not the next.
         upload_dirty_textures();
         sink_->render(list, frame_);
+        fonts_.end_frame(); // drop env.text() layouts nobody drew for a while
     }
 
     // --- popups ---
@@ -9491,7 +10564,7 @@ public:
     // sink reset): re-upload the font atlas and every live widget texture
     // on the next render().
     void invalidate_textures() {
-        font_.mark_dirty();
+        fonts_.for_each_font([](text::Font& f) { f.mark_dirty(); });
         if (root_) root_->invalidate_tree();
         for (auto& p : popups_) p.widget->invalidate_tree();
         for (auto& d : dialogs_) d.widget->invalidate_tree();
@@ -9726,12 +10799,15 @@ private:
     }
 
     void upload_dirty_textures() {
-        if (font_.valid() && font_.atlas_dirty()) {
-            TexUpload up{font_.atlas_id(), font_.atlas_width(), font_.atlas_height(),
-                         TexFormat::Alpha8, font_.atlas_pixels().data()};
-            sink_->upload(up);
-            font_.clear_dirty();
-        }
+        fonts_.for_each_font([this](text::Font& f) {
+            if (!f.valid()) return;
+            for (auto& page : f.atlas().pages()) {
+                if (!page->dirty) continue;
+                sink_->upload(TexUpload{page->tex_id, text::kAtlasPage, text::kAtlasPage,
+                                        TexFormat::Alpha8, page->pixels.data()});
+                page->dirty = false;
+            }
+        });
         // Widgets that own textures (Image, ...) report pending uploads.
         uploads_.clear();
         if (root_) root_->collect_tree(uploads_);
@@ -9891,7 +10967,7 @@ private:
 
     IRenderSink* sink_;
     Theme theme_;
-    text::Font font_;
+    text::FontLibrary fonts_;
     Widget::WidgetPtr root_;
     Widget* focused_ = nullptr;
     Vec2 frame_{};
@@ -11769,25 +12845,6 @@ private:
         return n;
     }
 
-    static std::string utf8_encode(std::uint32_t cp) {
-        std::string out;
-        if (cp < 0x80) {
-            out += char(cp);
-        } else if (cp < 0x800) {
-            out += char(0xC0 | (cp >> 6));
-            out += char(0x80 | (cp & 0x3F));
-        } else if (cp < 0x10000) {
-            out += char(0xE0 | (cp >> 12));
-            out += char(0x80 | ((cp >> 6) & 0x3F));
-            out += char(0x80 | (cp & 0x3F));
-        } else {
-            out += char(0xF0 | (cp >> 18));
-            out += char(0x80 | ((cp >> 12) & 0x3F));
-            out += char(0x80 | ((cp >> 6) & 0x3F));
-            out += char(0x80 | (cp & 0x3F));
-        }
-        return out;
-    }
 
     void refresh_metrics() {
         if (!ctx || !ctx->font().valid()) return;
@@ -12095,25 +13152,6 @@ private:
         return n;
     }
 
-    static std::string utf8_encode(std::uint32_t cp) {
-        std::string out;
-        if (cp < 0x80) {
-            out += char(cp);
-        } else if (cp < 0x800) {
-            out += char(0xC0 | (cp >> 6));
-            out += char(0x80 | (cp & 0x3F));
-        } else if (cp < 0x10000) {
-            out += char(0xE0 | (cp >> 12));
-            out += char(0x80 | ((cp >> 6) & 0x3F));
-            out += char(0x80 | (cp & 0x3F));
-        } else {
-            out += char(0xF0 | (cp >> 18));
-            out += char(0x80 | ((cp >> 12) & 0x3F));
-            out += char(0x80 | ((cp >> 6) & 0x3F));
-            out += char(0x80 | (cp & 0x3F));
-        }
-        return out;
-    }
 
     std::string text_, placeholder_;
     size_t caret_ = 0;
@@ -12157,7 +13195,21 @@ public:
     Label& set_color(Color c) { color_ = c; return *this; } // alpha 0 = theme default
     Label& set_wrap_width(float w) { wrap_width_ = w; valid_ = false; return *this; }
 
-    void attached(Context& c) override { font_ = &c.font(); }
+    // Style. Missing bold/italic faces are synthesized from the family's
+    // closest face; set_font takes a family registered with
+    // Context::add_font, or a role ("body", "heading", "mono").
+    Label& set_bold(bool on = true) { bold_ = on; valid_ = false; return *this; }
+    Label& set_italic(bool on = true) { italic_ = on; valid_ = false; return *this; }
+    Label& set_underline(bool on = true) { underline_ = on; valid_ = false; return *this; }
+    Label& set_strike(bool on = true) { strike_ = on; valid_ = false; return *this; }
+    Label& set_font(std::string family) { family_ = std::move(family); valid_ = false; return *this; }
+    bool bold() const { return bold_; }
+    bool italic() const { return italic_; }
+    bool underline() const { return underline_; }
+    bool strike() const { return strike_; }
+    const std::string& font() const { return family_; }
+
+    void attached(Context&) override { valid_ = false; }
 
     Size measure(const Constraints& c) override {
         float avail = wrap_width_ > 0 ? wrap_width_
@@ -12182,14 +13234,7 @@ public:
 
     void paint(const PaintEnv& env) const override {
         Color col = color_.a > 0 ? color_ : env.theme.text;
-        float inv = 1.f / sc();
-        for (const auto& pg : cached_.glyphs) {
-            const text::Glyph& g = *pg.glyph;
-            if (g.uv.empty()) continue;
-            env.list.glyph({bounds.x + pg.pos.x * inv, bounds.y + pg.pos.y * inv,
-                            g.size.w * inv, g.size.h * inv},
-                           g.tex_id, g.uv, col);
-        }
+        paint_text(env, cached_, {bounds.x, bounds.y}, col, 1.f / sc());
     }
 
     const char* widget_type() const override { return "Label"; }
@@ -12203,8 +13248,12 @@ private:
         float raster_px = sc_ * effective_px();
         float wrap = avail * sc_; // raster-px space to match the layout
         if (valid_ && cached_px_ == raster_px && cached_wrap_ == wrap) return;
-        if (!font_ || !font_->valid()) return;
-        cached_ = font_->layout(text_, raster_px, wrap);
+        if (!ctx) return;
+        auto font = ctx->fonts().resolve(family_, bold_, italic_);
+        if (!font.font->valid()) return;
+        std::uint8_t flags = std::uint8_t(font.synth | (underline_ ? text::Underline : 0) |
+                                          (strike_ ? text::Strike : 0));
+        cached_ = font.font->layout(text_, raster_px, wrap, flags);
         cached_px_ = raster_px;
         cached_wrap_ = wrap;
         valid_ = true;
@@ -12214,10 +13263,11 @@ private:
     float font_px_ = 0;    // 0 = theme default (logical)
     float wrap_width_ = 0; // 0 = wrap to the available width (logical)
     Color color_ = Color::transparent();
+    std::string family_;   // "" = body
     text::TextLayout cached_;
     float cached_px_ = 0;
     float cached_wrap_ = 0;
-    text::Font* font_ = nullptr;
+    bool bold_ = false, italic_ = false, underline_ = false, strike_ = false;
     bool valid_ = false;
 };
 

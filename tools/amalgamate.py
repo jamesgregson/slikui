@@ -33,6 +33,7 @@ ORDER = [
     # STB*_STATIC + *_IMPLEMENTATION and includes them itself; the inliner
     # keeps that macro ordering intact.
     "slikui/text/font.hpp",
+    "slikui/text/text.hpp",
     "slikui/text/default_font.hpp",
     "slikui/text/system_fonts.hpp",
     "slikui/widgets/env.hpp",

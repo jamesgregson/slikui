@@ -12,6 +12,7 @@
 #include "slikui/render/sink.hpp"
 #include "slikui/style/theme.hpp"
 #include "slikui/text/font.hpp"
+#include "slikui/text/text.hpp"
 #include "slikui/widgets/env.hpp"
 #include "slikui/widgets/widget.hpp"
 
@@ -39,7 +40,8 @@ void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos);
 class Context {
 public:
     explicit Context(IRenderSink& sink) : sink_(&sink) {
-        font_.set_texture_id(next_texture_id());
+        fonts_.body().set_texture_id(next_texture_id());
+        fonts_.set_texture_source([this] { return next_texture_id(); });
     }
     // Expire the liveness token first: borrowed widgets (Menu, Dialog) that
     // outlive this Context must not call back into it from their destructor.
@@ -54,11 +56,77 @@ public:
 
     Theme& theme() { return theme_; }
     const Theme& theme() const { return theme_; }
-    text::Font& font() { return font_; }
 
-    bool load_font_file(const std::string& path) { return font_.load_file(path); }
+    // The body font's regular face (what load_font_file loads).
+    text::Font& font() { return fonts_.body(); }
+
+    bool load_font_file(const std::string& path) { return fonts_.body().load_file(path); }
     bool load_font_memory(const std::uint8_t* data, size_t len) {
-        return font_.load_memory(data, len);
+        return fonts_.body().load_memory(data, len);
+    }
+
+    // --- font families ---
+    //
+    // Fonts are registered by family name, one face per style. Three names
+    // are roles every text call understands: "body" (the default - the font
+    // load_font_file/load_font_memory load), "heading" and "mono". Asking
+    // for an unregistered family falls back to "body"; asking for a style
+    // the family lacks synthesizes it from the closest face.
+    //
+    //   ctx.add_font("mono", "/path/JetBrainsMono-Regular.ttf");
+    //   ctx.add_font("body", "/path/Inter-Bold.ttf", text::FontStyle::Bold);
+    //
+    // `face` selects a face inside a .ttc collection; -1 picks the face whose
+    // style bits (head.macStyle) match `style`. False when the file can't be
+    // loaded; the family then keeps using its other faces.
+    bool add_font(std::string_view family, const std::string& path,
+                  text::FontStyle style = text::FontStyle::Regular, int face = 0) {
+        return fonts_.add_font(family, path, style, face);
+    }
+    bool add_font_memory(std::string_view family, const std::uint8_t* data, size_t len,
+                         text::FontStyle style = text::FontStyle::Regular, int face = 0) {
+        return fonts_.add_font_memory(family, data, len, style, face);
+    }
+    bool has_font(std::string_view family) const { return fonts_.has_font(family); }
+
+    text::FontLibrary& fonts() { return fonts_; }
+
+    // --- text (logical px; see slikui/text/text.hpp) ---
+
+    // Size of `s` drawn with `o`: widest line advance x block height. Wraps
+    // when o.wrap and o.max_width > 0. Use it from measure().
+    Size text_size(std::string_view s, const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        if (!rq.font->valid()) return {};
+        float avail = o.max_width > 0 ? theme_.s(o.max_width) : 0.f;
+        const text::TextLayout& lay =
+            fonts_.layout(s, rq, o.wrap ? avail : 0.f,
+                          o.overflow == TextOverflow::Ellipsis && !o.wrap ? avail : 0.f);
+        float inv = 1.f / theme_.scale;
+        return {text::layout_advance(lay) * inv, lay.size.h * inv};
+    }
+
+    TextMetrics text_metrics(const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        float inv = 1.f / theme_.scale;
+        return {rq.font->ascent(rq.px) * inv, rq.font->descent(rq.px) * inv,
+                rq.font->line_height(rq.px) * inv};
+    }
+
+    // A block to keep: draw with env.draw(block, pos), hit-test, caret and
+    // selection queries. Wraps to `wrap_width` when > 0 (lines align inside
+    // it per o.align); o.wrap / o.max_width are ignored here, except that
+    // TextOverflow::Ellipsis truncates to o.max_width.
+    TextBlock text_layout(std::string_view s, float wrap_width = 0, const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        float inv = 1.f / theme_.scale;
+        Color col = o.color.a > 0 ? o.color : theme_.text;
+        if (!rq.font->valid()) return TextBlock::make({}, std::string(s), inv, 0, o.align, col);
+        float wrap = wrap_width > 0 ? theme_.s(wrap_width) : 0.f;
+        float ell = o.overflow == TextOverflow::Ellipsis && wrap <= 0 && o.max_width > 0
+                        ? theme_.s(o.max_width) : 0.f;
+        text::TextLayout lay = text::layout_fitted(*rq.font, s, rq.px, wrap, ell, rq.flags);
+        return TextBlock::make(std::move(lay), std::string(s), inv, wrap, o.align, col);
     }
 
     void set_frame_size(Vec2 size) { frame_ = size; }
@@ -198,7 +266,7 @@ public:
     void render(bool clear = true) {
         if (!sink_) return;
         DrawList list;
-        const PaintEnv env{list, theme_, font_};
+        const PaintEnv env{list, theme_, fonts_.body(), &fonts_};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
@@ -210,6 +278,7 @@ public:
         // must see them this frame, not the next.
         upload_dirty_textures();
         sink_->render(list, frame_);
+        fonts_.end_frame(); // drop env.text() layouts nobody drew for a while
     }
 
     // --- popups ---
@@ -373,7 +442,7 @@ public:
     // sink reset): re-upload the font atlas and every live widget texture
     // on the next render().
     void invalidate_textures() {
-        font_.mark_dirty();
+        fonts_.for_each_font([](text::Font& f) { f.mark_dirty(); });
         if (root_) root_->invalidate_tree();
         for (auto& p : popups_) p.widget->invalidate_tree();
         for (auto& d : dialogs_) d.widget->invalidate_tree();
@@ -608,12 +677,15 @@ private:
     }
 
     void upload_dirty_textures() {
-        if (font_.valid() && font_.atlas_dirty()) {
-            TexUpload up{font_.atlas_id(), font_.atlas_width(), font_.atlas_height(),
-                         TexFormat::Alpha8, font_.atlas_pixels().data()};
-            sink_->upload(up);
-            font_.clear_dirty();
-        }
+        fonts_.for_each_font([this](text::Font& f) {
+            if (!f.valid()) return;
+            for (auto& page : f.atlas().pages()) {
+                if (!page->dirty) continue;
+                sink_->upload(TexUpload{page->tex_id, text::kAtlasPage, text::kAtlasPage,
+                                        TexFormat::Alpha8, page->pixels.data()});
+                page->dirty = false;
+            }
+        });
         // Widgets that own textures (Image, ...) report pending uploads.
         uploads_.clear();
         if (root_) root_->collect_tree(uploads_);
@@ -773,7 +845,7 @@ private:
 
     IRenderSink* sink_;
     Theme theme_;
-    text::Font font_;
+    text::FontLibrary fonts_;
     Widget::WidgetPtr root_;
     Widget* focused_ = nullptr;
     Vec2 frame_{};

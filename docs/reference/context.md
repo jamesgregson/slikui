@@ -62,7 +62,10 @@ The shell layer above popups - see
 | API | Notes |
 |-----|-------|
 | `theme() -> Theme&` | mutate freely; widgets read it every paint ([Theming](../guide/theming.md)) |
-| `load_font_file(path)` / `load_font_memory(data, len)` | one active font ([Text & fonts](../guide/text-fonts.md)) |
+| `load_font_file(path)` / `load_font_memory(data, len)` | the body font ([Text & fonts](../guide/text-fonts.md)) |
+| `add_font(family, path, style, face)` / `add_font_memory(...)` / `has_font(family)` | more faces by family name: `"heading"`, `"mono"`, your own |
+| `text_size(s, opts)` / `text_metrics(opts)` | measure text for `measure()` ([Drawing text](../guide/custom-widgets.md#drawing-text)) |
+| `text_layout(s, wrap_width, opts) -> TextBlock` | a kept layout: draw, hit-test, caret, selection |
 | `set_clipboard_source(fn)` / `set_clipboard_sink(fn)` | host clipboard for text fields |
 | `clipboard_text()` / `set_clipboard_text(str)` | direct clipboard access |
 | `set_cursor_host(fn)` | map `set_cursor` requests to system cursors |

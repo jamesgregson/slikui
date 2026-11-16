@@ -26,6 +26,8 @@ each wheel.
 ./build/examples/04_glfw_software         # same UI, CPU-rasterized scene
 ./build/examples/05_showcase/slikui_showcase
 ./build/examples/05_showcase/slikui_showcase --smoke showcase.png   # headless scripted pass
+./build/examples/07_text                  # text styles, fonts, custom widgets drawing text
+./build/examples/07_text --smoke text.ppm # headless scripted pass
 ```
 
 - `04_glfw_opengl` renders a lit reference shape (cube, sphere or torus) over
@@ -36,6 +38,9 @@ each wheel.
   on-screen, plus two custom widgets (`Fill`, `LevelMeter`) demonstrating the
   measure/paint/event/tick contract. Its `--smoke` transcript is
   byte-identical to the Python twin's (`python/examples/showcase.py`).
+- `07_text` is the C++ twin of `python -m slikui.examples.text`: Label
+  styles and font families, plus four custom widgets that draw text with
+  `env.text_in` and a kept `TextBlock` (drag to select).
 
 ## Python
 
@@ -48,7 +53,7 @@ python python/examples/pyrenderer_demo.py   # C++ vs CanvasSink pixel diff (0)
 python -m slikui.examples.paint --docs-image custom_widget docs/images/custom_widget.png
 python tools/extract_snippets.py            # regenerate docs/includes/examples/ after editing demo code
 python tools/gen_stubs.py                   # regenerate the committed type stub after binding changes
-for n in hello gallery events paint controls keyboard renderer window; do
+for n in hello gallery events paint controls keyboard renderer window text; do
   python -m slikui.examples.$n --smoke docs/images/examples-$n.png
 done                                        # the examples page's screenshots
 python tools/examples_gif.py                # examples-snake.gif, examples-clock.gif

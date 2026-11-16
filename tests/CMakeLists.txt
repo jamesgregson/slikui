@@ -9,6 +9,7 @@ add_executable(slikui_tests
   test_shells.cpp
   test_theme.cpp
   test_font.cpp
+  test_text.cpp
   test_golden.cpp
   test_input.cpp
   test_textures.cpp

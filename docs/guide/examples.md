@@ -46,6 +46,7 @@ one screen.
 | 06 | `keyboard` | focus traversal and rings, global shortcuts, Snake |
 | 07 | `renderer` | the render contract: two renderers, identical pixels, and your own |
 | 08 | `window` | a live app in a GLFW window (the same tour runs headless) |
+| 09 | `text` | Label styles, font families, custom widgets that draw, measure, wrap, truncate and select text |
 
 ## See them
 
@@ -75,6 +76,9 @@ marks on the slider](../images/examples-controls.png)
 
 ![The window tour, scripted: typed text echoed, slider dragged, the pointer
 readout and a toast](../images/examples-window.png)
+
+![The text smoke pass: Label styles, tags and stat cards, ellipsis vs
+wrapping, and "A TextBlock" selected by a drag](../images/examples-text.png)
 
 ## Every example has the same four modes
 
@@ -141,6 +145,22 @@ shortcut, and a whole game in one widget:
 
 ![Snake on its autopilot, recorded from the deterministic tick
 clock](../images/examples-snake.gif)
+
+## Text
+
+`text` draws all of its text from custom widgets (see
+[Drawing text](custom-widgets.md#drawing-text)). `Tag` measures itself
+with `text_size` and centers its text with `env.text_in`:
+
+--8<-- "includes/examples/tag.md"
+
+`SelectableText` keeps a `TextBlock`, re-laid only when its width changes,
+and uses it for drag-to-select:
+
+--8<-- "includes/examples/selectabletext.md"
+
+The C++ twin is `examples/07_text` (`--smoke` runs the same checks
+headless).
 
 ## Your own renderer
 

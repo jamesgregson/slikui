@@ -26,6 +26,9 @@ if(glfw3_FOUND)
 
   add_executable(05_showcase 05_showcase/main.cpp)
   target_link_libraries(05_showcase PRIVATE slikui ${GLFW_LIBS})
+
+  add_executable(07_text 07_text/main.cpp)
+  target_link_libraries(07_text PRIVATE slikui ${GLFW_LIBS})
 endif()
 
 # SDL3 + system OpenGL: UI over a scene, events routed by Context::wants_*.
@@ -38,14 +41,14 @@ else()
 endif()
 
 if(APPLE)
-  foreach(tgt 01_hello 03_gallery 04_glfw_opengl 04_glfw_software 05_showcase 06_sdl_opengl)
+  foreach(tgt 01_hello 03_gallery 04_glfw_opengl 04_glfw_software 05_showcase 06_sdl_opengl 07_text)
     if(TARGET ${tgt})
       target_link_libraries(${tgt} PRIVATE "-framework OpenGL")
     endif()
   endforeach()
 elseif(UNIX)
   find_package(OpenGL REQUIRED)
-  foreach(tgt 01_hello 03_gallery 04_glfw_opengl 04_glfw_software 05_showcase 06_sdl_opengl)
+  foreach(tgt 01_hello 03_gallery 04_glfw_opengl 04_glfw_software 05_showcase 06_sdl_opengl 07_text)
     if(TARGET ${tgt})
       target_link_libraries(${tgt} PRIVATE OpenGL::GL)
     endif()

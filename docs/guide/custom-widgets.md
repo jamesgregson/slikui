@@ -38,6 +38,88 @@ Painting emits into `env.list` (`rect`, `hollow_rect`, `line`, `circle`,
 `image`, `glyph`, clip stack) using `env.theme` colors - the same
 [DrawList commands](backends.md#drawlist-semantics) every backend receives.
 
+## Drawing text
+
+`env.text` draws a string at a point and `env.text_in` draws it inside a
+rect. With no options you get the theme's body font, size and text color;
+pass only what differs. Both return the rect the text occupies, so you can
+place what comes next. Sizes are logical px - theme scale is handled for
+you.
+
+=== "C++"
+
+    ```cpp
+    void paint(const slikui::PaintEnv& env) const override {
+        using slikui::TextAlign, slikui::TextVAlign, slikui::TextOverflow;
+        env.text({bounds.x, bounds.y}, "Hello");
+        env.text_in(bounds, "42%", {.size = 20, .bold = true,
+                                    .align = TextAlign::Center,
+                                    .valign = TextVAlign::Middle});
+        env.text_in(cell, name, {.overflow = TextOverflow::Ellipsis});
+
+        slikui::Rect r = env.text({x, y}, "42", {.size = 24, .bold = true});
+        env.text({r.right(), y}, "%", {.size = 14});    // follows the number
+    }
+
+    Size measure(const slikui::Constraints& c) override {
+        return c.clamp(ctx->text_size("42%", {.size = 20, .bold = true}));
+    }
+    ```
+
+=== "Python"
+
+    ```python
+    def paint(self, env):
+        env.text(slikui.Vec2(self.bounds.x, self.bounds.y), "Hello")
+        env.text_in(self.bounds, "42%", size=20, bold=True,
+                    align="center", valign="middle")
+        env.text_in(cell, name, overflow="ellipsis")
+
+        r = env.text(slikui.Vec2(x, y), "42", size=24, bold=True)
+        env.text(slikui.Vec2(r.x + r.w, y), "%", size=14)
+
+    def measure(self, constraints):
+        return constraints.clamp(self.context.text_size("42%", size=20, bold=True))
+    ```
+
+The options (`slikui::TextOpts`), all defaulting to the theme:
+
+| Option | Meaning |
+|--------|---------|
+| `font` | family or role: `"body"` (default), `"heading"`, `"mono"`, or a name passed to `add_font` |
+| `size` | logical px; 0 = `theme.base_font_px` |
+| `color` | alpha 0 / `None` = `theme.text` |
+| `bold`, `italic`, `underline`, `strike` | style; missing faces are synthesized |
+| `align` | `Left` / `Center` / `Right`: which part of the text sits on the point, or alignment inside the rect |
+| `valign` | `Top` / `Middle` / `Baseline` / `Bottom` |
+| `wrap` | wrap to the rect width (`text_in`) or `max_width` (`text`) |
+| `max_width` | `text` only: the available width for `wrap` and `overflow` |
+| `overflow` | `Visible`, `Clip` to the available width, or `Ellipsis` (single line) |
+
+In C++ the options are a struct, so designated initializers must follow the
+order of the table (`{.size = 20, .bold = true}`, not
+`{.bold = true, .size = 20}`); a reusable style is just a
+`static const slikui::TextOpts`. Python takes them as keyword arguments, and
+`align` / `valign` / `overflow` also accept lowercase names (`"center"`).
+`ctx->text_metrics(opts)` gives ascent, descent and line height for laying
+out lines yourself.
+
+`env.text` lays out on every call, and the context caches the result, so
+drawing the same strings every frame is cheap. For interactive text, keep a
+`TextBlock` instead: it is laid out once, drawn with `env.draw(block, pos)`,
+and answers `hit_test(point)`, `caret_rect(index)` and
+`selection_rects(start, end)` (byte offsets in C++, str indices in Python).
+
+```cpp
+slikui::TextBlock block = ctx->text_layout(paragraph, /*wrap_width=*/240, {.font = "mono"});
+size_t caret = block.hit_test(click_pos - top_left);
+```
+
+Worked versions of all of this - a tag sized by `text_size`, a stat card,
+ellipsis vs wrapping, and drag-to-select on a `TextBlock` - are in the
+`text` example (`python -m slikui.examples.text --window`) and its C++
+twin `examples/07_text`; see [Python examples](examples.md#text).
+
 ## C++ example
 
 Define the widget, implement `measure`/`paint`/`on_event`, add it like any
@@ -140,8 +222,9 @@ Python state lives in ordinary instance attributes.
   `slikui.Widget` subclasses are the extension seam. To decorate a built-in,
   wrap it: delegate `measure`/`arrange` to the child and draw in
   `paint_over` (`LimitSlider` in `slikui.examples.controls`).
-- Custom widgets draw geometry, not text: compose `Label` widgets beside
-  them.
+- Draw text with `env.text` / `env.text_in` (see
+  [Drawing text](#drawing-text)); `Label` widgets beside a custom widget
+  still work for captions.
 - Keep the wrappers `add()` returns (`self.slider = self.add(slikui.Slider)`)
   and capture them in callbacks freely. They are views of widgets the tree
   owns: valid until the tree drops the widget (`App.close()`, or its
