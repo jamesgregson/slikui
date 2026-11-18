@@ -72,8 +72,8 @@ hover/press transitions and the `Anim` tween helper advance here.
 to a flat `DrawList` through `PaintEnv` (draw list + theme + font). Containers
 may provide `clip_rect()` to clip their subtree; hit-testing honors the same
 clip, so content clipped out of view can't be clicked. The finished list goes to the
-[render sink](backends.md); popups paint after the root, dialogs and toasts
-above those.
+[render sink](backends.md); popups paint after the root, then toasts, then
+dialogs on top.
 
 ## Layout in one paragraph
 

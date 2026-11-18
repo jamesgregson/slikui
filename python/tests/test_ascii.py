@@ -6,6 +6,7 @@ stdout), so the project uses none: write symbols in prose as ASCII ("->",
 the generated files (dist/slikui.hpp, the type stub, doc snippets).
 """
 
+import os
 import pathlib
 
 import pytest
@@ -18,13 +19,22 @@ BINARY = {".png", ".gif", ".jpg", ".jpeg", ".ppm", ".ttf", ".otf", ".so", ".dyli
           ".dll", ".pyd", ".pyc", ".a", ".o", ".obj", ".exe", ".whl", ".gz", ".zip"}
 
 
+def skip_dir(path):
+    name = path.name
+    return (name in SKIP_DIRS or name.endswith(".egg-info")
+            or name.startswith(".venv")
+            # any CMake build tree, whatever it is called (build-asan, ...)
+            or (path / "CMakeCache.txt").is_file())
+
+
 def text_files():
-    for path in sorted(ROOT.rglob("*")):
-        rel = path.relative_to(ROOT)
-        if any(part in SKIP_DIRS or part.endswith(".egg-info") for part in rel.parts):
-            continue
-        if path.is_file() and path.suffix.lower() not in BINARY:
-            yield path, rel
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        here = pathlib.Path(dirpath)
+        dirnames[:] = sorted(d for d in dirnames if not skip_dir(here / d))
+        for name in sorted(filenames):
+            path = here / name
+            if path.suffix.lower() not in BINARY:
+                yield path, path.relative_to(ROOT)
 
 
 def test_repository_is_ascii():

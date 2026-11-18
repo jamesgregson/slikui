@@ -37,7 +37,7 @@ methods are the entire contract.
 ```
 ctx.render()
   |- upload() for dirty atlases (font atlas, images)
-  |- build DrawList (root tree, then popups, then dialogs/toasts)
+  |- build DrawList (root tree, popups, toasts, then dialogs)
   `- sink.render(list, framebuffer_size)
 ```
 
