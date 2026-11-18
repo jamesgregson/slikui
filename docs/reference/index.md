@@ -84,4 +84,4 @@ Every widget class, grouped by reference page. All are exported from
 |-------|---------|
 | `Widget` | tree, protocol (`measure`/`arrange`/`paint`/`on_event`/`tick`), state flags |
 | `Container` | padding/gap/cross-axis base for layouts |
-| `PaintEnv` | draw list + theme + font handed to `paint` |
+| `PaintEnv` | draw list + theme + text (`text`, `text_in`, `draw`) handed to `paint` |

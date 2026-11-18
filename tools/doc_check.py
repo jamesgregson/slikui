@@ -46,7 +46,8 @@ CPP_EXTRAS = {
     "IRenderSink", "DrawList", "DrawCmd", "TexUpload", "PaintEnv", "Anim",
     "software", "opengl", "glfw", "sdl", "text",
     "theme_presets", "apply_preset", "use_theme", "find_system_font",
-    "shortcut_label",
+    "shortcut_label", "find_system_font_face", "SystemFont",
+    "TextOpts", "TextAlign", "TextVAlign", "TextOverflow", "TextMetrics", "TextBlock",
 }
 
 # Python-side modules referenced by name in prose (not part of __all__)

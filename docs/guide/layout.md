@@ -9,8 +9,10 @@ Layout is immediate-mode in spirit but retained in the tree. `Column` and
 Both containers stack children with `set_gap` and `set_padding`, distribute
 extra main-axis space to children that expand, and align cross-axis with
 `set_cross` (`CrossMode::Stretch`, `Start`, `Center`). `Spacer` soaks up
-remaining space - use it to push siblings to the far edge. `Divider` draws a
-rule.
+remaining space - use it to push siblings to the far edge. Any widget can
+do the same with `set_expand()` (Python: `expand=True`) - a `ScrollArea` or
+`Splitter` filling the rest of a window's column instead of keeping its size
+hint. `Divider` draws a rule.
 
 === "C++"
 

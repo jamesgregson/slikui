@@ -67,12 +67,15 @@ Children that report `expands_main()` (Spacer) split leftover main-axis space.
 
 ## Text pipeline
 
-`text::Font` owns the TTF bytes, an stb_truetype fontinfo, a 512x512 alpha8
-atlas and a glyph cache keyed by (codepoint, size). Glyphs rasterize on
-demand; the atlas is pushed to the sink when dirty. `layout(text, px,
-max_width)` produces positioned glyphs with word wrapping; `advance_upto`
-powers caret hit-testing. Layouts are cached per widget (`Label`, `ListView`,
-`Tabs`) and invalidated on text/size changes.
+`text::Font` is one face: the TTF bytes, an stb_truetype fontinfo, a glyph
+cache keyed by (glyph, 1/4-px size, synthesized style) and a growable atlas
+of 512x512 alpha8 pages, each pushed to the sink when dirty.
+`text::FontLibrary` (owned by `Context`) maps family names to faces,
+synthesizes missing bold/italic, and caches the layouts behind `env.text`.
+`layout(text, px, max_width, flags)` produces positioned glyphs with word
+wrapping, line/byte tables and underline/strikethrough bars; `advance_upto`
+powers caret hit-testing. Widget layouts are cached per widget (`Label`,
+`ListView`, `Tabs`) and invalidated on text/size changes.
 
 ## Extension points
 

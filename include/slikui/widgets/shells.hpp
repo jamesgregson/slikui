@@ -67,9 +67,11 @@ public:
     Vec2 position() const { return pos_; }
     Dialog& on_close(std::function<void()> f) { on_close_ = std::move(f); return *this; }
 
+    // Closes the dialog; on_close fires (once) for every way it closes -
+    // this, Escape, Context::close_dialog - after the closing event.
     void request_close() {
-        if (ctx) ctx->close_dialog(*this);
-        if (on_close_) on_close_();
+        if (ctx) ctx->close_dialog(*this);  // -> PopupClosed -> on_close
+        else if (on_close_) on_close_();     // never opened: fire directly
     }
 
     void attached(Context& c) override {
@@ -97,6 +99,9 @@ public:
 
     bool on_event(const Event& e) override {
         switch (e.type) {
+        case Event::Type::PopupClosed:
+            if (on_close_) on_close_();
+            return true;
         case Event::Type::MousePress:
             if (e.button == MouseLeft && enabled && children[0]->bounds.contains(e.pos) &&
                 !children[0]->children[2]->bounds.contains(e.pos)) {
@@ -387,6 +392,8 @@ public:
 
     const char* widget_type() const override { return "LogView"; }
 
+    void theme_changed() override { lays_valid_ = false; } // scale/font may have changed
+
 private:
     struct Line {
         std::string text;
@@ -581,6 +588,8 @@ public:
     }
 
     const char* widget_type() const override { return "Toast"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
 
     bool stretch_cross() const override { return false; }
 

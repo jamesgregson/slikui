@@ -57,7 +57,7 @@ ui.tick(0.0, 1 / 60)                               # layout + animation
 frame = ui.render()                                # zero-copy (H, W) uint32 ndarray
 ```
 
-Eight examples ship in the wheel ([gallery](https://jamesgregson.github.io/slikui/guide/examples/)):
+Nine examples ship in the wheel ([gallery](https://jamesgregson.github.io/slikui/guide/examples/)):
 
 ```sh
 pip install "slikui-python[demo]"                  # + glfw/PyOpenGL for live windows
@@ -99,7 +99,7 @@ cmake --build build -j
 ctest --test-dir build          # golden-image pixel checks included
 ```
 
-Six examples (`01_hello` ... `05_showcase`) and the Python twins -
+The C++ examples (`01_hello` ... `07_text`) and the Python twins -
 [Development](docs/development.md) has the full tour, plus how to regenerate
 the docs images, amalgamate the header, and cut a release.
 

@@ -107,9 +107,8 @@ def build(app):
     shells_log.log(slikui.LogView.Level.Info, "loaded scene.dragon (24 ms)")
     shells_log.log(slikui.LogView.Level.Warning, "missing texture: bark_d")
     shells_log.log(slikui.LogView.Level.Error, "shader compile failed")
-    # Note: no modal dialog / toast here - they sit on the popup stack and
-    # would sit under every smoke click for their lifetime (showcase covers
-    # dialogs and toasts properly).
+    # Note: no modal dialog here - it would trap every smoke click for its
+    # lifetime (showcase covers dialogs and toasts properly).
 
     # accordion (Expander groups)
     acc = root.add(slikui.Accordion, gap=4)

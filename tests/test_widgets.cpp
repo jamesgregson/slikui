@@ -641,3 +641,283 @@ TEST(text_block_tight_height) {
     auto two = f.ctx.font().layout("H\nx", px);
     CHECK_NEAR(two.size.h - lay.size.h, lay.line_height, 0.5f);
 }
+
+// ---------------------------------------------------------------------------
+// Widget::remove / clear_children
+// ---------------------------------------------------------------------------
+namespace {
+// Counts live instances so tests can see exactly when destruction happens.
+struct Tracked : slikui::Widget {
+    static inline int alive = 0;
+    Tracked() { ++alive; }
+    ~Tracked() override { --alive; }
+    slikui::Size measure(const slikui::Constraints& c) override { return c.clamp({40, 20}); }
+    bool focusable() const override { return true; }
+    bool on_event(const slikui::Event& e) override {
+        if (e.type == slikui::Event::Type::FocusLost) ++focus_lost;
+        return false;
+    }
+    int focus_lost = 0;
+};
+// Removes a sibling from inside tick().
+struct SiblingKiller : slikui::Widget {
+    slikui::Widget* victim = nullptr;
+    void tick(slikui::Time) override {
+        if (victim && parent) parent->remove(*victim);
+        victim = nullptr;
+    }
+};
+} // namespace
+
+TEST(remove_child_outside_a_pass_destroys_now) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& a = root.add<Tracked>();
+    root.add<slikui::Label>("keep");
+    f.frame();
+    CHECK(Tracked::alive == 1);
+    CHECK(root.remove(a));
+    CHECK(Tracked::alive == 0);
+    CHECK(root.children.size() == 1);
+    slikui::Label stranger("not a child");
+    CHECK(!root.remove(stranger));
+    f.frame();
+}
+
+TEST(remove_self_from_click_handler) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& b = root.add<slikui::Button>("delete me");
+    int clicks = 0;
+    b.on_click([&] {
+        ++clicks;
+        root.remove(b); // the handler's own widget: destroyed after handle()
+    });
+    f.frame();
+    slikui::Vec2 c = b.bounds.center();
+    f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, c.x, c.y));
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, c.x, c.y));
+    CHECK(clicks == 1);
+    CHECK(root.children.empty());
+    f.frame(); // nothing dangles (ASan)
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, c.x, c.y));
+}
+
+TEST(remove_focused_and_hovered_subtree) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& box = root.add<slikui::Column>();
+    auto& t = box.add<Tracked>();
+    f.frame();
+    slikui::Vec2 c = t.bounds.center();
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, c.x, c.y));
+    f.ctx.set_focus(&t);
+    CHECK(f.ctx.focused() == &t);
+    CHECK(f.ctx.hovered() == &t);
+    root.remove(box); // grandparent of the focused widget (FocusLost first)
+    CHECK(Tracked::alive == 0);
+    CHECK(f.ctx.focused() == nullptr);
+    CHECK(f.ctx.hovered() == nullptr);
+    f.frame();
+    f.ctx.handle(f.key(slikui::Key::A));
+}
+
+TEST(remove_popup_anchor_keeps_popup) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& anchor = root.add<slikui::Button>("anchor");
+    f.frame();
+    auto& pop = f.ctx.push_popup(std::make_unique<slikui::Label>("popup"), anchor,
+                                 slikui::PopupDir::Below);
+    f.frame();
+    slikui::Rect before = pop.bounds;
+    root.remove(anchor);
+    f.frame(); // layout_popup must not read the destroyed anchor (ASan)
+    CHECK(f.ctx.popup_count() == 1);
+    CHECK(pop.bounds.x == before.x && pop.bounds.y == before.y);
+}
+
+TEST(remove_sibling_during_tick) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& killer = root.add<SiblingKiller>();
+    auto& victim = root.add<Tracked>();
+    root.add<slikui::Label>("after");
+    killer.victim = &victim;
+    f.frame(); // tick removes `victim` mid-tick_tree; freed after the pass
+    CHECK(Tracked::alive == 0);
+    CHECK(root.children.size() == 2);
+    f.frame();
+}
+
+TEST(clear_children_and_scrollarea_forwarding) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& scroll = root.add<slikui::ScrollArea>();
+    for (int i = 0; i < 5; ++i) scroll.add<Tracked>();
+    f.frame();
+    CHECK(Tracked::alive == 5);
+    slikui::Widget& as_widget = scroll;
+    as_widget.clear_children(); // virtual: empties the content, keeps the column
+    CHECK(Tracked::alive == 0);
+    CHECK(scroll.children.size() == 1);
+    CHECK(scroll.content().children.empty());
+    scroll.add<Tracked>();
+    f.frame();
+    CHECK(Tracked::alive == 1);
+    root.clear_children();
+    CHECK(Tracked::alive == 0);
+    f.frame();
+}
+
+// ---------------------------------------------------------------------------
+// set_expand / ScrollArea scroll API
+// ---------------------------------------------------------------------------
+TEST(set_expand_fills_column) {
+    Fixture f; // 320 x 240
+    auto& root = f.ctx.set_root<slikui::Column>();
+    root.add<slikui::Label>("header");
+    auto& scroll = root.add<slikui::ScrollArea>();
+    scroll.set_expand();
+    root.add<slikui::Label>("footer");
+    f.frame();
+    // Without expand it keeps its 150 px hint; with it, the rest of the frame.
+    CHECK(scroll.bounds.h > 150.f);
+    CHECK_NEAR(root.children[2]->bounds.bottom(), 240.f, 0.5f);
+}
+
+TEST(scrollarea_scroll_api) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& scroll = root.add<slikui::ScrollArea>();
+    std::vector<slikui::Label*> rows;
+    for (int i = 0; i < 40; ++i) rows.push_back(&scroll.add<slikui::Label>("row"));
+    f.frame();
+    CHECK(scroll.scroll_y() == 0.f);
+    CHECK(scroll.max_scroll() > 0.f);
+
+    scroll.scroll_to_bottom();
+    f.frame();
+    CHECK_NEAR(scroll.scroll_y(), scroll.max_scroll(), 0.01f);
+
+    scroll.set_scroll_y(-50.f); // clamped
+    f.frame();
+    CHECK(scroll.scroll_y() == 0.f);
+
+    // Reveal a row below the fold: it ends up inside the viewport.
+    scroll.scroll_to(*rows[30]);
+    f.frame();
+    CHECK(rows[30]->bounds.y >= scroll.bounds.y);
+    CHECK(rows[30]->bounds.bottom() <= scroll.bounds.bottom());
+}
+
+TEST(treeview_row_rect) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& tree = root.add<slikui::TreeView>();
+    using Row = slikui::TreeView::Row;
+    tree.set_rows({Row{"a", 0, true}, Row{"a1", 1}, Row{"b", 0}});
+    f.frame();
+    slikui::Rect r = tree.row_rect(2);
+    CHECK_NEAR(r.y, tree.bounds.y + 2 * r.h, 0.01f);
+    tree.set_expanded(0, false);
+    CHECK(tree.row_rect(1).empty()); // hidden under a collapsed parent
+    CHECK_NEAR(tree.row_rect(2).y, tree.bounds.y + r.h, 0.01f);
+    CHECK(tree.row_rect(99).empty());
+}
+
+// ---------------------------------------------------------------------------
+// PopupClosed
+// ---------------------------------------------------------------------------
+namespace {
+struct PopupProbe : slikui::Widget {
+    int* closed;
+    std::function<void()> on_closed;
+    explicit PopupProbe(int* counter) : closed(counter) {}
+    slikui::Size measure(const slikui::Constraints& c) override { return c.clamp({60, 30}); }
+    bool on_event(const slikui::Event& e) override {
+        if (e.type != slikui::Event::Type::PopupClosed) return false;
+        ++*closed;
+        if (on_closed) on_closed();
+        return true;
+    }
+};
+} // namespace
+
+TEST(popup_closed_on_every_path_once) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& anchor = root.add<slikui::Button>("anchor");
+    f.frame();
+    int closed = 0;
+    auto open = [&] {
+        f.ctx.push_popup(std::make_unique<PopupProbe>(&closed), anchor, slikui::PopupDir::Below);
+        f.frame();
+    };
+    using T = slikui::Event::Type;
+
+    open(); // click outside every popup
+    f.ctx.handle(f.mouse(T::MousePress, 300, 230));
+    CHECK(closed == 1);
+    CHECK(f.ctx.popup_count() == 0);
+
+    open(); // Escape
+    f.ctx.handle(f.key(slikui::Key::Escape));
+    CHECK(closed == 2);
+
+    open(); // app focus lost
+    slikui::Event lost{};
+    lost.type = T::FocusLost;
+    f.ctx.handle(lost);
+    CHECK(closed == 3);
+
+    open(); // programmatic, outside any pass
+    f.ctx.close_popups();
+    CHECK(closed == 4);
+    f.frame(); // owned probe destroyed after its notification (ASan)
+    f.ctx.close_popups(); // nothing open: no notification
+    CHECK(closed == 4);
+}
+
+TEST(popup_closed_handler_may_reopen) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& anchor = root.add<slikui::Button>("anchor");
+    f.frame();
+    int closed = 0;
+    auto& first = static_cast<PopupProbe&>(f.ctx.push_popup(
+        std::make_unique<PopupProbe>(&closed), anchor, slikui::PopupDir::Below));
+    first.on_closed = [&] { // runs after the Escape pass, stack unlocked
+        f.ctx.push_popup(std::make_unique<PopupProbe>(&closed), anchor, slikui::PopupDir::Above);
+    };
+    f.frame();
+    f.ctx.handle(f.key(slikui::Key::Escape));
+    CHECK(closed == 1);
+    CHECK(f.ctx.popup_count() == 1); // the replacement is open
+    f.frame();
+    f.ctx.handle(f.key(slikui::Key::Escape));
+    CHECK(closed == 2);
+    CHECK(f.ctx.popup_count() == 0);
+    f.frame();
+}
+
+TEST(popup_closed_skipped_when_reopened_same_pass) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& anchor = root.add<slikui::Button>("anchor");
+    int closed = 0;
+    PopupProbe borrowed(&closed);
+    // Close + re-push inside one handle() pass - what Menu::open_for does.
+    f.ctx.add_shortcut(slikui::Key::R, slikui::ModCtrl, [&] {
+        f.ctx.close_popups();
+        f.ctx.push_popup(borrowed, anchor, slikui::PopupDir::Below);
+    });
+    f.frame();
+    f.ctx.push_popup(borrowed, anchor, slikui::PopupDir::Below);
+    f.frame();
+    f.ctx.handle(f.key(slikui::Key::R, slikui::ModCtrl));
+    CHECK(closed == 0); // it never really closed
+    CHECK(f.ctx.popup_count() == 1);
+    f.ctx.close_popups();
+    CHECK(closed == 1);
+}

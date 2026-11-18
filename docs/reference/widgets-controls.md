@@ -147,7 +147,9 @@ The built-in caption row is demonstrated in the
 ## Label
 
 Static text. `set_font_size` overrides the theme's base size, `set_color`
-overrides the theme text color, `set_wrap_width` word-wraps.
+overrides the theme text color, `set_wrap_width` word-wraps. `set_bold`,
+`set_italic`, `set_underline`, `set_strike` and `set_font(family)` style it
+([Text & fonts](../guide/text-fonts.md#font-families-and-styles)).
 
 === "C++"
 
@@ -175,6 +177,8 @@ overrides the theme text color, `set_wrap_width` word-wraps.
 | `set_font_size` | `(float px)` |
 | `set_color` | `(Color)` |
 | `set_wrap_width` | `(float px)` |
+| `set_bold` / `set_italic` / `set_underline` / `set_strike` | `(bool on = true)` |
+| `set_font` | `(std::string family)` - `"body"`, `"heading"`, `"mono"` or a registered name |
 
 ## Widget base class
 

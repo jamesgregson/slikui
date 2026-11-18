@@ -27,6 +27,7 @@
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
+#include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 
 #include <slikui/slikui.hpp>
@@ -42,6 +43,7 @@
 #include <type_traits>
 #include <string>
 #include <utility>
+#include <variant>
 
 namespace nb = nanobind;
 using namespace slikui;
@@ -60,6 +62,90 @@ template <typename W, typename... Bs, typename V>
 void def_setter(nb::class_<W, Bs...>& cls, const char* name, W& (W::*f)(V)) {
     cls.def(name, [f](W& w, V v) -> W& { return (w.*f)(std::move(v)); },
             nb::rv_policy::reference, nb::arg("value"));
+}
+
+// ---------------------------------------------------------------------- //
+// Text options: TextOpts as typed keyword-only arguments. align / valign /
+// overflow take the enum or its lowercase name ("center", "ellipsis", ...).
+// ---------------------------------------------------------------------- //
+
+using AlignArg = std::variant<TextAlign, std::string>;
+using VAlignArg = std::variant<TextVAlign, std::string>;
+using OverflowArg = std::variant<TextOverflow, std::string>;
+
+template <class E, size_t N>
+E parse_enum_arg(const std::variant<E, std::string>& v, const char* what,
+                 const std::pair<const char*, E> (&names)[N]) {
+    if (const E* e = std::get_if<E>(&v)) return *e;
+    const std::string& s = std::get<std::string>(v);
+    std::string valid;
+    for (const auto& [name, value] : names) {
+        if (s == name) return value;
+        valid += valid.empty() ? "" : ", ";
+        valid += std::string("'") + name + "'";
+    }
+    throw nb::value_error((std::string(what) + " must be one of " + valid + " (got '" + s + "')").c_str());
+}
+
+TextOpts make_text_opts(const std::string& font, float size, const std::optional<Color>& color,
+                        bool bold, bool italic, bool underline, bool strike,
+                        const AlignArg& align, const VAlignArg& valign, bool wrap, float max_width,
+                        const OverflowArg& overflow) {
+    static const std::pair<const char*, TextAlign> aligns[] = {
+        {"left", TextAlign::Left}, {"center", TextAlign::Center}, {"right", TextAlign::Right}};
+    static const std::pair<const char*, TextVAlign> valigns[] = {
+        {"top", TextVAlign::Top}, {"middle", TextVAlign::Middle},
+        {"baseline", TextVAlign::Baseline}, {"bottom", TextVAlign::Bottom}};
+    static const std::pair<const char*, TextOverflow> overflows[] = {
+        {"visible", TextOverflow::Visible}, {"clip", TextOverflow::Clip},
+        {"ellipsis", TextOverflow::Ellipsis}};
+    TextOpts o;
+    o.font = font; // string_view: `font` outlives the call using these opts
+    o.size = size;
+    if (color) o.color = *color;
+    o.bold = bold;
+    o.italic = italic;
+    o.underline = underline;
+    o.strike = strike;
+    o.align = parse_enum_arg(align, "align", aligns);
+    o.valign = parse_enum_arg(valign, "valign", valigns);
+    o.wrap = wrap;
+    o.max_width = max_width;
+    o.overflow = parse_enum_arg(overflow, "overflow", overflows);
+    return o;
+}
+
+#define SLIKUI_TEXT_PARAMS                                                              \
+    const std::string &font, float size, std::optional<Color> color, bool bold,         \
+        bool italic, bool underline, bool strike, AlignArg align, VAlignArg valign,     \
+        bool wrap, float max_width, OverflowArg overflow
+#define SLIKUI_TEXT_OPTS                                                                \
+    make_text_opts(font, size, color, bold, italic, underline, strike, align, valign,   \
+                   wrap, max_width, overflow)
+#define SLIKUI_TEXT_ARGS                                                                \
+    nb::kw_only(), nb::arg("font") = "", nb::arg("size") = 0.f,                         \
+        nb::arg("color").none() = nb::none(), nb::arg("bold") = false,                  \
+        nb::arg("italic") = false, nb::arg("underline") = false,                        \
+        nb::arg("strike") = false, nb::arg("align") = TextAlign::Left,                  \
+        nb::arg("valign") = TextVAlign::Top, nb::arg("wrap") = false,                   \
+        nb::arg("max_width") = 0.f, nb::arg("overflow") = TextOverflow::Visible
+
+// TextBlock speaks UTF-8 byte offsets; Python speaks str indices (codepoints).
+size_t byte_to_char(const std::string& s, size_t byte) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.size() && i < byte; ++i)
+        if ((std::uint8_t(s[i]) & 0xC0) != 0x80) ++n;
+    return n;
+}
+size_t char_to_byte(const std::string& s, size_t index) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if ((std::uint8_t(s[i]) & 0xC0) != 0x80) {
+            if (n == index) return i;
+            ++n;
+        }
+    }
+    return s.size();
 }
 
 // Vec2Edit/Vec3Edit/Vec4Edit share one API; bind it once per instantiation.
@@ -377,6 +463,8 @@ struct PyWidget : slikui::Widget {
 
     void tick(Time t) override { NB_OVERRIDE(tick, t); }
 
+    void theme_changed() override { NB_OVERRIDE(theme_changed); }
+
     bool stretch_cross() const override { NB_OVERRIDE(stretch_cross); }
 
     bool expands_main() const override { NB_OVERRIDE(expands_main); }
@@ -460,6 +548,9 @@ NB_MODULE(_slikui, m) {
         .def_static("from_hex",
                     [](std::uint32_t rgb, std::uint8_t alpha) { return Color::from_hex(rgb, alpha); },
                     nb::arg("rgb"), nb::arg("alpha") = 255)
+        .def_static("from_float", &Color::from_float, nb::arg("r"), nb::arg("g"),
+                    nb::arg("b"), nb::arg("a") = 1.f,
+                    "Channels as 0..1 floats (Color() itself takes 0..255 ints).")
         .def("with_alpha", &Color::with_alpha, nb::arg("alpha"))
         .def("faded", &Color::faded, nb::arg("f"))
         .def("lerp", &Color::lerp, nb::arg("other"), nb::arg("t"))
@@ -567,6 +658,9 @@ NB_MODULE(_slikui, m) {
 
     nb::class_<Constraints>(m, "Constraints")
         .def(nb::init<>())
+        .def("__init__",
+             [](Constraints* c, Vec2 min, Vec2 max) { new (c) Constraints{min, max}; },
+             nb::arg("min"), nb::arg("max"))
         .def_rw("min", &Constraints::min)
         .def_rw("max", &Constraints::max)
         .def_static("loose",
@@ -652,7 +746,13 @@ NB_MODULE(_slikui, m) {
         .value("Num6", Key::Num6)
         .value("Num7", Key::Num7)
         .value("Num8", Key::Num8)
-        .value("Num9", Key::Num9);
+        .value("Num9", Key::Num9)
+        .value("Equal", Key::Equal)
+        .value("LeftBracket", Key::LeftBracket)
+        .value("RightBracket", Key::RightBracket)
+        .value("Backslash", Key::Backslash)
+        .value("Semicolon", Key::Semicolon)
+        .value("Grave", Key::Grave);
 
     nb::enum_<Mod>(m, "Mod", nb::is_arithmetic())
         .value("ModNone", ModNone)
@@ -684,7 +784,8 @@ NB_MODULE(_slikui, m) {
         .value("DoubleClick", Event::Type::DoubleClick)
         .value("MouseEnter", Event::Type::MouseEnter)
         .value("MouseLeave", Event::Type::MouseLeave)
-        .value("FocusGained", Event::Type::FocusGained);
+        .value("FocusGained", Event::Type::FocusGained)
+        .value("PopupClosed", Event::Type::PopupClosed);
 
     nb::class_<Event>(m, "Event")
         .def("__init__",
@@ -848,10 +949,99 @@ NB_MODULE(_slikui, m) {
         .def("__iter__",
              [](const DrawList& l) { return nb::cast(l.commands()).attr("__iter__")(); });
 
+    // ------------------------------------------------------------------ //
+    // Text: styles, metrics, kept blocks
+    // ------------------------------------------------------------------ //
+
+    nb::enum_<text::FontStyle>(m, "FontStyle")
+        .value("Regular", text::FontStyle::Regular)
+        .value("Bold", text::FontStyle::Bold)
+        .value("Italic", text::FontStyle::Italic)
+        .value("BoldItalic", text::FontStyle::BoldItalic);
+
+    nb::enum_<TextAlign>(m, "TextAlign")
+        .value("Left", TextAlign::Left)
+        .value("Center", TextAlign::Center)
+        .value("Right", TextAlign::Right);
+
+    nb::enum_<TextVAlign>(m, "TextVAlign")
+        .value("Top", TextVAlign::Top)
+        .value("Middle", TextVAlign::Middle)
+        .value("Baseline", TextVAlign::Baseline)
+        .value("Bottom", TextVAlign::Bottom);
+
+    nb::enum_<TextOverflow>(m, "TextOverflow")
+        .value("Visible", TextOverflow::Visible)
+        .value("Clip", TextOverflow::Clip)
+        .value("Ellipsis", TextOverflow::Ellipsis);
+
+    nb::class_<TextMetrics>(m, "TextMetrics")
+        .def_ro("ascent", &TextMetrics::ascent)
+        .def_ro("descent", &TextMetrics::descent)
+        .def_ro("line_height", &TextMetrics::line_height)
+        .def("__repr__", [](const TextMetrics& t) {
+            return "TextMetrics(ascent=" + fmt_float(t.ascent) + ", descent=" +
+                   fmt_float(t.descent) + ", line_height=" + fmt_float(t.line_height) + ")";
+        });
+
+    // TextBlock - a kept layout (Context.text_layout). Positions are logical
+    // px relative to the block's top-left; indices are str indices.
+    nb::class_<TextBlock>(m, "TextBlock")
+        .def_prop_ro("size", &TextBlock::size)
+        .def_prop_ro("line_count", &TextBlock::line_count)
+        .def_prop_ro("line_height", &TextBlock::line_height)
+        .def_prop_ro("text", [](const TextBlock& b) { return b.text(); })
+        .def_prop_ro("empty", &TextBlock::empty)
+        .def_prop_ro("align", &TextBlock::align)
+        .def_prop_ro("color", &TextBlock::color)
+        .def("hit_test",
+             [](const TextBlock& b, Vec2 pos) { return byte_to_char(b.text(), b.hit_test(pos)); },
+             nb::arg("pos"), "Index of the caret position nearest `pos` (block-local).")
+        .def("caret_rect",
+             [](const TextBlock& b, size_t index) {
+                 return b.caret_rect(char_to_byte(b.text(), index));
+             },
+             nb::arg("index"), "Caret rectangle before str index `index` (block-local).")
+        .def("selection_rects",
+             [](const TextBlock& b, size_t start, size_t end) {
+                 return b.selection_rects(char_to_byte(b.text(), start),
+                                          char_to_byte(b.text(), end));
+             },
+             nb::arg("start"), nb::arg("end"),
+             "Highlight rectangles for str indices [start, end), one per line.");
+
+    nb::class_<SystemFont>(m, "SystemFont")
+        .def_ro("path", &SystemFont::path)
+        .def_ro("face", &SystemFont::face)
+        .def("__bool__", [](const SystemFont& f) { return bool(f); })
+        .def("__repr__", [](const SystemFont& f) {
+            return "SystemFont(path='" + f.path + "', face=" + std::to_string(f.face) + ")";
+        });
+
     // PaintEnv - the environment a paint() override receives: the frame's
-    // draw list and the active theme. A view over context state, valid only
-    // during the call (no font in v1: text needs Font/TextLayout bindings).
+    // draw list, the active theme and text drawing. A view over context
+    // state, valid only during the call.
     nb::class_<PaintEnv>(m, "PaintEnv")
+        .def("text",
+             [](PaintEnv& e, Vec2 pos, const std::string& s, SLIKUI_TEXT_PARAMS) {
+                 return e.text(pos, s, SLIKUI_TEXT_OPTS);
+             },
+             nb::arg("pos"), nb::arg("text"), SLIKUI_TEXT_ARGS,
+             "Draw `text` anchored at `pos` (top-left by default; align/valign\n"
+             "move the anchor). Returns the Rect the text occupies.")
+        .def("text_in",
+             [](PaintEnv& e, Rect box, const std::string& s, SLIKUI_TEXT_PARAMS) {
+                 return e.text_in(box, s, SLIKUI_TEXT_OPTS);
+             },
+             nb::arg("rect"), nb::arg("text"), SLIKUI_TEXT_ARGS,
+             "Draw `text` inside `rect`, aligned per align/valign; wrap=True wraps\n"
+             "to the rect width. Returns the Rect the text occupies.")
+        .def("draw",
+             [](PaintEnv& e, const TextBlock& b, Vec2 pos, std::optional<Color> color) {
+                 e.draw(b, pos, color.value_or(Color::transparent()));
+             },
+             nb::arg("block"), nb::arg("pos"), nb::arg("color").none() = nb::none(),
+             "Draw a kept TextBlock with its top-left at `pos`.")
         .def_prop_ro("list",
                      [](PaintEnv& e) -> DrawList& { return e.list; },
                      nb::rv_policy::reference_internal)
@@ -993,6 +1183,40 @@ NB_MODULE(_slikui, m) {
                                            slikui::text::default_font_size());
              },
              "Load the bundled DejaVu Sans subset (always available).")
+        .def("add_font",
+             [](Context& c, const std::string& family, const std::string& path,
+                text::FontStyle style, int face) { return c.add_font(family, path, style, face); },
+             nb::arg("family"), nb::arg("path"), nb::arg("style") = text::FontStyle::Regular,
+             nb::arg("face") = 0,
+             "Register a font face under a family name (\"body\", \"heading\",\n"
+             "\"mono\" or your own). face picks a .ttc face; -1 matches `style`.")
+        .def("add_font_memory",
+             [](Context& c, const std::string& family, nb::bytes data, text::FontStyle style,
+                int face) {
+                 return c.add_font_memory(family,
+                                          reinterpret_cast<const std::uint8_t*>(data.c_str()),
+                                          data.size(), style, face);
+             },
+             nb::arg("family"), nb::arg("data"), nb::arg("style") = text::FontStyle::Regular,
+             nb::arg("face") = 0)
+        .def("has_font", [](const Context& c, const std::string& family) { return c.has_font(family); },
+             nb::arg("family"))
+        .def("text_size",
+             [](Context& c, const std::string& s, SLIKUI_TEXT_PARAMS) {
+                 return c.text_size(s, SLIKUI_TEXT_OPTS);
+             },
+             nb::arg("text"), SLIKUI_TEXT_ARGS,
+             "Logical size of `text` drawn with these options (for measure()).")
+        .def("text_metrics",
+             [](Context& c, SLIKUI_TEXT_PARAMS) { return c.text_metrics(SLIKUI_TEXT_OPTS); },
+             SLIKUI_TEXT_ARGS, "Ascent, descent and line height for a style.")
+        .def("text_layout",
+             [](Context& c, const std::string& s, float wrap_width, SLIKUI_TEXT_PARAMS) {
+                 return c.text_layout(s, wrap_width, SLIKUI_TEXT_OPTS);
+             },
+             nb::arg("text"), nb::arg("wrap_width") = 0.f, SLIKUI_TEXT_ARGS,
+             "A kept TextBlock: draw with env.draw(); hit_test / caret_rect /\n"
+             "selection_rects for interactive widgets.")
         .def("set_root_column", [](Context& c) -> Column& { return c.set_root<Column>(); },
              nb::rv_policy::reference_internal)
         .def("set_root_row", [](Context& c) -> Row& { return c.set_root<Row>(); },
@@ -1093,6 +1317,12 @@ NB_MODULE(_slikui, m) {
              "Host routing: should key events go to the UI? (a widget has focus, "
              "or a modal dialog is open)")
         .def_prop_ro("has_popups", &Context::has_popups)
+        .def_prop_ro("toast_count", &Context::toast_count)
+        .def("toast",
+             [](Context& c, std::size_t i) -> Widget* {
+                 return i < c.toast_count() ? c.toast(i) : nullptr;
+             },
+             nb::arg("index"), nb::rv_policy::reference)
         .def_prop_ro("popup_count", &Context::popup_count)
         .def("popup",
              [](Context& c, std::size_t i) -> Widget* {
@@ -1183,8 +1413,11 @@ NB_MODULE(_slikui, m) {
                  if (auto* pw = dynamic_cast<PyWidget*>(&w)) pw->base_attached(c);
              },
              nb::arg("context"),
-             "Override: called once when the widget joins a Context (on the "
-             "first tick after it was added).")
+             "Override: called once when the widget joins a Context (when it "
+             "is added to an attached parent, else on the next tick).")
+        .def("theme_changed", [](Widget&) {},
+             "Override: called on the tick after Context.theme changed (UI "
+             "scale, preset, palette or metrics); drop theme-derived caches.")
         .def("on_event",
              [](Widget& w, const Event& e) { return w.on_event(e); },
              nb::arg("event"),
@@ -1204,6 +1437,13 @@ NB_MODULE(_slikui, m) {
              "Use this clock, not wall time, for animation.")
         .def("stretch_cross", [](Widget& w) { return w.stretch_cross(); })
         .def("expands_main", [](Widget& w) { return w.expands_main(); })
+        .def("set_expand",
+             [](Widget& w, bool on) -> Widget& { return w.set_expand(on); },
+             nb::arg("value") = true, nb::rv_policy::reference,
+             "Share leftover main-axis space in a Column/Row (like Spacer) - "
+             "e.g. a ScrollArea filling the rest of a Column. Builder kwarg: "
+             "expand=True.")
+        .def_prop_ro("expand", [](const Widget& w) { return w.expand(); })
         .def("mouse_transparent", [](Widget& w) { return w.mouse_transparent(); },
              "True for pure layout that paints nothing: Context.wants_mouse lets "
              "the pointer through it to the host's scene. Override to return True "
@@ -1251,6 +1491,15 @@ NB_MODULE(_slikui, m) {
         .def("find",
              [](Widget& w, const std::string& widget_id) -> Widget* { return w.find(widget_id); },
              nb::arg("id"), nb::rv_policy::reference)
+        .def("remove", [](Widget& w, Widget& child) { return w.remove(child); },
+             nb::arg("child"),
+             "Detach and destroy a direct child and its subtree (ScrollArea: a "
+             "child of its content). False if `child` is not a direct child. "
+             "Safe from event handlers and callbacks. Afterwards, handles to "
+             "removed built-in widgets are invalid - drop them; a removed custom "
+             "widget object survives (empty) and may be added again.")
+        .def("clear_children", [](Widget& w) { w.clear_children(); },
+             "remove() every child.")
         .def("set_context_menu",
              [](Widget& w, Menu& m) -> Widget& { return w.set_context_menu(&m); },
              nb::arg("menu"), nb::rv_policy::reference,
@@ -1282,6 +1531,14 @@ NB_MODULE(_slikui, m) {
         .def("set_padding",
              [](Container& c, float all) -> Container& { return c.set_padding(all); },
              nb::arg("all"), nb::rv_policy::reference)
+        .def("set_padding",
+             [](Container& c, float left, float top, float right, float bottom) -> Container& {
+                 return c.set_padding(Padding{left, top, right, bottom});
+             },
+             nb::arg("left"), nb::arg("top"), nb::arg("right"), nb::arg("bottom"),
+             nb::rv_policy::reference,
+             "Per-side padding - e.g. right=0 so a ScrollArea's scrollbar sits "
+             "at a pane's edge.")
         .def("set_gap",
              [](Container& c, float g) -> Container& { return c.set_gap(g); },
              nb::arg("value"), nb::rv_policy::reference)
@@ -1322,7 +1579,19 @@ NB_MODULE(_slikui, m) {
     def_setter(label, "set_font_size", &Label::set_font_size);
     def_setter(label, "set_color", &Label::set_color);
     def_setter(label, "set_wrap_width", &Label::set_wrap_width);
+    def_setter(label, "set_font", &Label::set_font);
+    for (auto [name, fn] : {std::pair{"set_bold", &Label::set_bold},
+                            std::pair{"set_italic", &Label::set_italic},
+                            std::pair{"set_underline", &Label::set_underline},
+                            std::pair{"set_strike", &Label::set_strike}})
+        label.def(name, [fn](Label& l, bool on) -> Label& { return (l.*fn)(on); },
+                  nb::arg("value") = true, nb::rv_policy::reference);
     label.def_prop_ro("text", [](Label& l) { return l.text(); });
+    label.def_prop_ro("bold", &Label::bold);
+    label.def_prop_ro("italic", &Label::italic);
+    label.def_prop_ro("underline", &Label::underline);
+    label.def_prop_ro("strike", &Label::strike);
+    label.def_prop_ro("font", [](Label& l) { return l.font(); });
 
     auto button = nb::class_<Button, Widget>(m, "Button");
     def_setter(button, "set_text", &Button::set_text);
@@ -1502,6 +1771,10 @@ NB_MODULE(_slikui, m) {
              nb::arg("w"), nb::rv_policy::reference)
         .def("on_open", [](Menu& m, std::function<void()> f) -> Menu& { return m.on_open(std::move(f)); },
              nb::arg("f"), nb::rv_policy::reference)
+        .def("on_close", [](Menu& m, std::function<void()> f) -> Menu& { return m.on_close(std::move(f)); },
+             nb::arg("f"), nb::rv_policy::reference,
+             "Fired when the menu leaves the screen for any reason, after the "
+             "closing event (reopening from here is safe).")
         .def("open_for",
              [](Menu& m, Widget& anchor, PopupDir dir) {
                  m.open_for(anchor, dir);
@@ -1596,6 +1869,9 @@ NB_MODULE(_slikui, m) {
         .def_rw("depth", &TreeView::Row::depth)
         .def_rw("expandable", &TreeView::Row::expandable);
     def_setter(treeview, "on_select", &TreeView::on_select);
+    treeview.def("row_rect", &TreeView::row_rect, nb::arg("index"),
+                 "Absolute rect of row `index` (current layout); empty when hidden "
+                 "under a collapsed parent or out of range.");
     treeview.def(nb::init<std::string>(), nb::arg("id") = "")
         .def("set_rows",
              [](TreeView& t, std::vector<TreeView::Row> rows) -> TreeView& {
@@ -1714,12 +1990,29 @@ NB_MODULE(_slikui, m) {
     scroll.def_prop_ro("content",
                        [](ScrollArea& s) -> Column& { return s.content(); },
                        nb::rv_policy::reference);
+    scroll.def("set_content_insets", &ScrollArea::set_content_insets, nb::arg("left"),
+               nb::arg("right"), nb::rv_policy::reference,
+               "Viewport edge -> content spacing (default 2, 2); the scrollbar "
+               "gutter is added on the right while scrolling.")
+        .def_prop_ro("scroll_y", &ScrollArea::scroll_y)
+        .def_prop_ro("max_scroll", &ScrollArea::max_scroll)
+        .def("set_scroll_y", &ScrollArea::set_scroll_y, nb::arg("y"), nb::rv_policy::reference,
+             "Content px above the viewport; applied (and clamped) at the next tick.")
+        .def("scroll_to_top", &ScrollArea::scroll_to_top, nb::rv_policy::reference)
+        .def("scroll_to_bottom", &ScrollArea::scroll_to_bottom, nb::rv_policy::reference)
+        .def("scroll_to", nb::overload_cast<const Rect&>(&ScrollArea::scroll_to), nb::arg("rect"),
+             "Least scroll that brings `rect` (absolute, current layout) into view, "
+             "e.g. tree.row_rect(i). Returns how far the content moves up.")
+        .def("scroll_to", nb::overload_cast<const Widget&>(&ScrollArea::scroll_to),
+             nb::arg("widget"), "Reveal a laid-out descendant.");
 
     auto listview = nb::class_<ListView, Widget>(m, "ListView");
     def_setter(listview, "set_items", &ListView::set_items);
     def_setter(listview, "set_selected", &ListView::set_selected);
     def_setter(listview, "on_select", &ListView::on_select);
     listview.def_prop_ro("selected", &ListView::selected);
+    listview.def("row_rect", &ListView::row_rect, nb::arg("index"),
+                 "Absolute rect of item `index` (current layout); empty if out of range.");
 
     auto tabs = nb::class_<Tabs, Widget>(m, "Tabs");
     def_setter(tabs, "set_tabs", &Tabs::set_tabs);
@@ -2054,4 +2347,11 @@ NB_MODULE(_slikui, m) {
           "on every platform. ``context`` is accepted for compatibility and unused.");
     m.def("find_system_font", &find_system_font,
           "First system TTF that opens (best-effort; '' if none).");
+    m.def("find_system_font_face",
+          [](const std::string& role, text::FontStyle style) {
+              return find_system_font_face(role, style);
+          },
+          nb::arg("role") = "sans", nb::arg("style") = text::FontStyle::Regular,
+          "Installed font for a role (\"sans\" or \"mono\") and style; falsy if none.\n"
+          "Pass it on: ctx.add_font(\"mono\", f.path, style, f.face).");
 }

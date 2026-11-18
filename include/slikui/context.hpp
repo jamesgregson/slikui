@@ -12,6 +12,7 @@
 #include "slikui/render/sink.hpp"
 #include "slikui/style/theme.hpp"
 #include "slikui/text/font.hpp"
+#include "slikui/text/text.hpp"
 #include "slikui/widgets/env.hpp"
 #include "slikui/widgets/widget.hpp"
 
@@ -39,7 +40,8 @@ void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos);
 class Context {
 public:
     explicit Context(IRenderSink& sink) : sink_(&sink) {
-        font_.set_texture_id(next_texture_id());
+        fonts_.body().set_texture_id(next_texture_id());
+        fonts_.set_texture_source([this] { return next_texture_id(); });
     }
     // Expire the liveness token first: borrowed widgets (Menu, Dialog) that
     // outlive this Context must not call back into it from their destructor.
@@ -54,11 +56,77 @@ public:
 
     Theme& theme() { return theme_; }
     const Theme& theme() const { return theme_; }
-    text::Font& font() { return font_; }
 
-    bool load_font_file(const std::string& path) { return font_.load_file(path); }
+    // The body font's regular face (what load_font_file loads).
+    text::Font& font() { return fonts_.body(); }
+
+    bool load_font_file(const std::string& path) { return fonts_.body().load_file(path); }
     bool load_font_memory(const std::uint8_t* data, size_t len) {
-        return font_.load_memory(data, len);
+        return fonts_.body().load_memory(data, len);
+    }
+
+    // --- font families ---
+    //
+    // Fonts are registered by family name, one face per style. Three names
+    // are roles every text call understands: "body" (the default - the font
+    // load_font_file/load_font_memory load), "heading" and "mono". Asking
+    // for an unregistered family falls back to "body"; asking for a style
+    // the family lacks synthesizes it from the closest face.
+    //
+    //   ctx.add_font("mono", "/path/JetBrainsMono-Regular.ttf");
+    //   ctx.add_font("body", "/path/Inter-Bold.ttf", text::FontStyle::Bold);
+    //
+    // `face` selects a face inside a .ttc collection; -1 picks the face whose
+    // style bits (head.macStyle) match `style`. False when the file can't be
+    // loaded; the family then keeps using its other faces.
+    bool add_font(std::string_view family, const std::string& path,
+                  text::FontStyle style = text::FontStyle::Regular, int face = 0) {
+        return fonts_.add_font(family, path, style, face);
+    }
+    bool add_font_memory(std::string_view family, const std::uint8_t* data, size_t len,
+                         text::FontStyle style = text::FontStyle::Regular, int face = 0) {
+        return fonts_.add_font_memory(family, data, len, style, face);
+    }
+    bool has_font(std::string_view family) const { return fonts_.has_font(family); }
+
+    text::FontLibrary& fonts() { return fonts_; }
+
+    // --- text (logical px; see slikui/text/text.hpp) ---
+
+    // Size of `s` drawn with `o`: widest line advance x block height. Wraps
+    // when o.wrap and o.max_width > 0. Use it from measure().
+    Size text_size(std::string_view s, const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        if (!rq.font->valid()) return {};
+        float avail = o.max_width > 0 ? theme_.s(o.max_width) : 0.f;
+        const text::TextLayout& lay =
+            fonts_.layout(s, rq, o.wrap ? avail : 0.f,
+                          o.overflow == TextOverflow::Ellipsis && !o.wrap ? avail : 0.f);
+        float inv = 1.f / theme_.scale;
+        return {text::layout_advance(lay) * inv, lay.size.h * inv};
+    }
+
+    TextMetrics text_metrics(const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        float inv = 1.f / theme_.scale;
+        return {rq.font->ascent(rq.px) * inv, rq.font->descent(rq.px) * inv,
+                rq.font->line_height(rq.px) * inv};
+    }
+
+    // A block to keep: draw with env.draw(block, pos), hit-test, caret and
+    // selection queries. Wraps to `wrap_width` when > 0 (lines align inside
+    // it per o.align); o.wrap / o.max_width are ignored here, except that
+    // TextOverflow::Ellipsis truncates to o.max_width.
+    TextBlock text_layout(std::string_view s, float wrap_width = 0, const TextOpts& o = {}) {
+        auto rq = fonts_.request(o, theme_);
+        float inv = 1.f / theme_.scale;
+        Color col = o.color.a > 0 ? o.color : theme_.text;
+        if (!rq.font->valid()) return TextBlock::make({}, std::string(s), inv, 0, o.align, col);
+        float wrap = wrap_width > 0 ? theme_.s(wrap_width) : 0.f;
+        float ell = o.overflow == TextOverflow::Ellipsis && wrap <= 0 && o.max_width > 0
+                        ? theme_.s(o.max_width) : 0.f;
+        text::TextLayout lay = text::layout_fitted(*rq.font, s, rq.px, wrap, ell, rq.flags);
+        return TextBlock::make(std::move(lay), std::string(s), inv, wrap, o.align, col);
     }
 
     void set_frame_size(Vec2 size) { frame_ = size; }
@@ -128,7 +196,7 @@ public:
         inside_press_ = false;
         popups_.clear();  // popup widgets may hold callbacks
         dialogs_.clear(); // dialog entries (owned dialogs move to closing_)
-        toasts_.clear();
+        toasts_.clear();  // owned toast widgets
         root_.reset();    // the tree itself
         closing_.clear(); // widgets deferred by close_popups()
         shortcuts_.clear(); // may hold Python callables
@@ -170,38 +238,62 @@ public:
     // --- frame ---
 
     void tick(Time t) {
-        Busy busy(*this);
+        {
+            Busy busy(*this);
+            tick_pass(t);
+        }
+        // Widgets retired during the pass (Widget::remove, expired toasts).
+        if (busy_ == 0) closing_.clear();
+    }
+
+private:
+    void tick_pass(Time t) {
         now_ = t.now;
+        if (!(theme_ == seen_theme_)) { // zoom, preset, palette edit
+            seen_theme_ = theme_;
+            if (root_) root_->theme_changed_tree();
+            for (auto& p : popups_) p.widget->theme_changed_tree();
+            for (auto& ts : toasts_) ts.widget->theme_changed_tree();
+            for (auto& d : dialogs_) d.widget->theme_changed_tree();
+        }
         if (!root_) return;
         attach_tree(*root_);
         root_->measure(Constraints::tight({frame_.x, frame_.y}));
         root_->arrange({0, 0, frame_.x, frame_.y});
         root_->tick_tree(t);
         for (auto& p : popups_) {
+            attach_tree(*p.widget); // like root_: catch subtrees grown since push
             layout_popup(p);
             p.widget->tick_tree(t); // menus animate hover, toasts fade
         }
         for (auto& d : dialogs_) {
+            attach_tree(*d.widget);
             layout_dialog(d);
             d.widget->tick_tree(t);
         }
-        // Expired toasts leave the popup stack.
+        // Expired toasts leave (destroyed at the end of this pass).
         for (size_t i = toasts_.size(); i-- > 0;) {
             if (t.now >= toasts_[i].expires_at) {
-                close_popup_widget(toasts_[i].widget);
+                if (focused_ && inside(focused_, toasts_[i].widget.get())) set_focus(nullptr);
+                closing_.push_back(std::move(toasts_[i].widget));
                 toasts_.erase(toasts_.begin() + long(i));
             }
         }
+        layout_toasts();
+        for (auto& ts : toasts_) ts.widget->tick_tree(t);
         update_tooltip(t);
     }
+
+public:
 
     void render(bool clear = true) {
         if (!sink_) return;
         DrawList list;
-        const PaintEnv env{list, theme_, font_};
+        const PaintEnv env{list, theme_, fonts_.body(), &fonts_};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
+        for (auto& ts : toasts_) ts.widget->paint_tree(env);
         if (Widget* modal = topmost_modal()) // dim everything under dialogs
             list.rect({0, 0, frame_.x, frame_.y}, Color::black().faded(.45f));
         for (auto& d : dialogs_) d.widget->paint_tree(env);
@@ -210,6 +302,7 @@ public:
         // must see them this frame, not the next.
         upload_dirty_textures();
         sink_->render(list, frame_);
+        fonts_.end_frame(); // drop env.text() layouts nobody drew for a while
     }
 
     // --- popups ---
@@ -264,11 +357,7 @@ public:
 
     void close_popups() {
         Busy busy(*this);
-        for (auto& p : popups_) {
-            Widget* root = p.widget;
-            if (focused_ && inside(focused_, root)) set_focus(nullptr);
-            if (p.owned) closing_.push_back(std::move(p.owned));
-        }
+        for (size_t i = popups_.size(); i-- > 0;) retire_popup(popups_[i]); // topmost first
         popups_.clear();
     }
     bool has_popups() const { return !popups_.empty(); }
@@ -328,6 +417,7 @@ public:
             if (dialogs_[i].widget == &d) {
                 if (focused_ && inside(focused_, dialogs_[i].widget))
                     set_focus(nullptr);
+                focus_notes_.push_back({dialogs_[i].widget, Event::Type::PopupClosed});
                 if (dialogs_[i].owned)
                     closing_.push_back(std::move(dialogs_[i].owned));
                 dialogs_.erase(dialogs_.begin() + long(i));
@@ -339,14 +429,21 @@ public:
 
     // --- toasts ---
     //
-    // Transient corner notices on the popup layer: pushed owned, positioned
-    // in the bottom-right corner, removed automatically after `seconds`
-    // (measured from the last tick's time).
-    void push_toast(std::unique_ptr<Widget> w, double seconds) {
-        Widget* raw = w.get();
-        push_popup(std::move(w), {frame_.x - 12, frame_.y - 12});
-        toasts_.push_back(ToastEntry{raw, now_ + seconds});
+    // Transient corner notices: pushed owned, stacked upward from the
+    // bottom-right corner (newest at the bottom), removed automatically after
+    // `seconds` (measured from the last tick's time). Toasts are their own
+    // layer - painted above popups, below dialogs - and are passive: never
+    // hit-tested, so clicks, hover and wheel pass through to what is under
+    // them, and they neither close nor are closed by the popup stack.
+    Widget& push_toast(std::unique_ptr<Widget> w, double seconds) {
+        Widget& ref = *w;
+        toasts_.push_back(ToastEntry{Widget::WidgetPtr(w.release()), now_ + seconds});
+        attach_tree(ref);
+        layout_toasts();
+        return ref;
     }
+    size_t toast_count() const { return toasts_.size(); }
+    Widget* toast(size_t i) { return toasts_[i].widget.get(); }
 
     // --- shortcuts ---
     //
@@ -373,9 +470,10 @@ public:
     // sink reset): re-upload the font atlas and every live widget texture
     // on the next render().
     void invalidate_textures() {
-        font_.mark_dirty();
+        fonts_.for_each_font([](text::Font& f) { f.mark_dirty(); });
         if (root_) root_->invalidate_tree();
         for (auto& p : popups_) p.widget->invalidate_tree();
+        for (auto& ts : toasts_) ts.widget->invalidate_tree();
         for (auto& d : dialogs_) d.widget->invalidate_tree();
     }
 
@@ -431,9 +529,24 @@ private:
         bool placed = false; // false until the first layout centers it
     };
     struct ToastEntry {
-        Widget* widget = nullptr;
+        Widget::WidgetPtr widget; // owned
         double expires_at = 0;
     };
+
+    void layout_toasts() {
+        const float margin = 12.f, gap = 8.f;
+        float bottom = frame_.y - margin;
+        for (size_t i = toasts_.size(); i-- > 0;) { // newest lowest
+            Widget& w = *toasts_[i].widget;
+            attach_tree(w);
+            Size s = w.measure(Constraints::loose(frame_));
+            s.w = std::fmin(s.w, std::fmax(frame_.x - 2 * margin, 40.f));
+            float x = std::fmax(frame_.x - margin - s.w, 0.f);
+            float y = std::fmax(bottom - s.h, 0.f);
+            w.arrange({x, y, s.w, s.h});
+            bottom = y - gap;
+        }
+    }
 
     struct Popup {
         Widget::WidgetPtr owned;  // null for borrowed popups
@@ -489,6 +602,9 @@ private:
         for (size_t i = 0; i < focus_notes_.size(); ++i) {
             FocusNote n = focus_notes_[i];
             if (!n.widget) continue; // forgotten (destroyed) meanwhile
+            // Closed and reopened within one pass (menus re-pushing
+            // themselves): it never really closed.
+            if (n.type == Event::Type::PopupClosed && on_screen(n.widget)) continue;
             Event e{};
             e.type = n.type;
             n.widget->on_event(e);
@@ -517,8 +633,28 @@ private:
             if (t == w) t = nullptr;
         for (auto& n : focus_notes_)
             if (n.widget == w) n.widget = nullptr;
+        // A popup anchored to it stays where it is, unanchored.
+        for (auto& p : popups_)
+            if (p.anchor == w) {
+                p.anchor = nullptr;
+                p.pos = {p.widget->bounds.x, p.widget->bounds.y};
+            }
     }
     friend void context_forget(Context* ctx, const Widget* w) noexcept;
+    friend bool context_detach(Context* ctx, Widget& w);
+    friend void context_defer_destroy(Context* ctx, Widget* w) noexcept;
+
+    // Widget::remove: `w`'s subtree just left the tree.
+    bool detach(Widget& w) {
+        if (focused_ && inside(focused_, &w)) set_focus(nullptr); // FocusLost
+        forget_tree(w);
+        return busy_ > 0;
+    }
+    void forget_tree(const Widget& w) noexcept {
+        forget(&w);
+        for (const auto& c : w.children) forget_tree(*c);
+    }
+    friend void context_attach(Context* ctx, Widget& w);
 
     static size_t key_index(Key k) { return size_t(k) & 0xFF; }
 
@@ -580,12 +716,17 @@ private:
     }
     void close_popups_above_index(long k) {
         Busy busy(*this);
-        for (long i = long(popups_.size()) - 1; i > k; --i) {
-            Popup& p = popups_[size_t(i)];
-            if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
-            if (p.owned) closing_.push_back(std::move(p.owned));
-        }
+        for (long i = long(popups_.size()) - 1; i > k; --i) retire_popup(popups_[size_t(i)]);
         if (k + 1 < long(popups_.size())) popups_.resize(size_t(k + 1));
+    }
+
+    // A popup is leaving the stack: drop focus inside it, queue its
+    // PopupClosed, and defer an owned popup's destruction past that
+    // notification (closing_ is cleared after the notes flush).
+    void retire_popup(Popup& p) {
+        if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
+        focus_notes_.push_back({p.widget, Event::Type::PopupClosed});
+        if (p.owned) closing_.push_back(std::move(p.owned));
     }
 
     // Dispatch an event up the chain from `w` to the root, until consumed.
@@ -608,16 +749,20 @@ private:
     }
 
     void upload_dirty_textures() {
-        if (font_.valid() && font_.atlas_dirty()) {
-            TexUpload up{font_.atlas_id(), font_.atlas_width(), font_.atlas_height(),
-                         TexFormat::Alpha8, font_.atlas_pixels().data()};
-            sink_->upload(up);
-            font_.clear_dirty();
-        }
+        fonts_.for_each_font([this](text::Font& f) {
+            if (!f.valid()) return;
+            for (auto& page : f.atlas().pages()) {
+                if (!page->dirty) continue;
+                sink_->upload(TexUpload{page->tex_id, text::kAtlasPage, text::kAtlasPage,
+                                        TexFormat::Alpha8, page->pixels.data()});
+                page->dirty = false;
+            }
+        });
         // Widgets that own textures (Image, ...) report pending uploads.
         uploads_.clear();
         if (root_) root_->collect_tree(uploads_);
         for (auto& p : popups_) p.widget->collect_tree(uploads_);
+        for (auto& ts : toasts_) ts.widget->collect_tree(uploads_);
         for (auto& d : dialogs_) d.widget->collect_tree(uploads_);
         for (const auto& up : uploads_) sink_->upload(up);
     }
@@ -708,19 +853,6 @@ private:
             if (it->modal) return it->widget;
         return nullptr;
     }
-    // Remove one popup (used by toast expiry); moves owned storage to closing_.
-    void close_popup_widget(Widget* w) {
-        Busy busy(*this);
-        for (size_t i = 0; i < popups_.size(); ++i) {
-            if (popups_[i].widget == w) {
-                if (focused_ && inside(focused_, w)) set_focus(nullptr);
-                if (popups_[i].owned) closing_.push_back(std::move(popups_[i].owned));
-                popups_.erase(popups_.begin() + long(i));
-                return;
-            }
-        }
-    }
-
     Widget* hit_test_in(Widget& w, Vec2 pos) {
         if (!w.visible) return nullptr;
         // Children are only pickable where they are painted: a clipping
@@ -773,7 +905,7 @@ private:
 
     IRenderSink* sink_;
     Theme theme_;
-    text::Font font_;
+    text::FontLibrary fonts_;
     Widget::WidgetPtr root_;
     Widget* focused_ = nullptr;
     Vec2 frame_{};
@@ -787,10 +919,17 @@ private:
     std::shared_ptr<const bool> alive_ = std::make_shared<const bool>(true);
 
     // Focus notifications waiting for a safe point (see set_focus / Busy).
+    // Queued widget notifications: FocusLost / FocusGained / PopupClosed.
     struct FocusNote {
         Widget* widget;
         Event::Type type;
     };
+    bool on_screen(const Widget* w) const {
+        if (popup_open(w)) return true;
+        for (const auto& d : dialogs_)
+            if (d.widget == w) return true;
+        return false;
+    }
     std::vector<FocusNote> focus_notes_;
     int busy_ = 0;
 
@@ -816,6 +955,7 @@ private:
     // floating shell layer above popups + toast expiry tracking
     std::vector<DialogEntry> dialogs_;
     std::vector<ToastEntry> toasts_;
+    Theme seen_theme_; // theme as of the last tick (theme_changed detection)
 
     // cursor shape host callback + last-requested shape
     std::function<void(Cursor)> cursor_host_;
@@ -840,6 +980,20 @@ inline float theme_scale_of(const Context* ctx) {
 // Called from ~Widget (Context is complete here).
 inline void context_forget(Context* ctx, const Widget* w) noexcept {
     if (ctx) ctx->forget(w);
+}
+
+inline void context_attach(Context* ctx, Widget& w) {
+    if (ctx) ctx->attach_tree(w);
+}
+
+inline bool context_detach(Context* ctx, Widget& w) {
+    return ctx && ctx->detach(w);
+}
+
+inline void context_defer_destroy(Context* ctx, Widget* w) noexcept {
+    if (!w) return;
+    if (ctx) ctx->closing_.push_back(Widget::WidgetPtr(w));
+    else w->release();
 }
 
 // noexcept: runs from widget destructors. A sink's release() must not throw
@@ -868,6 +1022,8 @@ public:
     }
 
     const char* widget_type() const override { return "TooltipLabel"; }
+
+    void theme_changed() override { valid_ = false; } // scale/font may have changed
     bool stretch_cross() const override { return false; }
 
 private:

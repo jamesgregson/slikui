@@ -9,7 +9,9 @@ right-aligned shortcut hints; disabled items swallow clicks.
 
 Menus are **borrowed** popups - build once, open many times. Checkmark state
 is read through a callback at paint time and `on_open` fires before each show
-so you can refresh enabled flags. Escape unwinds submenus one level per
+so you can refresh enabled flags; `on_close` fires whenever the menu leaves
+the screen (item chosen, click outside, Escape, another menu opened, focus
+lost), after the event that closed it. Escape unwinds submenus one level per
 press.
 
 The capture below opens the **File** menu by simulating a click on it:

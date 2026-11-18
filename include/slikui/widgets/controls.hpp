@@ -114,6 +114,8 @@ public:
 
     const char* widget_type() const override { return "Button"; }
 
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
+
     bool stretch_cross() const override { return false; }
     bool draw_border_ = true;
 
@@ -208,6 +210,8 @@ public:
 
     const char* widget_type() const override { return "Radio"; }
 
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
+
     bool stretch_cross() const override { return false; }
 
 private:
@@ -295,6 +299,8 @@ public:
     }
 
     const char* widget_type() const override { return "Checkbox"; }
+
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
 
     bool stretch_cross() const override { return false; }
 
@@ -484,6 +490,8 @@ public:
 
     const char* widget_type() const override { return "Slider"; }
 
+    void theme_changed() override { label_valid_ = false; } // scale/font may have changed
+
 private:
     bool shows_value() const { return !label_.empty() || fmt_set_; }
     float key_step() const { return step_ > 0 ? step_ : (max_ - min_) / 20.f; }
@@ -533,7 +541,7 @@ public:
         items_ = std::move(items);
         selected_ = -1;
         hovered_ = -1;
-        labels_valid_ = false;
+        widths_.clear();
         return *this;
     }
     Segmented& set_selected(long index, bool fire_callback = true) {
@@ -548,30 +556,64 @@ public:
     bool stretch_cross() const override { return false; }
 
     Size measure(const Constraints& c) override {
-        refresh_labels();
-        float inv = 1.f / ui_scale();
         float w = 0;
-        for (auto& l : lays_) w += l.size.w * inv + 24.f;
+        for (const auto& it : items_) w += natural(it);
         return c.clamp({std::fmax(w, 60.f), 26.f});
     }
 
+    // Segments keep their natural width (text + padding) when they fit.
+    // Narrower than that, the width is shared out so short labels stay
+    // whole and the long ones shrink (their text elides with "...").
+    void arrange(const Rect& area) override {
+        bounds = area;
+        size_t n = items_.size();
+        widths_.assign(n, 0.f);
+        float total = 0;
+        for (size_t i = 0; i < n; ++i) total += (widths_[i] = natural(items_[i]));
+        if (n == 0 || total <= area.w) return;
+        // Water-fill: segments narrower than the fair share keep their width;
+        // the rest split what's left equally.
+        std::vector<bool> fixed(n, false);
+        float avail = std::fmax(area.w, 0.f);
+        size_t open = n;
+        for (bool changed = true; changed && open > 0;) {
+            changed = false;
+            float share = avail / float(open);
+            for (size_t i = 0; i < n; ++i) {
+                if (fixed[i] || widths_[i] > share) continue;
+                fixed[i] = true;
+                avail -= widths_[i];
+                --open;
+                changed = true;
+            }
+        }
+        float share = open > 0 ? avail / float(open) : 0.f;
+        for (size_t i = 0; i < n; ++i)
+            if (!fixed[i]) widths_[i] = share;
+    }
+
     void paint(const PaintEnv& env) const override {
-        refresh_labels();
         const Theme& t = env.theme;
-        float inv = 1.f / ui_scale();
         env.list.rect(bounds, t.surface_alt, t.radius);
         float x = bounds.x;
-        for (size_t i = 0; i < items_.size(); ++i) {
-            float w = lays_[i].size.w * inv + 24.f;
+        for (size_t i = 0; i < items_.size() && i < widths_.size(); ++i) {
+            float w = widths_[i];
             Rect seg{x, bounds.y, w, bounds.h};
-            float ty = seg.center().y - lays_[i].size.h * inv * .5f;
+            Color txt;
             if (long(i) == selected_) {
                 env.list.rect(seg, t.accent, t.radius);
-                paint_text(env, lays_[i], {x + 12, ty}, t.accent_text, inv);
+                txt = t.accent_text;
             } else {
-                Color txt = long(i) == hovered_ && enabled ? t.text : t.text_dim;
-                paint_text(env, lays_[i], {x + 12, ty}, txt, inv);
+                txt = long(i) == hovered_ && enabled ? t.text : t.text_dim;
             }
+            float pad = std::fmin(12.f, w * .2f);
+            Rect box{seg.x + pad, seg.y, std::fmax(w - 2 * pad, 0.f), seg.h};
+            TextOpts o;
+            o.color = txt;
+            o.align = TextAlign::Center;
+            o.valign = TextVAlign::Middle;
+            o.overflow = TextOverflow::Ellipsis;
+            env.text_in(box, items_[i], o);
             x += w;
         }
     }
@@ -582,7 +624,7 @@ public:
             hovered_ = -1;
             return false;
         case Event::Type::MouseMove:
-            hovered_ = index_at(e.pos.x);
+            hovered_ = bounds.contains(e.pos) ? index_at(e.pos.x) : -1;
             return false;
         case Event::Type::MousePress:
             if (e.button == MouseLeft && enabled && bounds.contains(e.pos)) {
@@ -599,28 +641,24 @@ public:
     const char* widget_type() const override { return "Segmented"; }
 
 private:
+    // Text width + 12 px padding each side (logical px). Context caches the
+    // layout per raster size, so this follows UI-scale changes.
+    float natural(const std::string& item) const {
+        return (ctx ? ctx->text_size(item).w : 0.f) + 24.f;
+    }
     long index_at(float x) const {
-        float inv = 1.f / ui_scale();
         float acc = bounds.x;
-        for (size_t i = 0; i < items_.size(); ++i) {
-            acc += lays_[i].size.w * inv + 24.f;
+        for (size_t i = 0; i < widths_.size(); ++i) {
+            acc += widths_[i];
             if (x < acc) return long(i);
         }
         return -1;
-    }
-    void refresh_labels() const {
-        if (labels_valid_ || !ctx) return;
-        const Theme& t = ctx->theme();
-        lays_.clear();
-        for (auto& it : items_) lays_.push_back(ctx->font().layout(it, t.s(t.base_font_px)));
-        labels_valid_ = true;
     }
 
     std::vector<std::string> items_;
     long selected_ = -1, hovered_ = -1;
     std::function<void(size_t)> on_select_;
-    mutable std::vector<text::TextLayout> lays_;
-    mutable bool labels_valid_ = false;
+    std::vector<float> widths_; // per segment, set by arrange
 };
 
 // ---------------------------------------------------------------------------

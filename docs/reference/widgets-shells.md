@@ -39,14 +39,15 @@ app and traps presses outside it. Escape or the X button closes.
 | `set_title` | `(std::string)` |
 | `set_modal` | `(bool)` |
 | `set_position` | `(Vec2)` |
-| `on_close` | `(std::function<void()>)` |
+| `on_close` | `(std::function<void()>)` - once per close, however it closes (X, Escape, `close_dialog`), after the closing event |
 | `add_button` | MessageBox - `(label, fn)` |
 
 ## Toast
 
 Auto-dismissing corner notices: `ctx.push_toast(std::make_unique<Toast>("Saved"), 3.0)`
 - the second argument is the lifetime in seconds. `set_icon(Icon)` adds a
-procedural icon.
+procedural icon. Toasts never take input: clicks pass through to whatever is
+under them, and open menus/popups are unaffected. Several stack upward.
 
 === "Python"
 

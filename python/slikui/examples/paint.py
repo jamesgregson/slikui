@@ -1,11 +1,10 @@
 """04 - Widgets that do their own drawing.
 
 Every widget here is a pure-Python subclass of ``slikui.Widget``: layout
-participation via ``measure``, geometry via ``env.list`` primitives, events
-via ``on_event``, animation via ``tick``. Text stays in ordinary ``Label``
-widgets beside them - the Python trampoline exposes ``env.list`` and
-``env.theme`` to custom widgets, not the font, and composing with Labels is
-the intended division of labor.
+participation via ``measure``, geometry via ``env.list`` primitives, text
+via ``env.text`` / ``env.text_in`` (theme font and color unless told
+otherwise), events via ``on_event``, animation via ``tick``. Captions still
+use ordinary ``Label`` widgets beside them.
 
 Run:
 
@@ -67,10 +66,10 @@ import slikui
 
 
 class Sparkline(slikui.Widget):
-    """A numpy series as a polyline, with a hover crosshair.
+    """A numpy series as a polyline, with a hover crosshair and readout.
 
     ``hover_x`` is the pointer's local x (or ``None``); ``paint`` turns it
-    into the crosshair line. MouseMove only arrives while the pointer is
+    into the crosshair line and prints the sample under it. MouseMove only arrives while the pointer is
     over the widget, so the crosshair is cleared on MouseLeave - the hover
     idiom for any widget.
     """
@@ -112,10 +111,16 @@ class Sparkline(slikui.Widget):
                    for i, v in enumerate(self.series)]
             for a, p in zip(pts, pts[1:]):
                 env.list.line(a, p, col, 1.5)
-        if self.hover_x is not None:  # crosshair at the pointer
+        if self.hover_x is not None:  # crosshair + value at the pointer
             x = b.x + self.hover_x
             env.list.line(slikui.Vec2(x, b.y), slikui.Vec2(x, b.y + b.h),
                           th.text, 1.0)
+            if self.series.size:
+                i = round(self.hover_x / max(b.w, 1.0) * (self.series.size - 1))
+                v = float(self.series[min(max(i, 0), self.series.size - 1)])
+                right = self.hover_x > b.w / 2  # keep the readout inside
+                env.text(slikui.Vec2(x - 4 if right else x + 4, b.y + 2), f"{v:+.2f}",
+                         size=11, color=th.text_dim, align="right" if right else "left")
 
 
 # doc: end
@@ -128,8 +133,8 @@ import slikui
 
 class RadialGauge(slikui.Widget):
     """A 270-degree arc gauge built from line segments (no arc primitive -
-    draw the circle you need). The gap sits at the bottom; text lives in a
-    Label beside the gauge."""
+    draw the circle you need). The gap sits at the bottom; the value is
+    printed centered in the hub with ``env.text_in``."""
 
     START, SWEEP = 135.0, 270.0  # degrees, 0 deg at 3 o'clock, clockwise
 
@@ -165,6 +170,8 @@ class RadialGauge(slikui.Widget):
             env.list.line(self._pt(cx, cy, r, i / n), self._pt(cx, cy, r, (i + 1) / n),
                           th.accent, 4.0)
         env.list.circle(slikui.Vec2(cx, cy), r * 0.55, th.surface)
+        env.text_in(b, f"{round(self.value * 100)}", size=13, bold=True,
+                    align="center", valign="middle")
 
 
 # doc: end
@@ -270,7 +277,7 @@ def build(app):
 
     root.add(slikui.Label, "Custom drawing", font_size=26)
     root.add(slikui.Label, "pure-Python subclasses of slikui.Widget - "
-                           "env.list geometry, Labels for text").set_color(muted)
+                           "env.list + env.text").set_color(muted)
 
     root.add(slikui.Label, "Meter - click the bar to scrub").set_color(muted)
     meter = root.add(Meter, 0.4)

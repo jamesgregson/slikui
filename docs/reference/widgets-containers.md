@@ -16,6 +16,23 @@ their main axis, distribute extra main-axis space to children whose
 | `set_cross` | `(CrossMode m)` - `Stretch`, `Start`, `Center` |
 | `add<T>(args...)` | construct + own a child, returns `T&` |
 
+Every `Widget` (not only containers) also has:
+
+| API | Notes |
+|-----|-------|
+| `set_expand(bool = true)` | share leftover main-axis space in a Column/Row (Python: `expand=True`) |
+| `remove(child)` | detach + destroy a direct child and its subtree; `false` if not a child |
+| `clear_children()` | `remove()` every child |
+
+`remove` is safe from event handlers and callbacks (even a button removing
+itself in `on_click`): focus (with `FocusLost`), hover, mouse capture, press
+targets and popup anchors in the subtree are dropped at once, and the
+widgets are destroyed when the running `handle()`/`tick()` returns. Don't
+call it from inside the parent's own `measure`/`arrange`/`paint`. A
+`ScrollArea` forwards both to its content column. In Python, handles to
+removed built-in widgets are invalid afterwards; a removed custom widget
+object survives (empty) and can be added again with `add_widget`.
+
 ## Column / Row
 
 `Column` stacks top-to-bottom, `Row` left-to-right. Children with

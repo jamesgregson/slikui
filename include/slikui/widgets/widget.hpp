@@ -38,6 +38,15 @@ float theme_scale_of(const Context* ctx);
 void context_forget(Context* ctx, const Widget* w) noexcept;
 // Defined in context.hpp: tell the context's sink a texture id is dead.
 void context_release_texture(Context* ctx, std::uint32_t id) noexcept;
+// Defined in context.hpp: attach a subtree to `ctx` (sets ctx, calls attached()).
+void context_attach(Context* ctx, Widget& w);
+// Defined in context.hpp: drop every Context reference into a subtree that
+// was just detached; true when its destruction must wait (a handle()/tick()
+// pass is running - see Widget::remove).
+bool context_detach(Context* ctx, Widget& w);
+// Defined in context.hpp: hand a detached subtree to the Context, which
+// destroys it at the end of the running handle()/tick() pass.
+void context_defer_destroy(Context* ctx, Widget* w) noexcept;
 
 class Widget {
 public:
@@ -61,13 +70,52 @@ public:
         T& ref = *static_cast<T*>(child.get());
         ref.parent = this;
         children.push_back(std::move(child));
+        adopted(ref);
         return ref;
     }
 
     void add(std::unique_ptr<Widget> child) {
         if (!child) return;
         child->parent = this;
+        Widget& ref = *child;
         children.push_back(WidgetPtr(child.release()));
+        adopted(ref);
+    }
+
+private:
+    // A child added to an attached widget joins the context immediately, so
+    // children created lazily (e.g. inside measure()) can lay out text in
+    // the same frame - and inside popups/dialogs, whose trees the Context
+    // does not re-walk every tick.
+    void adopted(Widget& child) {
+        if (ctx && !ctx_alive_.expired()) context_attach(ctx, child);
+    }
+
+public:
+    // Detach and destroy a direct child with its subtree; false when `child`
+    // is not a direct child. Context references into the subtree (focus -
+    // with FocusLost - hover, mouse capture, press targets, popup anchors)
+    // are dropped at once. Safe from event handlers and callbacks (on_click,
+    // tick, Python handlers): destruction waits until the running
+    // handle()/tick() pass returns. Not from inside the parent's own
+    // measure/arrange/paint loop. Containers that own internal parts
+    // (ScrollArea forwards to its content column) override this.
+    virtual bool remove(Widget& child) {
+        for (size_t i = 0; i < children.size(); ++i) {
+            if (children[i].get() != &child) continue;
+            WidgetPtr owned = std::move(children[i]);
+            children.erase(children.begin() + long(i));
+            owned->parent = nullptr;
+            bool live = ctx && !ctx_alive_.expired();
+            if (live && context_detach(ctx, *owned))
+                context_defer_destroy(ctx, owned.release());
+            return true; // else `owned` destroys it here
+        }
+        return false;
+    }
+    // remove() every child, last first.
+    virtual void clear_children() {
+        while (!children.empty()) remove(*children.back());
     }
 
     Widget* find(const std::string& widget_id) {
@@ -116,7 +164,11 @@ public:
     virtual bool focusable() const { return false; }
 
     // Children marked expanding share leftover main-axis space (Spacer).
-    virtual bool expands_main() const { return false; }
+    // set_expand(true) opts any widget in - e.g. a ScrollArea or Splitter
+    // filling the rest of a Column instead of keeping its size hint.
+    virtual bool expands_main() const { return expand_; }
+    Widget& set_expand(bool on = true) { expand_ = on; return *this; }
+    bool expand() const { return expand_; }
 
     // Whether containers may stretch this widget along their cross axis.
     // Fixed-size controls (buttons, switches, ...) opt out and hug.
@@ -143,6 +195,19 @@ protected:
 
     // Called by Context once per widget when it enters a context.
     virtual void attached(Context&) {}
+
+public:
+    // Called by Context::tick on every widget (root tree, popups, toasts,
+    // dialogs) when Context::theme() changed since the previous tick: UI
+    // scale (zoom), palette or metrics. Widgets that cache text layouts or
+    // theme-derived colors drop them here; the next measure/paint rebuilds.
+    virtual void theme_changed() {}
+    void theme_changed_tree() {
+        theme_changed();
+        for (auto& c : children) c->theme_changed_tree();
+    }
+
+protected:
 
 public:
     // True for pure layout widgets that paint nothing (Column, Row, Spacer):
@@ -240,6 +305,7 @@ protected:
     std::string tooltip_;       // hover-delay tooltip text
     Widget* context_menu_ = nullptr;  // right-click target (borrowed, see above)
     Cursor hover_cursor_ = Cursor::Arrow; // requested while hovered
+    bool expand_ = false;       // set_expand: share leftover main-axis space
 
     friend class Context;
 
@@ -251,7 +317,8 @@ public:
 
     void tick_tree(Time t) {
         tick(t);
-        for (auto& c : children) c->tick_tree(t);
+        // By index: a tick() may remove() a sibling (the vector shrinks).
+        for (size_t i = 0; i < children.size(); ++i) children[i]->tick_tree(t);
     }
 };
 

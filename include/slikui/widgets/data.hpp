@@ -135,6 +135,8 @@ public:
 
     const char* widget_type() const override { return "Plot"; }
 
+    void theme_changed() override { labels_valid_ = false; } // scale/font may have changed
+
 private:
     struct SeriesData {
         std::vector<Vec2> pts;
@@ -316,6 +318,7 @@ public:
         rows_ = std::move(rows);
         expanded_.assign(rows_.size(), true);
         selected_ = -1;
+        metrics_valid_ = false; // natural width
         visible_valid_ = false;
         return *this;
     }
@@ -337,18 +340,26 @@ public:
     }
     TreeView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
 
+    // Absolute rect of row `index` in the current layout; empty when it is
+    // hidden under a collapsed ancestor or out of range - e.g.
+    // ScrollArea::scroll_to(tree.row_rect(i)).
+    Rect row_rect(size_t index) const {
+        refresh_visible();
+        for (size_t vi = 0; vi < visible_.size(); ++vi)
+            if (visible_[vi] == index)
+                return {bounds.x, bounds.y + float(vi) * row_height(), bounds.w, row_height()};
+        return {};
+    }
+
     Size measure(const Constraints& c) override {
         refresh_metrics();
         refresh_visible();
-        return c.clamp({natural_w_ * ui_scale_inv(),
-                        float(visible_.size()) * row_height()});
+        return c.clamp({natural_w_, float(visible_.size()) * row_height()});
     }
 
     void paint(const PaintEnv& env) const override {
-        refresh_metrics();
         refresh_visible();
         const Theme& t = env.theme;
-        float inv = ui_scale_inv();
         float y = bounds.y;
         for (size_t vi = 0; vi < visible_.size(); ++vi) {
             size_t i = visible_[vi];
@@ -363,24 +374,22 @@ public:
                 // chevron right (closed) / down (open)
                 float cy = row.y + row_height() * .5f;
                 Color mark = t.text_dim;
-                if (expanded_[i]) {
-                    env.list.line({indent, cy - 2}, {indent + 4, cy + 2}, mark, 2);
-                    env.list.line({indent + 4, cy + 2}, {indent, cy + 6}, mark, 2);
-                } else {
+                if (expanded_[i]) { // chevron down: v
+                    env.list.line({indent - 2, cy - 2}, {indent + 2, cy + 2}, mark, 2);
+                    env.list.line({indent + 2, cy + 2}, {indent + 6, cy - 2}, mark, 2);
+                } else {            // chevron right: >
                     env.list.line({indent, cy - 4}, {indent + 4, cy}, mark, 2);
                     env.list.line({indent + 4, cy}, {indent, cy + 4}, mark, 2);
                 }
             }
             float tx = indent + (r.expandable ? 16.f : 4.f);
-            float text_h = lays_[i].size.h * inv;
-            for (const auto& pg : lays_[i].glyphs) {
-                const text::Glyph& g = *pg.glyph;
-                if (g.uv.empty()) continue;
-                env.list.glyph({tx + pg.pos.x * inv,
-                                row.y + (row_height() - text_h) * .5f + pg.pos.y * inv,
-                                g.size.w * inv, g.size.h * inv},
-                               g.tex_id, g.uv, t.text);
-            }
+            // Elide to the row: long labels must not run past the tree.
+            Rect box{tx, row.y, std::fmax(bounds.right() - 4.f - tx, 0.f), row_height()};
+            TextOpts o;
+            o.color = t.text;
+            o.valign = TextVAlign::Middle;
+            o.overflow = TextOverflow::Ellipsis;
+            env.text_in(box, r.label, o);
             y += row_height();
         }
     }
@@ -413,28 +422,30 @@ public:
 
     const char* widget_type() const override { return "TreeView"; }
 
+    void theme_changed() override { metrics_valid_ = false; } // scale/font may have changed
+
 private:
     float row_height() const { return 24.f; }
-    float ui_scale_inv() const { return 1.f / ui_scale(); }
     long row_at(float y) const {
         long r = long(std::floor((y - bounds.y) / row_height()));
         return (r >= 0 && r < long(visible_.size())) ? r : -1;
     }
 
+    // Natural width (logical px): widest indent + label. Recomputed when
+    // the rows or the UI scale change.
     void refresh_metrics() const {
-        if (metrics_valid_ || !ctx) return;
-        const Theme& t = ctx->theme();
-        lays_.assign(rows_.size(), text::TextLayout{});
+        if (!ctx) return;
+        float sc = ui_scale();
+        if (metrics_valid_ && metrics_scale_ == sc) return;
         natural_w_ = 40.f + (rows_.empty() ? 0.f
                                            : float(rows_.back().depth) * 16.f);
-        for (size_t i = 0; i < rows_.size(); ++i) {
-            lays_[i] = ctx->font().layout(rows_[i].label, t.s(t.base_font_px));
+        for (const auto& r : rows_)
             natural_w_ = std::fmax(natural_w_,
-                                   6.f + float(rows_[i].depth) * 16.f +
-                                       (rows_[i].expandable ? 16.f : 4.f) +
-                                       lays_[i].size.w);
-        }
+                                   6.f + float(r.depth) * 16.f +
+                                       (r.expandable ? 16.f : 4.f) +
+                                       ctx->text_size(r.label).w);
         metrics_valid_ = true;
+        metrics_scale_ = sc;
     }
 
     // Rows whose every ancestor is expanded, in display order.
@@ -458,8 +469,7 @@ private:
     std::vector<Row> rows_;
     std::vector<bool> expanded_;
     mutable std::vector<size_t> visible_;
-    mutable std::vector<text::TextLayout> lays_;
-    mutable float natural_w_ = 0;
+    mutable float natural_w_ = 0, metrics_scale_ = 0;
     mutable bool metrics_valid_ = false, visible_valid_ = false;
     long selected_ = -1;
     long hovered_ = -1;
@@ -546,6 +556,8 @@ public:
     }
 
     const char* widget_type() const override { return "Table"; }
+
+    void theme_changed() override { metrics_valid_ = false; } // scale/font may have changed
 
 private:
     float row_height() const { return 24.f; }

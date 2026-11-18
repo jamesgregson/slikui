@@ -1,5 +1,138 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+
+- **Custom widgets draw text** (C++ and Python): `env.text(pos, str, opts)`
+  and `env.text_in(rect, str, opts)` draw in the theme font, size and color
+  unless told otherwise, and return the rect the text occupies. Options
+  (`TextOpts`) cover font family, size, color, bold, italic, underline,
+  strikethrough, alignment, vertical anchor (top/middle/baseline/bottom),
+  wrapping and overflow (clip/ellipsis). Python takes them as keyword
+  arguments. Layouts are cached by the context, so per-frame calls are cheap.
+- `Context::text_size`, `text_metrics` and `text_layout` (a kept
+  `TextBlock` with `hit_test`, `caret_rect` and `selection_rects`, drawn with
+  `env.draw`).
+- **Font families**: `Context::add_font(family, path, style, face)` /
+  `add_font_memory`, with roles `"body"`, `"heading"`, `"mono"` and custom
+  names. Missing bold/italic faces are synthesized. `.ttc` collections load
+  any face (`face = -1` picks it by style). `find_system_font_face(role,
+  style)` finds installed sans/mono faces.
+- `Label::set_bold`, `set_italic`, `set_underline`, `set_strike` and
+  `set_font(family)`.
+- `utf8_encode` / `utf8_append` in `core/utf8.hpp`.
+- Text examples: `python -m slikui.examples.text` and its C++ twin
+  `examples/07_text` (Label styles, font families, text-drawing custom
+  widgets, drag-to-select on a `TextBlock`).
+
+- `Widget::theme_changed()` (Python: override `theme_changed`): called on
+  every widget on the tick after `Context::theme()` changed - UI scale,
+  preset, palette or metrics. `Theme` gains `operator==`.
+- `Context::toast_count()` / `toast(i)` (Python: `ctx.toast_count`,
+  `ctx.toast(i)`); `push_toast` returns the toast widget.
+- **`Widget::remove(child)` / `clear_children()`** (C++ and Python): destroy a
+  subtree. Safe from event handlers and callbacks - a widget can remove
+  itself in its own `on_click`; focus, hover, capture, press targets and
+  popup anchors are dropped at once and destruction waits for the running
+  `handle()`/`tick()`. `ScrollArea` forwards both to its content.
+- **`Widget::set_expand(bool)`** (builder: `expand=True`): any widget shares
+  leftover main-axis space like `Spacer` - e.g. a `ScrollArea` or `Splitter`
+  filling the rest of a `Column`.
+- **ScrollArea scroll API**: `scroll_y()`, `max_scroll()`, `set_scroll_y`,
+  `scroll_to_top`, `scroll_to_bottom`, `scroll_to(rect)` /
+  `scroll_to(widget)`; `TreeView::row_rect(i)` and `ListView::row_rect(i)`
+  to reveal a row.
+- `Key::Equal`, `LeftBracket`, `RightBracket`, `Backslash`, `Semicolon`,
+  `Grave` (appended; existing values unchanged), mapped by the GLFW and SDL
+  backends (C++ and Python). `shortcut_label` now names punctuation keys
+  (`Ctrl+=`, `Ctrl+]`, ...) and `Insert`.
+- Python builder: custom widget classes receive the kwargs their `__init__`
+  names (`row.add(Knob, value=3, tooltip="t")` calls `Knob(value=3)`, then
+  `set_tooltip`); previously every kwarg was treated as a setter.
+- `Color::from_float(r, g, b, a = 1)` (Python `Color.from_float`) and
+  Python `Constraints(min, max)`.
+- Python `Container.set_padding(left, top, right, bottom)` (per side).
+- **`Event::Type::PopupClosed`**: a popup's (or dialog's) root widget is told
+  when it leaves the screen, whatever closed it - click outside, Escape,
+  focus loss, a menu action, `close_popups`/`close_dialog`. Delivered after
+  the closing event (reopening from the handler is safe) and skipped when the
+  popup was reopened within the same pass. Owned popups are destroyed only
+  after their notification.
+- `Menu::on_close(fn)` (Python `Menu.on_close`), pairing `on_open`. Closed
+  menus also drop their rows' hover highlight, so a reopened menu doesn't
+  flash the last-hovered row.
+
+### Changed
+
+- **Toasts are their own passive layer** (above popups, below dialogs) instead
+  of entries on the popup stack. They are never hit-tested, so clicks, hover
+  and wheel reach whatever is under them, and they neither close nor are
+  closed by popups (a press outside a menu, Escape, focus loss). Several
+  toasts stack upward from the bottom-right corner, 12 px from the edges.
+  `popup_count()` no longer counts toasts - use `toast_count()`.
+- `Segmented` fits its frame: segments keep their natural width when there is
+  room; otherwise short labels stay whole and the long ones shrink, eliding
+  with "...".
+- `TreeView` and `ListView` elide row labels that don't fit the frame.
+- **Tighter `ScrollArea` spacing**: content sits 2 px inside the viewport
+  (was 8) and 6 px from the scrollbar thumb (was 12), so scrolled content
+  lines up with its siblings and highlights run close to the bar.
+  `set_content_insets(left, right)` restores more room where wanted.
+
+### Fixed
+
+- **`Dialog::on_close` fires for every way a dialog closes**: Escape and
+  `Context::close_dialog` skipped it (only the X button / `request_close`
+  fired it). It now runs once, after the closing event.
+- **An open toast no longer swallows clicks**: the first press anywhere
+  outside it closed the toast and was dropped (the press never reached its
+  widget, so no Click either).
+- **Text widgets follow runtime UI-scale changes** (zoom): Button, Checkbox,
+  Radio, Slider, Segmented, Tabs, Dropdown, Expander, DragValue, TreeView,
+  ListView, Table, Plot, LogView, Menu/MenuBar, Toast and tooltips kept text
+  laid out at the scale of their first layout, so their sizes and text
+  drifted after a zoom.
+- `Segmented` text no longer runs past the control (and its click targets
+  past its frame) when it is narrower than its labels.
+- `TreeView` / `ListView` row text no longer runs past the widget; `TreeView`
+  no longer under-measures its width at UI scales above 1 (the indent part
+  was divided by the scale).
+- **Glyphs no longer vanish when the font atlas fills**: the atlas grows by
+  512x512 pages (each its own texture) instead of silently dropping glyphs.
+- Font sizes that differed by less than 1 px (e.g. 15.2 and 15.6) shared one
+  glyph raster; the cache now keys on 1/4-px size steps. Text at fractional
+  HiDPI scales can shift by up to 1/8 px as a result.
+- `utf8_next` rejects overlong encodings, surrogates, values above U+10FFFF
+  and sequences truncated at the end of the string (all decode as U+FFFD).
+- **Single-line `Label`s no longer wrap at high UI scale** (about 2.5x and
+  up): `measure` reported the ink width, but wrapping decides on the advance
+  width, which is several raster px wider at large sizes, so the last word
+  dropped onto a second line outside the label's frame.
+- **`TreeView::set_rows` re-labels rows**: after the first layout, rows kept
+  their old text, and growing the row count read past the end of the label
+  cache.
+- `TreeView` chevrons point down when a row is expanded (both states drew
+  `>`).
+- **`CrossMode::Center` centers every child**: children whose
+  `stretch_cross()` is false (Button, Switch, most custom widgets) were
+  top-aligned regardless of the cross mode.
+- **Children added to an attached widget join its context immediately.**
+  Widgets that build children lazily (e.g. in `measure`) work inside popups
+  and dialogs - their labels never drew there - and draw on their first frame
+  everywhere. Popups and dialogs are also re-attached every tick, like the
+  root tree.
+- `Menu` items and `MenuBar` titles clear their hover highlight when the
+  pointer leaves (several items could show hover at once).
+- **Menu rows share the menu's width**: each item used to be only as wide as
+  its own text, so hover highlights had different widths and shortcut hints
+  didn't line up. Labels sit 12 px in, keeping the 32 px checkmark gutter
+  only in menus that have a checkable item; a hint on a submenu row no
+  longer overlaps its chevron.
+- The software renderers (`software::Sink`, `CanvasSink`) clip lines: lines
+  bled a pixel past clip edges, and a line entirely outside the clip could
+  paint a full row or column along its edge at fractional scales.
+
 ## 0.4.1
 
 ### Fixed

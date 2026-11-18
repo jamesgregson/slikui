@@ -33,6 +33,60 @@ A `Context` has exactly one active font. Load it from a file, or from memory:
 an empty string when nothing is found - check the return of `load_font_file`
 and fall back to the bundled font.
 
+## Font families and styles
+
+Beyond the body font, register more faces by family name. Three names are
+roles every text call understands - `"body"` (what `load_font_file` loads),
+`"heading"` and `"mono"` - and any other name is your own. An unregistered
+family falls back to body.
+
+=== "C++"
+
+    ```cpp
+    ctx.add_font("mono", "/path/JetBrainsMono-Regular.ttf");
+    ctx.add_font("body", "/path/Inter-Bold.ttf", slikui::text::FontStyle::Bold);
+
+    // Installed fonts by role and style (.ttc faces resolved for you):
+    if (auto f = slikui::find_system_font_face("mono"))
+        ctx.add_font("mono", f.path, slikui::text::FontStyle::Regular, f.face);
+    ```
+
+=== "Python"
+
+    ```python
+    ctx.add_font("mono", "/path/JetBrainsMono-Regular.ttf")
+    ctx.add_font("body", "/path/Inter-Bold.ttf", slikui.FontStyle.Bold)
+
+    f = slikui.find_system_font_face("mono", slikui.FontStyle.Bold)
+    if f:
+        ctx.add_font("mono", f.path, slikui.FontStyle.Bold, f.face)
+    ```
+
+Bold and italic never need a font file: when a family has no face for the
+requested style, slikui synthesizes it from the closest face it has (italic
+slants the outline, bold thickens the glyph). Real faces look better, so
+register them when you ship them.
+
+Underline and strikethrough use the font's own placement metrics and draw in
+the text color. `Label` takes all of these as setters:
+
+=== "C++"
+
+    ```cpp
+    root.add<slikui::Label>("Warning").set_bold().set_underline();
+    root.add<slikui::Label>("x = 3.14").set_font("mono");
+    ```
+
+=== "Python"
+
+    ```python
+    root.add(slikui.Label, "Warning", bold=True, underline=True)
+    root.add(slikui.Label, "x = 3.14", font="mono")
+    ```
+
+Custom widgets draw text with the same options through `env.text` - see
+[Custom widgets](custom-widgets.md#drawing-text).
+
 ![Text rendered by this pipeline: the Label capture loads a system font and
 rasterizes glyphs on demand into the atlas](../images/labels.png)
 
@@ -48,14 +102,19 @@ Licence: `third_party/fonts/LICENSE-DejaVu.txt` - ship it with your app.
 
 ## How glyphs reach the screen
 
-- The font owns the TTF bytes, an stb_truetype fontinfo, a 512x512 alpha8
-  atlas and a glyph cache keyed by `(codepoint, size)`. Glyphs rasterize on
-  demand; the atlas is pushed to the sink when dirty.
-- `layout(text, px, max_width)` produces positioned glyphs with word
-  wrapping; `advance_upto` powers caret hit-testing in text fields.
+- Each font face owns its TTF bytes, an stb_truetype fontinfo, a glyph
+  cache and an alpha8 atlas of 512x512 pages. Glyphs rasterize on demand;
+  when a page fills, a new page (with its own texture id) is added, and
+  dirty pages are pushed to the sink.
+- The cache is keyed by glyph, size (rounded to 1/4 px) and synthesized
+  style, so bold and regular text at the same size coexist.
+- `layout(text, px, max_width, flags)` produces positioned glyphs with word
+  wrapping, per-line byte ranges, and underline/strikethrough bars;
+  `advance_upto` powers caret hit-testing in text fields.
 - Layouts are cached per widget (`Label`, `ListView`, `Tabs`) and invalidated
-  on text or size changes.
-- Whitespace glyphs are never emitted - widgets skip them.
+  on text or size changes; `env.text` layouts are cached by the context and
+  dropped after about two seconds unused.
+- Whitespace glyphs are never drawn.
 - Glyphs re-rasterize automatically when `theme().scale` changes (window
   dragged between displays).
 

@@ -15,6 +15,8 @@ Where to look:
     keyboard.py   focus (Tab, FocusGained/Lost), shortcuts, Snake
     renderer.py   the render contract; plugging in your own renderer
     window.py     a live GLFW app (_window.py is the host)
+    text.py       Label styles, font families, env.text / text_in in
+                  custom widgets, TextBlock hit-testing (drag to select)
 
 Custom-widget contract (subclass ``slikui.Widget``, call
 ``super().__init__()``; add with ``parent.add(MyWidget, args...)``):
@@ -40,7 +42,9 @@ Custom-widget contract (subclass ``slikui.Widget``, call
   only. FocusLost also arrives when the app loses focus mid-drag.
 * KeyPress/KeyRelease go to the focused widget (else the hovered one); Tab,
   Escape and shortcut chords are consumed first. TextInput needs focus.
-* Custom widgets draw no text - compose ``Label`` widgets beside them.
+* Text: ``env.text(Vec2, str, size=.., bold=.., align="center", ..)`` and
+  ``env.text_in(Rect, str, ..)`` draw in the theme font and color and return
+  the occupied Rect; ``self.context.text_size(str, ..)`` measures.
 * Built-in widget classes can't be subclassed in Python; wrap one in a
   custom widget and decorate it with ``paint_over`` (LimitSlider).
 * Keep the wrappers ``add()`` returns (``self.slider = self.add(...)``):
@@ -96,6 +100,10 @@ REGISTRY: tuple[Example, ...] = (
     Example("window", "Live window",
             "A small app in a real GLFW window; the same tour runs headless.",
             ("window",)),
+    Example("text", "Text",
+            "Label styles and font families; custom widgets that draw,"
+            " measure, wrap, truncate and select text.",
+            ("custom",)),
 )
 
 

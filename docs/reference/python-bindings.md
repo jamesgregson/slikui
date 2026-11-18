@@ -43,6 +43,13 @@ frame = ui.render()                        # zero-copy (H, W) uint32 ndarray
 kwargs: `foo=` resolves to `set_foo`, or to the attribute/method `foo`
 itself when there is no setter (e.g. `on_click=`). A wrong name is a loud
 `AttributeError`, not a silent no-op. Same for `ctx.set_root(cls, ...)`.
+For your own widget classes, kwargs named in `__init__` go to the
+constructor and the rest to setters: `row.add(Knob, value=3, tooltip="t")`
+calls `Knob(value=3)`, then `set_tooltip("t")`.
+
+Values: `Color(r, g, b, a=255)` takes 0..255 ints; use
+`Color.from_float(r, g, b, a=1.0)` for normalized floats.
+`Constraints(min, max)` builds arbitrary constraints (also `loose`, `tight`).
 If type-level patching is unavailable, module-level
 `slikui.add(container, ...)` / `slikui.set_root(context, ...)` are the
 fallbacks.

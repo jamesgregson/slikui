@@ -8,10 +8,10 @@ import slikui
 
 
 class Sparkline(slikui.Widget):
-    """A numpy series as a polyline, with a hover crosshair.
+    """A numpy series as a polyline, with a hover crosshair and readout.
 
     ``hover_x`` is the pointer's local x (or ``None``); ``paint`` turns it
-    into the crosshair line. MouseMove only arrives while the pointer is
+    into the crosshair line and prints the sample under it. MouseMove only arrives while the pointer is
     over the widget, so the crosshair is cleared on MouseLeave - the hover
     idiom for any widget.
     """
@@ -53,8 +53,14 @@ class Sparkline(slikui.Widget):
                    for i, v in enumerate(self.series)]
             for a, p in zip(pts, pts[1:]):
                 env.list.line(a, p, col, 1.5)
-        if self.hover_x is not None:  # crosshair at the pointer
+        if self.hover_x is not None:  # crosshair + value at the pointer
             x = b.x + self.hover_x
             env.list.line(slikui.Vec2(x, b.y), slikui.Vec2(x, b.y + b.h),
                           th.text, 1.0)
+            if self.series.size:
+                i = round(self.hover_x / max(b.w, 1.0) * (self.series.size - 1))
+                v = float(self.series[min(max(i, 0), self.series.size - 1)])
+                right = self.hover_x > b.w / 2  # keep the readout inside
+                env.text(slikui.Vec2(x - 4 if right else x + 4, b.y + 2), f"{v:+.2f}",
+                         size=11, color=th.text_dim, align="right" if right else "left")
 ```

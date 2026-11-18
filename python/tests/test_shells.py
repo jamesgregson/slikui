@@ -131,13 +131,14 @@ def test_toast_shows_and_expires():
 
     toast = ui.ctx.push_toast("Screenshot saved", 0.2, icon=slikui.Icon.Camera)
     ui.tick(0.55, 1 / 60)
-    assert ui.ctx.popup_count == 1
-    b = ui.ctx.popup(0).bounds
-    assert b.right() > 300 and b.bottom() > 230  # bottom-right corner
+    assert ui.ctx.toast_count == 1
+    assert ui.ctx.popup_count == 0  # toasts are their own layer
+    b = ui.ctx.toast(0).bounds
+    assert b.right() > 290 and b.bottom() > 220  # bottom-right corner, 12 px margin
     assert toast is not None
 
     ui.tick(1.0, 1 / 60)  # 0.5 + 0.2 < 1.0 -> expired
-    assert ui.ctx.popup_count == 0
+    assert ui.ctx.toast_count == 0
 
 
 # ---------------------------------------------------------------------------
