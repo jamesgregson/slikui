@@ -8,6 +8,7 @@ import numpy
 from numpy.typing import NDArray
 
 from slikui._py.builder import (
+    _init_subclass as __init_subclass__,
     container_add as add,
     context_set_root as set_root
 )
@@ -438,6 +439,38 @@ class Key(enum.Enum):
     Semicolon = 74
 
     Grave = 75
+
+    Kp0 = 76
+
+    Kp1 = 77
+
+    Kp2 = 78
+
+    Kp3 = 79
+
+    Kp4 = 80
+
+    Kp5 = 81
+
+    Kp6 = 82
+
+    Kp7 = 83
+
+    Kp8 = 84
+
+    Kp9 = 85
+
+    KpDecimal = 86
+
+    KpDivide = 87
+
+    KpMultiply = 88
+
+    KpSubtract = 89
+
+    KpAdd = 90
+
+    KpEqual = 91
 
 class Mod(enum.IntEnum):
     ModNone = 0
@@ -1268,10 +1301,10 @@ class Container(Widget):
     def set_cross(self, value: CrossMode) -> Container: ...
 
 class Column(Container):
-    pass
+    def __init__(self) -> None: ...
 
 class Row(Container):
-    pass
+    def __init__(self) -> None: ...
 
 class Spacer(Widget):
     pass
@@ -1513,6 +1546,9 @@ class MenuBar(Row):
     def __init__(self, id: str = '') -> None: ...
 
     def add_menu(self, title: str) -> Menu: ...
+
+    def set_background(self, color: Color) -> MenuBar:
+        """Fill behind the bar (default transparent: the window background)."""
 
 class IconButton(Widget):
     def __init__(self, icon: Icon, id: str = '') -> None: ...
@@ -1850,6 +1886,10 @@ class Spinner(Widget):
     def set_speed(self, value: float) -> Spinner: ...
 
 class TextField(Widget):
+    @property
+    def scroll_x(self) -> float:
+        """Horizontal scroll of the text (logical px; 0 = start shown)."""
+
     def set_text(self, value: str) -> TextField: ...
 
     @property
@@ -2013,6 +2053,8 @@ class ListView(Widget):
     def set_selected(self, value: int) -> ListView: ...
 
     def on_select(self, value: Callable[[int], None]) -> ListView: ...
+
+    def on_activate(self, value: Callable[[int], None]) -> ListView: ...
 
     @property
     def selected(self) -> int: ...
@@ -2461,6 +2503,10 @@ class FileBrowser(Dialog):
 
     def on_pick(self, value: Callable[[str], None]) -> FileBrowser: ...
 
+    def set_filters(self, value: Sequence[str]) -> FileBrowser: ...
+
+    def set_show_hidden(self, value: bool) -> FileBrowser: ...
+
     def set_path(self, dir: str) -> FileBrowser: ...
 
     @property
@@ -2472,7 +2518,21 @@ class FileBrowser(Dialog):
         """
 
     @property
+    def filters(self) -> list[str]: ...
+
+    @property
+    def show_hidden(self) -> bool: ...
+
+    def commit(self) -> bool:
+        """
+        Pick the selection as the Open/Save button does; False when nothing is chosen (a selected directory is entered instead).
+        """
+
+    @property
     def list(self) -> ListView: ...
+
+    @property
+    def list_scroll(self) -> ScrollArea: ...
 
     @property
     def name_field(self) -> TextField: ...

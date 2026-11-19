@@ -48,6 +48,14 @@
 namespace nb = nanobind;
 using namespace slikui;
 
+// [slikui patch] in third_party/nanobind/src/nb_type.cpp - see
+// third_party/nanobind/SLIKUI_PATCHES.md.
+NAMESPACE_BEGIN(NB_NAMESPACE)
+NAMESPACE_BEGIN(detail)
+void nb_inst_forget_refs(PyTypeObject *tp, void *ptr) noexcept;
+NAMESPACE_END(detail)
+NAMESPACE_END(NB_NAMESPACE)
+
 namespace {
 
 // Shortest round-trippable-enough float text for __repr__ ("12", "0.25").
@@ -423,17 +431,32 @@ static_assert(sizeof(DrawCmd) == 56, "update DRAWCMD_DTYPE if DrawCmd changes");
 static_assert(std::is_standard_layout_v<GpuInstance> && offsetof(GpuInstance, rect) == 0);
 static_assert(std::is_standard_layout_v<GpuBatch> && offsetof(GpuBatch, first) == 0);
 
-// PyWidget - trampoline so Python classes can implement the Widget contract
-// (measure/paint/on_event/...). See docs/python-custom-widgets.md.
+// PyOwned - what the bindings need from any widget trampoline, whatever
+// built-in it derives from: the tree-ownership protocol plus the C++ base
+// implementations that the bound protocol methods forward to.
+struct PyOwned {
+    virtual ~PyOwned() = default;
+    virtual void anchor_self() = 0;
+    virtual bool anchored() const = 0;
+    virtual std::optional<Rect> base_clip_rect() const = 0;
+    virtual void base_attached(Context& c) = 0;
+};
+
+// PyWidgetT<Base> - trampoline so Python classes can implement the Widget
+// contract (measure/paint/on_event/...) on top of slikui.Widget or one of
+// the built-ins bound with it (Panel, Column, Row). See
+// docs/python-custom-widgets.md. Overrides that call super() reach the C++
+// base: nanobind's trampoline detects the re-dispatch.
 //
 // Lifetime model (spike-verified): Python-created widgets live in
 // nanobind-colocated storage, so the C++ tree must never `delete` them. The
 // tree destroys every widget through Widget::Deleter -> virtual release();
-// PyWidget::release() drops the anchor - a reference to the instance's own
+// release() here drops the anchor - a reference to the instance's own
 // wrapper - and nanobind then runs the destructor and frees the storage.
 // While the tree holds the pointer, the anchor keeps the wrapper alive.
-struct PyWidget : slikui::Widget {
-    NB_TRAMPOLINE(slikui::Widget);
+template <class Base>
+struct PyWidgetT : Base, PyOwned {
+    NB_TRAMPOLINE(Base);
 
     Size measure(const Constraints& c) override { NB_OVERRIDE(measure, c); }
 
@@ -454,10 +477,10 @@ struct PyWidget : slikui::Widget {
             nb_trampoline.base().attr(t.key)(nb::cast(&c, nb::rv_policy::reference));
             return;
         }
-        slikui::Widget::attached(c);
+        Base::attached(c);
     }
-    std::optional<Rect> base_clip_rect() const { return slikui::Widget::clip_rect(); }
-    void base_attached(Context& c) { slikui::Widget::attached(c); }
+    std::optional<Rect> base_clip_rect() const override { return Base::clip_rect(); }
+    void base_attached(Context& c) override { Base::attached(c); }
 
     bool on_event(const Event& e) override { NB_OVERRIDE(on_event, e); }
 
@@ -482,17 +505,17 @@ struct PyWidget : slikui::Widget {
             type_cache_ = nb::borrow<nb::str>(nb_trampoline.base().attr(t.key)()).c_str();
             return type_cache_.c_str();
         }
-        return slikui::Widget::widget_type();
+        return Base::widget_type();
     }
 
     // NOT dispatched to Python: this is the destruction protocol. Dropping
     // the anchor may deallocate `this` re-entrantly - touch nothing after.
     //
     // The subtree is destroyed eagerly, before the anchor drops. Dropping the
-    // anchor alone does not guarantee ~PyWidget runs: Python may still hold
-    // the wrapper - and the subtree itself can be what holds it. Callbacks
-    // inside the subtree can capture this wrapper: a cycle through C++
-    // ownership the GC cannot see, so the whole subtree would leak (found
+    // anchor alone does not guarantee the destructor runs: Python may still
+    // hold the wrapper - and the subtree itself can be what holds it.
+    // Callbacks inside the subtree can capture this wrapper: a cycle through
+    // C++ ownership the GC cannot see, so the whole subtree would leak (found
     // via examples/showcase.py: a Fill container hosting every page). The
     // tree is tearing this widget down, so its children go now, whatever
     // Python does with the detached wrapper afterwards. The anchor still
@@ -501,18 +524,50 @@ struct PyWidget : slikui::Widget {
     void release() noexcept override {
         nb::gil_scoped_acquire gil;
         {
-            auto doomed = std::move(children);
-            children.clear();
-        } // children destroyed here (nested PyWidgets release recursively)
+            auto doomed = std::move(this->children);
+            this->children.clear();
+        } // children destroyed here (nested trampolines release recursively)
         anchor.reset();
     }
 
     // Called by add_widget()/set_root_widget() when the tree takes over.
-    void anchor_self() { anchor = nb::borrow(nb::handle(nb_trampoline.self)); }
+    void anchor_self() override { anchor = nb::borrow(nb::handle(nb_trampoline.self)); }
+    bool anchored() const override { return anchor.is_valid(); }
 
     nb::object anchor;          // set once the tree owns the pointer
     mutable std::string type_cache_;
 };
+
+using PyWidget = PyWidgetT<slikui::Widget>;
+
+// Widget::destroy_hook: when the C++ tree destroys a widget, detach the
+// Python wrappers that merely referenced it. Without this a stale wrapper
+// stays registered at the address: using it reads freed memory, and a new
+// widget allocated there is handed out as the old wrapper (wrong type).
+PyTypeObject* g_widget_type = nullptr;
+void forget_widget_wrappers(Widget* w) noexcept {
+    if (!g_widget_type || !nb::is_alive()) return;
+    nb::gil_scoped_acquire gil;
+    nb::detail::nb_inst_forget_refs(g_widget_type, w);
+}
+
+// Hand a Python-created widget to the C++ tree (add_widget, set_root_widget).
+// Only trampolined instances - Python subclasses of Widget, Panel, Column or
+// Row - live in storage the tree may own this way.
+Widget& adopt_py_widget(Widget& w, const char* where) {
+    auto* po = dynamic_cast<PyOwned*>(&w);
+    if (!po)
+        throw nb::type_error(
+            (std::string(where) +
+             "(): custom widgets must subclass slikui.Widget, Panel, Column or "
+             "Row - other bound widget types cannot dispatch overrides")
+                .c_str());
+    if (po->anchored())
+        throw nb::type_error(
+            (std::string(where) + "(): widget is already in a widget tree").c_str());
+    po->anchor_self();
+    return w;
+}
 
 } // namespace
 
@@ -752,7 +807,23 @@ NB_MODULE(_slikui, m) {
         .value("RightBracket", Key::RightBracket)
         .value("Backslash", Key::Backslash)
         .value("Semicolon", Key::Semicolon)
-        .value("Grave", Key::Grave);
+        .value("Grave", Key::Grave)
+        .value("Kp0", Key::Kp0)
+        .value("Kp1", Key::Kp1)
+        .value("Kp2", Key::Kp2)
+        .value("Kp3", Key::Kp3)
+        .value("Kp4", Key::Kp4)
+        .value("Kp5", Key::Kp5)
+        .value("Kp6", Key::Kp6)
+        .value("Kp7", Key::Kp7)
+        .value("Kp8", Key::Kp8)
+        .value("Kp9", Key::Kp9)
+        .value("KpDecimal", Key::KpDecimal)
+        .value("KpDivide", Key::KpDivide)
+        .value("KpMultiply", Key::KpMultiply)
+        .value("KpSubtract", Key::KpSubtract)
+        .value("KpAdd", Key::KpAdd)
+        .value("KpEqual", Key::KpEqual);
 
     nb::enum_<Mod>(m, "Mod", nb::is_arithmetic())
         .value("ModNone", ModNone)
@@ -1223,15 +1294,7 @@ NB_MODULE(_slikui, m) {
              nb::rv_policy::reference_internal)
         .def("set_root_widget",
              [](Context& c, Widget& w) -> Widget& {
-                 if (auto* pw = dynamic_cast<PyWidget*>(&w)) {
-                     if (pw->anchor)
-                         throw nb::type_error(
-                             "set_root_widget(): widget is already in a widget tree");
-                     pw->anchor_self();
-                 } else {
-                     throw nb::type_error(
-                         "set_root_widget(): custom widgets must subclass slikui.Widget");
-                 }
+                 adopt_py_widget(w, "set_root_widget");
                  c.set_root(std::unique_ptr<Widget>(&w));
                  return w;
              },
@@ -1404,13 +1467,13 @@ NB_MODULE(_slikui, m) {
              "widget's clip_rect - decorations over wrapped widgets.")
         .def("clip_rect",
              [](Widget& w) {
-                 auto* pw = dynamic_cast<PyWidget*>(&w);
-                 return pw ? pw->base_clip_rect() : std::optional<Rect>{};
+                 auto* po = dynamic_cast<PyOwned*>(&w);
+                 return po ? po->base_clip_rect() : std::optional<Rect>{};
              },
              "Override: Rect to clip the children to while painting, or None.")
         .def("attached",
              [](Widget& w, Context& c) {
-                 if (auto* pw = dynamic_cast<PyWidget*>(&w)) pw->base_attached(c);
+                 if (auto* po = dynamic_cast<PyOwned*>(&w)) po->base_attached(c);
              },
              nb::arg("context"),
              "Override: called once when the widget joins a Context (when it "
@@ -1510,22 +1573,14 @@ NB_MODULE(_slikui, m) {
              nb::arg("text"), nb::rv_policy::reference)
         .def("add_widget",
              [](Widget& host, Widget& child) -> Widget& {
-                 if (auto* pw = dynamic_cast<PyWidget*>(&child)) {
-                     if (pw->anchor) // nanobind owns the storage once anchored
-                         throw nb::type_error(
-                             "add_widget(): widget is already in a widget tree");
-                     pw->anchor_self();
-                 } else {
-                     throw nb::type_error(
-                         "add_widget(): custom widgets must subclass slikui.Widget - "
-                         "Python subclasses of bound widget types (Column, Row, ...) "
-                         "cannot dispatch overrides");
-                 }
+                 adopt_py_widget(child, "add_widget");
                  host.add(std::unique_ptr<Widget>(&child));
                  return child;
              },
              nb::arg("widget"), nb::rv_policy::reference);
     bind_add(widget_cls);
+    g_widget_type = (PyTypeObject*) widget_cls.ptr();
+    Widget::destroy_hook = &forget_widget_wrappers;
 
     nb::class_<Container, Widget>(m, "Container")
         .def("set_padding",
@@ -1546,12 +1601,17 @@ NB_MODULE(_slikui, m) {
              [](Container& c, CrossMode mode) -> Container& { return c.set_cross(mode); },
              nb::arg("value"), nb::rv_policy::reference);
 
-    auto column_cls = nb::class_<Column, Container>(m, "Column");
-    auto row_cls = nb::class_<Row, Container>(m, "Row");
+    // Column, Row and Panel carry the widget trampoline, so Python may
+    // subclass them and override the protocol (on_event, paint, measure,
+    // ...) like slikui.Widget; super() reaches the built-in behaviour.
+    auto column_cls = nb::class_<Column, Container, PyWidgetT<Column>>(m, "Column");
+    column_cls.def(nb::init<>()); // for Python subclasses (add with add_widget)
+    auto row_cls = nb::class_<Row, Container, PyWidgetT<Row>>(m, "Row");
+    row_cls.def(nb::init<>());
     auto spacer_cls = nb::class_<Spacer, Widget>(m, "Spacer");
-    (void)column_cls; (void)row_cls; (void)spacer_cls;
+    (void)spacer_cls;
 
-    auto panel_cls = nb::class_<Panel, Container>(m, "Panel");
+    auto panel_cls = nb::class_<Panel, Container, PyWidgetT<Panel>>(m, "Panel");
     panel_cls.def(nb::init<>()); // standalone popups (Menus, anchored panels)
     def_setter(panel_cls, "set_background", &Panel::set_background);
     def_setter(panel_cls, "set_border", &Panel::set_border);
@@ -1788,7 +1848,11 @@ NB_MODULE(_slikui, m) {
              [](MenuBar& b, std::string title) -> Menu& {
                  return b.add_menu(std::move(title));
              },
-             nb::arg("title"), nb::rv_policy::reference);
+             nb::arg("title"), nb::rv_policy::reference)
+        .def("set_background",
+             [](MenuBar& b, Color c) -> MenuBar& { return b.set_background(c); },
+             nb::arg("color"), nb::rv_policy::reference,
+             "Fill behind the bar (default transparent: the window background).");
 
     auto iconbutton = nb::class_<IconButton, Widget>(m, "IconButton");
     def_setter(iconbutton, "on_click", &IconButton::on_click);
@@ -1969,6 +2033,8 @@ NB_MODULE(_slikui, m) {
     def_setter(spinner, "set_speed", &Spinner::set_speed);
 
     auto textfield = nb::class_<TextField, Widget>(m, "TextField");
+    textfield.def_prop_ro("scroll_x", &TextField::scroll_x,
+                          "Horizontal scroll of the text (logical px; 0 = start shown).");
     def_setter(textfield, "set_text", &TextField::set_text);
     textfield.def_prop_rw("text",
                           [](TextField& t) { return t.text(); },
@@ -2010,6 +2076,7 @@ NB_MODULE(_slikui, m) {
     def_setter(listview, "set_items", &ListView::set_items);
     def_setter(listview, "set_selected", &ListView::set_selected);
     def_setter(listview, "on_select", &ListView::on_select);
+    def_setter(listview, "on_activate", &ListView::on_activate);
     listview.def_prop_ro("selected", &ListView::selected);
     listview.def("row_rect", &ListView::row_rect, nb::arg("index"),
                  "Absolute rect of item `index` (current layout); empty if out of range.");
@@ -2221,6 +2288,8 @@ NB_MODULE(_slikui, m) {
         .value("Open", FileBrowser::Mode::Open)
         .value("Save", FileBrowser::Mode::Save);
     def_setter(filebrowser, "on_pick", &FileBrowser::on_pick);
+    def_setter(filebrowser, "set_filters", &FileBrowser::set_filters);
+    def_setter(filebrowser, "set_show_hidden", &FileBrowser::set_show_hidden);
     filebrowser.def(nb::init<FileBrowser::Mode, std::string, std::string>(),
                     nb::arg("mode"), nb::arg("title") = "", nb::arg("id") = "")
         .def("set_path",
@@ -2233,7 +2302,15 @@ NB_MODULE(_slikui, m) {
              [](FileBrowser& fb) { return fb.selection(); },
              "path()/selection(): current directory and the picked file ('' "
              "when nothing is chosen).")
+        .def_prop_ro("filters", [](FileBrowser& fb) { return fb.filters(); })
+        .def_prop_ro("show_hidden", &FileBrowser::show_hidden)
+        .def("commit", &FileBrowser::commit,
+             "Pick the selection as the Open/Save button does; False when "
+             "nothing is chosen (a selected directory is entered instead).")
         .def_prop_ro("list", [](FileBrowser& fb) -> ListView& { return fb.list(); },
+                     nb::rv_policy::reference)
+        .def_prop_ro("list_scroll",
+                     [](FileBrowser& fb) -> ScrollArea& { return fb.list_scroll(); },
                      nb::rv_policy::reference)
         .def_prop_ro("name_field",
                      [](FileBrowser& fb) -> TextField& { return fb.name_field(); },

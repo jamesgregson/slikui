@@ -292,6 +292,9 @@ enum class Key : std::uint32_t {
     // Remaining US-layout punctuation (appended in 0.5; keys by physical
     // position, like the rest): = [ ] \ ; `
     Equal, LeftBracket, RightBracket, Backslash, Semicolon, Grave,
+    // Numeric keypad (appended after 0.5.0). Keypad Enter still maps to Enter.
+    Kp0, Kp1, Kp2, Kp3, Kp4, Kp5, Kp6, Kp7, Kp8, Kp9,
+    KpDecimal, KpDivide, KpMultiply, KpSubtract, KpAdd, KpEqual,
 };
 
 enum Mod : std::uint32_t {
@@ -9926,8 +9929,14 @@ public:
     // would later dispatch into freed memory. ctx_alive_ guards the reverse
     // case - a borrowed widget (Menu, Dialog) outliving its Context.
     virtual ~Widget() {
+        if (destroy_hook) destroy_hook(this);
         if (ctx && !ctx_alive_.expired()) context_forget(ctx, this);
     }
+
+    // Called from every ~Widget with the dying widget (by then only its
+    // address is meaningful). Null by default; the Python bindings set it to
+    // invalidate wrappers of widgets the tree destroys.
+    static inline void (*destroy_hook)(Widget*) noexcept = nullptr;
 
     Widget(const Widget&) = delete;
     Widget& operator=(const Widget&) = delete;
@@ -12339,6 +12348,7 @@ public:
     Switch& set_checked(bool c, bool fire_callback = false) {
         checked_ = c;
         knob_.target = c ? 1.f : 0.f;
+        if (!ticked_) knob_.value = knob_.target; // initial state: no slide-in
         if (fire_callback && on_change_) on_change_(checked_);
         return *this;
     }
@@ -12369,7 +12379,10 @@ public:
         return false;
     }
 
-    void tick(Time t) override { knob_.advance(t.dt); }
+    void tick(Time t) override {
+        ticked_ = true;
+        knob_.advance(t.dt);
+    }
 
     const char* widget_type() const override { return "Switch"; }
 
@@ -12377,6 +12390,7 @@ public:
 
 private:
     bool checked_ = false;
+    bool ticked_ = false; // until the first tick, state changes snap
     Anim knob_{0, 0, 18};
     std::function<void(bool)> on_change_;
 };
@@ -12402,6 +12416,7 @@ public:
         if (v == value_) return *this;
         value_ = v;
         fraction_.target = fraction();
+        if (!ticked_) fraction_.value = fraction_.target; // initial value: no sweep
         label_valid_ = false;
         if (fire_callback && on_change_) on_change_(value_);
         return *this;
@@ -12490,6 +12505,8 @@ public:
 
     void tick(Time t) override {
         fraction_.target = fraction();
+        if (!ticked_) fraction_.value = fraction_.target; // range/log/step set before showing
+        ticked_ = true;
         fraction_.advance(t.dt);
     }
 
@@ -12529,6 +12546,7 @@ private:
     bool fmt_set_ = false, log_ = false;
     float step_ = 0;
     bool dragging_ = false;
+    bool ticked_ = false; // until the first tick, value changes snap
     Anim fraction_{0, 0, 20};
     std::function<void(float)> on_change_;
     mutable text::TextLayout label_lay_, value_lay_;
@@ -12736,6 +12754,8 @@ private:
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <string>
 #include <utility>
@@ -12786,32 +12806,44 @@ public:
         const_cast<TextField*>(this)->refresh_metrics();
         std::string shown = display_text();
         float px = t.s(t.base_font_px); // raster size
-        float pad_x = 8.f;
+        // Text is clipped to the padded interior; a long value scrolls
+        // horizontally to keep the caret in view, a long placeholder elides.
+        float inner_w = std::fmax(bounds.w - 2 * kPadX, 0.f);
+        env.list.push_clip({bounds.x + kPadX - 1, bounds.y + 1, inner_w + 2,
+                            std::fmax(bounds.h - 2, 0.f)});
         // Center by the tight text block, not the leading - the block now
         // starts at the ascent, so this is typographically centered.
 
         if (!shown.empty()) {
+            update_scroll();
             text::TextLayout lay = ctx->font().layout(shown, px);
             float text_y = bounds.center().y - lay.size.h * inv * .5f;
+            float x0 = bounds.x + kPadX - scroll_x_;
             if (focused && has_sel()) {
                 auto [lo, hi] = sel_range();
-                float sx = bounds.x + pad_x + ctx->font().advance_upto(text_, lo, px) * inv;
-                float ex = bounds.x + pad_x + ctx->font().advance_upto(text_, hi, px) * inv;
+                float sx = x0 + x_of(lo), ex = x0 + x_of(hi);
                 env.list.rect({sx, text_y, ex - sx, lay.size.h * inv}, t.accent.faded(.35f), 2);
             }
-            paint_lay(env, lay, bounds.x + pad_x, text_y, t.text, inv);
+            paint_lay(env, lay, x0, text_y, t.text, inv);
             if (focused && caret_visible_) {
-                float cx = bounds.x + pad_x +
-                           ctx->font().advance_upto(text_, caret_, px) * inv;
+                float cx = x0 + x_of(caret_);
                 env.list.line({cx, text_y + 2}, {cx, text_y + lay.size.h * inv - 2},
                               t.text, 1);
             }
-        } else if (!placeholder_.empty()) {
-            text::TextLayout lay = ctx->font().layout(placeholder_, px);
-            float text_y = bounds.center().y - lay.size.h * inv * .5f;
-            paint_lay(env, lay, bounds.x + pad_x, text_y, t.text_dim.faded(.6f), inv);
+        } else {
+            scroll_x_ = 0;
+            if (!placeholder_.empty()) {
+                text::TextLayout lay =
+                    text::layout_fitted(ctx->font(), placeholder_, px, 0, inner_w * sc, 0);
+                float text_y = bounds.center().y - lay.size.h * inv * .5f;
+                paint_lay(env, lay, bounds.x + kPadX, text_y, t.text_dim.faded(.6f), inv);
+            }
         }
+        env.list.pop_clip();
     }
+
+    // Horizontal scroll offset of the text (logical px; 0 = start visible).
+    float scroll_x() const { return scroll_x_; }
 
     bool on_event(const Event& e) override {
         switch (e.type) {
@@ -13033,15 +13065,34 @@ private:
         caret_ = lo;
         clear_sel();
     }
+    // Logical x of byte offset `i` from the text start, measured on what is
+    // shown (password fields draw one '*' per byte).
+    float x_of(size_t i) const {
+        float px = ctx->theme().s(ctx->theme().base_font_px);
+        float inv = 1.f / ui_scale();
+        return password_ ? ctx->font().advance_upto(std::string(text_.size(), '*'), i, px) * inv
+                         : ctx->font().advance_upto(text_, i, px) * inv;
+    }
+    // Keep the caret inside the padded interior while focused; snap back to
+    // the start on blur. Clamped so no empty space opens up on the right.
+    void update_scroll() const {
+        float inner_w = std::fmax(bounds.w - 2 * kPadX - 1, 0.f); // -1: caret width
+        if (!focused) {
+            scroll_x_ = 0;
+            return;
+        }
+        float cx = x_of(caret_);
+        if (cx - scroll_x_ < 0) scroll_x_ = cx;
+        if (cx - scroll_x_ > inner_w) scroll_x_ = cx - inner_w;
+        float max_scroll = std::fmax(0.f, x_of(text_.size()) - inner_w);
+        scroll_x_ = std::clamp(scroll_x_, 0.f, max_scroll);
+    }
     // Place the caret at a click position (approximate: walk codepoints).
     size_t caret_at(float x) const {
-        float inv = 1.f / ui_scale();
-        float px = ctx->theme().s(ctx->theme().base_font_px);
-        float rel = x - bounds.x - 8;
+        float rel = x - bounds.x - kPadX + scroll_x_;
         size_t n = 0;
-        while (n < text_.size() &&
-               ctx->font().advance_upto(text_, n + 1, px) * inv < rel)
-            ++n;
+        while (n < text_.size() && x_of(next_cp_boundary(n)) < rel)
+            n = next_cp_boundary(n);
         return n;
     }
 
@@ -13065,8 +13116,11 @@ private:
             ctx->font().line_height(ctx->theme().s(ctx->theme().base_font_px));
     }
 
+    static constexpr float kPadX = 8.f; // text inset from the left/right edge
+
     std::string text_, placeholder_;
     size_t caret_ = 0;
+    mutable float scroll_x_ = 0;
     long sel_anchor_ = -1; // byte offset where the selection was anchored
     bool selecting_ = false;
     bool password_ = false;
@@ -13691,6 +13745,8 @@ public:
     }
     long selected() const { return selected_; }
     ListView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+    // Double-click on an item (after its on_select for the first click).
+    ListView& on_activate(std::function<void(size_t)> f) { on_activate_ = std::move(f); return *this; }
 
     // Absolute rect of item `index` in the current layout (empty if out of
     // range) - e.g. ScrollArea::scroll_to(list.row_rect(i)).
@@ -13739,6 +13795,7 @@ public:
             if (idx >= 0) {
                 selected_ = idx;
                 if (on_select_) on_select_(size_t(idx));
+                if (e.clicks == 2 && on_activate_) on_activate_(size_t(idx));
             }
             return true;
         }
@@ -13777,7 +13834,7 @@ private:
     size_t hovered_ = size_t(-1);
     mutable float line_height_ = 0, natural_w_ = 100, valid_scale_ = 0;
     mutable bool valid_ = false;
-    std::function<void(size_t)> on_select_;
+    std::function<void(size_t)> on_select_, on_activate_;
 };
 
 // ---------------------------------------------------------------------------
@@ -23637,6 +23694,11 @@ inline std::string shortcut_label(Key key, unsigned mods) {
         out += char('0' + k - int(Key::Num0));
         return out;
     }
+    if (k >= int(Key::Kp0) && k <= int(Key::Kp9)) {
+        out += "Num";
+        out += char('0' + k - int(Key::Kp0));
+        return out;
+    }
     switch (key) {
     case Key::Enter: out += "Enter"; break;
     case Key::Escape: out += "Esc"; break;
@@ -23664,6 +23726,12 @@ inline std::string shortcut_label(Key key, unsigned mods) {
     case Key::Backslash: out += "\\"; break;
     case Key::Semicolon: out += ";"; break;
     case Key::Grave: out += "`"; break;
+    case Key::KpDecimal: out += "Num."; break;
+    case Key::KpDivide: out += "Num/"; break;
+    case Key::KpMultiply: out += "Num*"; break;
+    case Key::KpSubtract: out += "Num-"; break;
+    case Key::KpAdd: out += "Num+"; break;
+    case Key::KpEqual: out += "Num="; break;
     default:
         if (k >= int(Key::F1) && k <= int(Key::F12))
             out += "F" + std::to_string(k - int(Key::F1) + 1);
@@ -24038,8 +24106,12 @@ public:
         return c.clamp(s);
     }
 
+    // Fill behind the bar; transparent (the default) shows the window
+    // background, like Toolbar.
+    MenuBar& set_background(Color c) { background_ = c; return *this; }
+
     void paint(const PaintEnv& env) const override {
-        env.list.rect(bounds, env.theme.surface, 0);
+        if (background_.a > 0) env.list.rect(bounds, background_, 0);
         env.list.line({bounds.x, bounds.bottom() - 1},
                       {bounds.right(), bounds.bottom() - 1}, env.theme.border, 1);
     }
@@ -24130,6 +24202,7 @@ public:
     };
 
     std::vector<std::unique_ptr<Menu>> menus_;
+    Color background_ = Color::transparent();
 };
 
 } // namespace slikui
@@ -24786,10 +24859,15 @@ public:
                  std::move(widget_id)),
           mode_(mode) {
         path_label_ = &content().add<Label>("");
-        list_ = &content().add<ListView>();
-        list_->on_select([this](size_t i) { entry_clicked(long(i)); });
+        // The list scrolls inside a pane that shrinks to fit the window, so
+        // the name field and buttons below it stay reachable.
+        pane_ = &content().add<ListPane>();
+        list_ = &pane_->add<ListView>();
+        list_->on_select([this](size_t i) { entry_selected(long(i)); });
+        list_->on_activate([this](size_t i) { entry_activated(long(i)); });
         name_ = &content().add<TextField>();
         name_->set_placeholder("file name");
+        name_->on_submit([this](std::string_view) { commit(); });
         auto& buttons = content().add<Row>();
         buttons.set_gap(8);
         buttons.add<Spacer>();
@@ -24806,8 +24884,26 @@ public:
         return *this;
     }
     std::string path() const { return path_.string(); }
+    // Glob patterns (`*` and `?`, case-insensitive) a file name must match
+    // one of, e.g. {"*.png", "*.jpg"}; empty (the default) lists every file.
+    // Directories are always listed.
+    FileBrowser& set_filters(std::vector<std::string> patterns) {
+        filters_ = std::move(patterns);
+        refresh();
+        return *this;
+    }
+    const std::vector<std::string>& filters() const { return filters_; }
+    // Dotfiles and dot-directories are hidden by default.
+    FileBrowser& set_show_hidden(bool on) {
+        show_hidden_ = on;
+        refresh();
+        return *this;
+    }
+    bool show_hidden() const { return show_hidden_; }
     // The selected file (path + name field); empty when nothing is chosen.
+    // A file selected via list().set_selected() counts as chosen.
     std::string selection() const {
+        sync_from_list();
         if (name_->text().empty()) return {};
         return (path_ / name_->text()).lexically_normal().string();
     }
@@ -24816,17 +24912,94 @@ public:
         return *this;
     }
     ListView& list() { return *list_; }
+    ScrollArea& list_scroll() { return *pane_; }
     TextField& name_field() { return *name_; }
     Button& open_button() { return *open_button_; }
+    // Pick the current selection (as the Open/Save button does). False when
+    // nothing is chosen; a selected directory is entered instead.
+    bool commit() {
+        sync_from_list();
+        if (name_->text().empty()) {
+            long i = list_->selected();
+            if (i >= 0 && size_t(i) < entries_.size() && is_dir_[size_t(i)]) enter(size_t(i));
+            return false;
+        }
+        std::string sel = selection();
+        if (on_pick_) on_pick_(sel);
+        request_close();
+        return true;
+    }
 
     void attached(Context& c) override {
         Dialog::attached(c);
         path_label_->set_color(c.theme().text_dim);
     }
 
+    // The list pane takes its preferred height, less whatever the dialog
+    // would overflow the space it is given (measure: the window; arrange:
+    // the area the Context settled on, which may be smaller still).
+    Size measure(const Constraints& c) override {
+        pane_->cap = kListHeight;
+        Size s = Dialog::measure(c);
+        if (s.h > c.max.y) {
+            pane_->cap = std::fmax(kMinListHeight, kListHeight - (s.h - c.max.y));
+            s = Dialog::measure(c);
+        }
+        return s;
+    }
+    void arrange(const Rect& area) override {
+        Size want = Dialog::measure(Constraints::loose({area.w, kInfinite}));
+        if (want.h > area.h)
+            pane_->cap = std::fmax(kMinListHeight, pane_->cap - (want.h - area.h));
+        Dialog::arrange(area);
+    }
+
+    void tick(Time t) override {
+        Dialog::tick(t);
+        sync_from_list(); // show a programmatic selection in the name field
+    }
+
     const char* widget_type() const override { return "FileBrowser"; }
 
+    // Implementation detail, public only so add<ListPane> can instantiate.
+    class ListPane : public ScrollArea {
+    public:
+        float cap = 320.f;
+        Size measure(const Constraints& c) override { return c.clamp({420.f, cap}); }
+    };
+
 private:
+    static constexpr float kListHeight = 320.f, kMinListHeight = 48.f;
+
+    static bool glob_match(std::string_view pat, std::string_view name) {
+        auto lower = [](char ch) {
+            return (ch >= 'A' && ch <= 'Z') ? char(ch - 'A' + 'a') : ch;
+        };
+        size_t p = 0, n = 0, star = std::string_view::npos, mark = 0;
+        while (n < name.size()) {
+            if (p < pat.size() && (pat[p] == '?' || lower(pat[p]) == lower(name[n]))) {
+                ++p;
+                ++n;
+            } else if (p < pat.size() && pat[p] == '*') {
+                star = p++;
+                mark = n;
+            } else if (star != std::string_view::npos) {
+                p = star + 1;
+                n = ++mark;
+            } else {
+                return false;
+            }
+        }
+        while (p < pat.size() && pat[p] == '*') ++p;
+        return p == pat.size();
+    }
+    bool passes_filter(const std::string& name) const {
+        if (filters_.empty()) return true;
+        for (const auto& f : filters_)
+            if (glob_match(f, name)) return true;
+        return false;
+    }
+
     void refresh() {
         entries_.clear();
         is_dir_.clear();
@@ -24838,12 +25011,11 @@ private:
         }
         std::vector<std::string> files;
         for (const auto& it : std::filesystem::directory_iterator(path_, ec)) {
+            std::string name = it.path().filename().string();
+            if (!show_hidden_ && !name.empty() && name[0] == '.') continue;
             bool dir = it.is_directory(ec);
-            if (dir) {
-                dirs.push_back(it.path().filename().string() + "/");
-            } else {
-                files.push_back(it.path().filename().string());
-            }
+            if (dir) dirs.push_back(name + "/");
+            else if (passes_filter(name)) files.push_back(name);
         }
         std::sort(dirs.begin(), dirs.end());
         std::sort(files.begin(), files.end());
@@ -24856,36 +25028,55 @@ private:
             is_dir_.push_back(false);
         }
         list_->set_items(entries_).set_selected(-1);
+        synced_sel_ = -1;
+        pane_->scroll_to_top();
         path_label_->set_text(path_.string());
     }
 
-    void entry_clicked(long i) {
+    // A selected file fills the name field; a directory leaves it alone.
+    void entry_selected(long i) {
+        synced_sel_ = i;
+        if (i < 0 || size_t(i) >= entries_.size() || is_dir_[size_t(i)]) return;
+        name_->set_text(entries_[size_t(i)]);
+    }
+    // Double-click: enter a directory, pick a file.
+    void entry_activated(long i) {
         if (i < 0 || size_t(i) >= entries_.size()) return;
         if (is_dir_[size_t(i)]) {
-            std::string name = entries_[size_t(i)];
-            if (name == "..") path_ = path_.parent_path();
-            else path_ /= name.substr(0, name.size() - 1); // strip "/"
-            refresh();
+            enter(size_t(i));
         } else {
-            name_->set_text(entries_[size_t(i)]);
+            entry_selected(i);
+            commit();
         }
     }
-
-    void commit() {
-        std::string sel = selection();
-        if (sel.empty()) return;
-        if (on_pick_) on_pick_(sel);
-        request_close();
+    void enter(size_t i) {
+        std::string name = entries_[i];
+        if (name == "..") path_ = path_.parent_path();
+        else path_ /= name.substr(0, name.size() - 1); // strip "/"
+        refresh();
+    }
+    // Keep the name field in step with a selection made through list()
+    // directly (set_selected does not fire on_select).
+    void sync_from_list() const {
+        long i = list_->selected();
+        if (i == synced_sel_) return;
+        synced_sel_ = i;
+        if (i >= 0 && size_t(i) < entries_.size() && !is_dir_[size_t(i)])
+            name_->set_text(entries_[size_t(i)]);
     }
 
     Mode mode_;
     Label* path_label_ = nullptr;
+    ListPane* pane_ = nullptr;
     ListView* list_ = nullptr;
     TextField* name_ = nullptr;
     Button* open_button_ = nullptr;
     std::filesystem::path path_;
     std::vector<std::string> entries_;
     std::vector<bool> is_dir_;
+    std::vector<std::string> filters_;
+    bool show_hidden_ = false;
+    mutable long synced_sel_ = -1;
     std::function<void(std::string)> on_pick_;
 };
 
@@ -25913,6 +26104,22 @@ inline Key map_key(int glfw_key) {
     case GLFW_KEY_7: return Key::Num7;
     case GLFW_KEY_8: return Key::Num8;
     case GLFW_KEY_9: return Key::Num9;
+    case GLFW_KEY_KP_0: return Key::Kp0;
+    case GLFW_KEY_KP_1: return Key::Kp1;
+    case GLFW_KEY_KP_2: return Key::Kp2;
+    case GLFW_KEY_KP_3: return Key::Kp3;
+    case GLFW_KEY_KP_4: return Key::Kp4;
+    case GLFW_KEY_KP_5: return Key::Kp5;
+    case GLFW_KEY_KP_6: return Key::Kp6;
+    case GLFW_KEY_KP_7: return Key::Kp7;
+    case GLFW_KEY_KP_8: return Key::Kp8;
+    case GLFW_KEY_KP_9: return Key::Kp9;
+    case GLFW_KEY_KP_DECIMAL: return Key::KpDecimal;
+    case GLFW_KEY_KP_DIVIDE: return Key::KpDivide;
+    case GLFW_KEY_KP_MULTIPLY: return Key::KpMultiply;
+    case GLFW_KEY_KP_SUBTRACT: return Key::KpSubtract;
+    case GLFW_KEY_KP_ADD: return Key::KpAdd;
+    case GLFW_KEY_KP_EQUAL: return Key::KpEqual;
     default: return Key::Unknown;
     }
 }
@@ -26403,6 +26610,22 @@ inline Key map_key(SDL_Keycode k) {
     case SDLK_BACKSLASH: return Key::Backslash;
     case SDLK_SEMICOLON: return Key::Semicolon;
     case SDLK_GRAVE: return Key::Grave;
+    case SDLK_KP_0: return Key::Kp0;
+    case SDLK_KP_1: return Key::Kp1;
+    case SDLK_KP_2: return Key::Kp2;
+    case SDLK_KP_3: return Key::Kp3;
+    case SDLK_KP_4: return Key::Kp4;
+    case SDLK_KP_5: return Key::Kp5;
+    case SDLK_KP_6: return Key::Kp6;
+    case SDLK_KP_7: return Key::Kp7;
+    case SDLK_KP_8: return Key::Kp8;
+    case SDLK_KP_9: return Key::Kp9;
+    case SDLK_KP_PERIOD: return Key::KpDecimal;
+    case SDLK_KP_DIVIDE: return Key::KpDivide;
+    case SDLK_KP_MULTIPLY: return Key::KpMultiply;
+    case SDLK_KP_MINUS: return Key::KpSubtract;
+    case SDLK_KP_PLUS: return Key::KpAdd;
+    case SDLK_KP_EQUALS: return Key::KpEqual;
     case SDLK_LEFT: return Key::Left;
     case SDLK_RIGHT: return Key::Right;
     case SDLK_UP: return Key::Up;

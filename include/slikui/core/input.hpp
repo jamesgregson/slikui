@@ -28,6 +28,9 @@ enum class Key : std::uint32_t {
     // Remaining US-layout punctuation (appended in 0.5; keys by physical
     // position, like the rest): = [ ] \ ; `
     Equal, LeftBracket, RightBracket, Backslash, Semicolon, Grave,
+    // Numeric keypad (appended after 0.5.0). Keypad Enter still maps to Enter.
+    Kp0, Kp1, Kp2, Kp3, Kp4, Kp5, Kp6, Kp7, Kp8, Kp9,
+    KpDecimal, KpDivide, KpMultiply, KpSubtract, KpAdd, KpEqual,
 };
 
 enum Mod : std::uint32_t {

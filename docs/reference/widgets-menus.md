@@ -49,6 +49,7 @@ The capture below opens the **File** menu by simulating a click on it:
 | API | Signature |
 |-----|-----------|
 | `MenuBar::add_menu` | `(title) -> Menu&` |
+| `MenuBar::set_background` | `(Color)` - default transparent: the window background shows, as with `Toolbar` |
 | `Menu::add_item` | `(label, fn, hint = "", enabled = true)` |
 | `Menu::add_checkable` | `(label, is_checked_fn, on_toggle_fn)` |
 | `Menu::add_submenu` | `(label) -> Menu&` |

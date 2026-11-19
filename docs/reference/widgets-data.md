@@ -46,6 +46,7 @@ click - the screenshot shows it after a simulated press:
 | `ListView::set_items` | `(std::vector<std::string>)` |
 | `ListView::set_selected` | `(long index)` |
 | `ListView::on_select` | `(std::function<void(size_t)>)` |
+| `ListView::on_activate` | `(std::function<void(size_t)>)` - double-click, after `on_select` |
 | `Tabs::set_tabs` | `(std::vector<std::string>)` |
 | `Tabs::set_selected` / `on_change` | tab index |
 | `Dropdown::set_items` / `set_placeholder` / `set_selected` / `on_select` | like ListView |

@@ -192,6 +192,8 @@ public:
     }
     long selected() const { return selected_; }
     ListView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+    // Double-click on an item (after its on_select for the first click).
+    ListView& on_activate(std::function<void(size_t)> f) { on_activate_ = std::move(f); return *this; }
 
     // Absolute rect of item `index` in the current layout (empty if out of
     // range) - e.g. ScrollArea::scroll_to(list.row_rect(i)).
@@ -240,6 +242,7 @@ public:
             if (idx >= 0) {
                 selected_ = idx;
                 if (on_select_) on_select_(size_t(idx));
+                if (e.clicks == 2 && on_activate_) on_activate_(size_t(idx));
             }
             return true;
         }
@@ -278,7 +281,7 @@ private:
     size_t hovered_ = size_t(-1);
     mutable float line_height_ = 0, natural_w_ = 100, valid_scale_ = 0;
     mutable bool valid_ = false;
-    std::function<void(size_t)> on_select_;
+    std::function<void(size_t)> on_select_, on_activate_;
 };
 
 // ---------------------------------------------------------------------------

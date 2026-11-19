@@ -56,8 +56,14 @@ public:
     // would later dispatch into freed memory. ctx_alive_ guards the reverse
     // case - a borrowed widget (Menu, Dialog) outliving its Context.
     virtual ~Widget() {
+        if (destroy_hook) destroy_hook(this);
         if (ctx && !ctx_alive_.expired()) context_forget(ctx, this);
     }
+
+    // Called from every ~Widget with the dying widget (by then only its
+    // address is meaningful). Null by default; the Python bindings set it to
+    // invalidate wrappers of widgets the tree destroys.
+    static inline void (*destroy_hook)(Widget*) noexcept = nullptr;
 
     Widget(const Widget&) = delete;
     Widget& operator=(const Widget&) = delete;

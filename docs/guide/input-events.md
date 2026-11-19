@@ -123,6 +123,11 @@ modifier is required, so typing never triggers one). Full details and code:
     ctx.add_shortcut(slikui.Key.R, slikui.mods("ctrl"), render_fn)
     ```
 
+`Key` names physical keys: letters, top-row digits (`Num0`-`Num9`),
+punctuation, and the numeric keypad (`Kp0`-`Kp9`, `KpDecimal`, `KpDivide`,
+`KpMultiply`, `KpSubtract`, `KpAdd`, `KpEqual`; keypad Enter arrives as
+`Enter`). Bind both `Equal` and `KpAdd` to serve either zoom key.
+
 ![The View menu opened as a borrowed popup over a viewport - the capture calls
 `open_context_menu`, which is exactly what a right-click does](../images/contextmenu.png)
 

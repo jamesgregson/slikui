@@ -444,10 +444,15 @@ public:
                  std::move(widget_id)),
           mode_(mode) {
         path_label_ = &content().add<Label>("");
-        list_ = &content().add<ListView>();
-        list_->on_select([this](size_t i) { entry_clicked(long(i)); });
+        // The list scrolls inside a pane that shrinks to fit the window, so
+        // the name field and buttons below it stay reachable.
+        pane_ = &content().add<ListPane>();
+        list_ = &pane_->add<ListView>();
+        list_->on_select([this](size_t i) { entry_selected(long(i)); });
+        list_->on_activate([this](size_t i) { entry_activated(long(i)); });
         name_ = &content().add<TextField>();
         name_->set_placeholder("file name");
+        name_->on_submit([this](std::string_view) { commit(); });
         auto& buttons = content().add<Row>();
         buttons.set_gap(8);
         buttons.add<Spacer>();
@@ -464,8 +469,26 @@ public:
         return *this;
     }
     std::string path() const { return path_.string(); }
+    // Glob patterns (`*` and `?`, case-insensitive) a file name must match
+    // one of, e.g. {"*.png", "*.jpg"}; empty (the default) lists every file.
+    // Directories are always listed.
+    FileBrowser& set_filters(std::vector<std::string> patterns) {
+        filters_ = std::move(patterns);
+        refresh();
+        return *this;
+    }
+    const std::vector<std::string>& filters() const { return filters_; }
+    // Dotfiles and dot-directories are hidden by default.
+    FileBrowser& set_show_hidden(bool on) {
+        show_hidden_ = on;
+        refresh();
+        return *this;
+    }
+    bool show_hidden() const { return show_hidden_; }
     // The selected file (path + name field); empty when nothing is chosen.
+    // A file selected via list().set_selected() counts as chosen.
     std::string selection() const {
+        sync_from_list();
         if (name_->text().empty()) return {};
         return (path_ / name_->text()).lexically_normal().string();
     }
@@ -474,17 +497,94 @@ public:
         return *this;
     }
     ListView& list() { return *list_; }
+    ScrollArea& list_scroll() { return *pane_; }
     TextField& name_field() { return *name_; }
     Button& open_button() { return *open_button_; }
+    // Pick the current selection (as the Open/Save button does). False when
+    // nothing is chosen; a selected directory is entered instead.
+    bool commit() {
+        sync_from_list();
+        if (name_->text().empty()) {
+            long i = list_->selected();
+            if (i >= 0 && size_t(i) < entries_.size() && is_dir_[size_t(i)]) enter(size_t(i));
+            return false;
+        }
+        std::string sel = selection();
+        if (on_pick_) on_pick_(sel);
+        request_close();
+        return true;
+    }
 
     void attached(Context& c) override {
         Dialog::attached(c);
         path_label_->set_color(c.theme().text_dim);
     }
 
+    // The list pane takes its preferred height, less whatever the dialog
+    // would overflow the space it is given (measure: the window; arrange:
+    // the area the Context settled on, which may be smaller still).
+    Size measure(const Constraints& c) override {
+        pane_->cap = kListHeight;
+        Size s = Dialog::measure(c);
+        if (s.h > c.max.y) {
+            pane_->cap = std::fmax(kMinListHeight, kListHeight - (s.h - c.max.y));
+            s = Dialog::measure(c);
+        }
+        return s;
+    }
+    void arrange(const Rect& area) override {
+        Size want = Dialog::measure(Constraints::loose({area.w, kInfinite}));
+        if (want.h > area.h)
+            pane_->cap = std::fmax(kMinListHeight, pane_->cap - (want.h - area.h));
+        Dialog::arrange(area);
+    }
+
+    void tick(Time t) override {
+        Dialog::tick(t);
+        sync_from_list(); // show a programmatic selection in the name field
+    }
+
     const char* widget_type() const override { return "FileBrowser"; }
 
+    // Implementation detail, public only so add<ListPane> can instantiate.
+    class ListPane : public ScrollArea {
+    public:
+        float cap = 320.f;
+        Size measure(const Constraints& c) override { return c.clamp({420.f, cap}); }
+    };
+
 private:
+    static constexpr float kListHeight = 320.f, kMinListHeight = 48.f;
+
+    static bool glob_match(std::string_view pat, std::string_view name) {
+        auto lower = [](char ch) {
+            return (ch >= 'A' && ch <= 'Z') ? char(ch - 'A' + 'a') : ch;
+        };
+        size_t p = 0, n = 0, star = std::string_view::npos, mark = 0;
+        while (n < name.size()) {
+            if (p < pat.size() && (pat[p] == '?' || lower(pat[p]) == lower(name[n]))) {
+                ++p;
+                ++n;
+            } else if (p < pat.size() && pat[p] == '*') {
+                star = p++;
+                mark = n;
+            } else if (star != std::string_view::npos) {
+                p = star + 1;
+                n = ++mark;
+            } else {
+                return false;
+            }
+        }
+        while (p < pat.size() && pat[p] == '*') ++p;
+        return p == pat.size();
+    }
+    bool passes_filter(const std::string& name) const {
+        if (filters_.empty()) return true;
+        for (const auto& f : filters_)
+            if (glob_match(f, name)) return true;
+        return false;
+    }
+
     void refresh() {
         entries_.clear();
         is_dir_.clear();
@@ -496,12 +596,11 @@ private:
         }
         std::vector<std::string> files;
         for (const auto& it : std::filesystem::directory_iterator(path_, ec)) {
+            std::string name = it.path().filename().string();
+            if (!show_hidden_ && !name.empty() && name[0] == '.') continue;
             bool dir = it.is_directory(ec);
-            if (dir) {
-                dirs.push_back(it.path().filename().string() + "/");
-            } else {
-                files.push_back(it.path().filename().string());
-            }
+            if (dir) dirs.push_back(name + "/");
+            else if (passes_filter(name)) files.push_back(name);
         }
         std::sort(dirs.begin(), dirs.end());
         std::sort(files.begin(), files.end());
@@ -514,36 +613,55 @@ private:
             is_dir_.push_back(false);
         }
         list_->set_items(entries_).set_selected(-1);
+        synced_sel_ = -1;
+        pane_->scroll_to_top();
         path_label_->set_text(path_.string());
     }
 
-    void entry_clicked(long i) {
+    // A selected file fills the name field; a directory leaves it alone.
+    void entry_selected(long i) {
+        synced_sel_ = i;
+        if (i < 0 || size_t(i) >= entries_.size() || is_dir_[size_t(i)]) return;
+        name_->set_text(entries_[size_t(i)]);
+    }
+    // Double-click: enter a directory, pick a file.
+    void entry_activated(long i) {
         if (i < 0 || size_t(i) >= entries_.size()) return;
         if (is_dir_[size_t(i)]) {
-            std::string name = entries_[size_t(i)];
-            if (name == "..") path_ = path_.parent_path();
-            else path_ /= name.substr(0, name.size() - 1); // strip "/"
-            refresh();
+            enter(size_t(i));
         } else {
-            name_->set_text(entries_[size_t(i)]);
+            entry_selected(i);
+            commit();
         }
     }
-
-    void commit() {
-        std::string sel = selection();
-        if (sel.empty()) return;
-        if (on_pick_) on_pick_(sel);
-        request_close();
+    void enter(size_t i) {
+        std::string name = entries_[i];
+        if (name == "..") path_ = path_.parent_path();
+        else path_ /= name.substr(0, name.size() - 1); // strip "/"
+        refresh();
+    }
+    // Keep the name field in step with a selection made through list()
+    // directly (set_selected does not fire on_select).
+    void sync_from_list() const {
+        long i = list_->selected();
+        if (i == synced_sel_) return;
+        synced_sel_ = i;
+        if (i >= 0 && size_t(i) < entries_.size() && !is_dir_[size_t(i)])
+            name_->set_text(entries_[size_t(i)]);
     }
 
     Mode mode_;
     Label* path_label_ = nullptr;
+    ListPane* pane_ = nullptr;
     ListView* list_ = nullptr;
     TextField* name_ = nullptr;
     Button* open_button_ = nullptr;
     std::filesystem::path path_;
     std::vector<std::string> entries_;
     std::vector<bool> is_dir_;
+    std::vector<std::string> filters_;
+    bool show_hidden_ = false;
+    mutable long synced_sel_ = -1;
     std::function<void(std::string)> on_pick_;
 };
 

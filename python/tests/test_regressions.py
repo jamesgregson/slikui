@@ -680,3 +680,234 @@ def test_dialog_on_close_fires_once_on_every_path():
     dlg.request_close()                              # used to fire it directly
     assert closes == [1, 1] and ui.ctx.dialog_count == 0
     ui.close()
+
+
+# --- geetar 0.5.0 report ---------------------------------------------------------
+
+def test_removed_widget_handle_raises_instead_of_reading_freed_memory():
+    # Issue #15: a removed widget's wrapper read freed memory.
+    ui = slikui.App(300, 200)
+    col = ui.set_root(slikui.Column)
+    lbl = col.add(slikui.Label, "hello there")
+    frame(ui)
+    col.remove(lbl)
+    frame(ui, 0.1)
+    for i in range(200):
+        col.add(slikui.Button, "x" * i)
+    frame(ui, 0.2)
+    with pytest.warns(RuntimeWarning, match="uninitialized instance"):
+        with pytest.raises(TypeError):
+            lbl.text
+    ui.close()
+
+
+def test_children_never_returns_a_stale_wrapper_of_another_type():
+    # Issue #15: after an App closed while Python still held one of its
+    # widgets, a new widget at the same address came back as the old wrapper.
+    kept = []
+    for _ in range(50):
+        app1 = slikui.App(200, 100)
+        kept.append(app1.set_root(slikui.Column).add(slikui.SearchBox))
+        app1.close()
+        app2 = slikui.App(200, 100)
+        col = app2.set_root(slikui.Column)
+        col.add(slikui.ScrollArea)
+        assert type(col.children[0]) is slikui.ScrollArea
+        app2.close()
+
+
+class TempoPanel(slikui.Panel):
+    """A Panel subclass used as a popup root (geetar's tempo popover)."""
+
+    def __init__(self):
+        super().__init__()
+        self.closed = 0
+        self.painted = 0
+        self.add(slikui.Label, "120 bpm")
+
+    def on_event(self, e):
+        if e.type == slikui.EventType.PopupClosed:
+            self.closed += 1
+            return True
+        return super().on_event(e)
+
+    def paint(self, env):
+        self.painted += 1
+        super().paint(env)  # the Panel's own background still draws
+
+
+def test_panel_subclass_gets_on_event_and_super_paint():
+    # Issue #29: overrides on Python subclasses of Panel were never called.
+    ui = slikui.App(300, 200)
+    anchor = ui.set_root(slikui.Column).add(slikui.Button, "tempo")
+    frame(ui)
+    pop = TempoPanel()
+    ui.ctx.push_popup(pop, anchor, slikui.PopupDir.Below)
+    px = frame(ui)
+    assert pop.painted >= 1
+    b = pop.bounds
+    surface = ui.ctx.theme.surface.to_abgr()
+    assert px[int(b.y + b.h - 3), int(b.x + 3)] == surface  # super().paint() drew it
+    ui.ctx.close_popups()
+    frame(ui, 0.1)
+    assert pop.closed == 1
+    ui.close()
+
+
+class CountingColumn(slikui.Column):
+    def __init__(self):
+        super().__init__()
+        self.measured = 0
+
+    def measure(self, c):
+        self.measured += 1
+        return super().measure(c)
+
+
+def test_column_and_row_subclasses_dispatch_overrides():
+    ui = slikui.App(300, 200)
+    root = ui.set_root(slikui.Column)
+    col = root.add(CountingColumn)
+    col.add(slikui.Label, "a")
+    col.add(slikui.Label, "b")
+    row = root.add(type("R", (slikui.Row,), {"widget_type": lambda self: "MyRow"}))
+    frame(ui)
+    assert col.measured > 0
+    assert col.bounds.h > 0  # super().measure() measured the children
+    assert row.widget_type() == "MyRow"
+    ui.close()
+
+
+def test_override_on_non_dispatching_builtin_is_rejected():
+    # Issue #29, the silent half: built-ins without the trampoline now refuse
+    # protocol overrides when the class is defined.
+    with pytest.raises(TypeError, match="has no effect"):
+        class LoudButton(slikui.Button):
+            def on_event(self, e):
+                return False
+    class Fine(slikui.Button):  # non-protocol additions are still allowed
+        def extra(self):
+            return 1
+    assert Fine.extra
+
+
+def test_slider_and_switch_initial_state_snaps():
+    # Issue #16: a new Slider swept in from the minimum (dt=0 never moved it).
+    ui = slikui.App(200, 80)
+    root = ui.set_root(slikui.Column)
+    s = root.add(slikui.Slider, 0, 100)
+    s.set_value(80, False)
+    ui.tick(0, 0)
+    px = ui.render().copy()
+    accent = ui.ctx.theme.accent.to_abgr()
+    c = s.bounds.center()
+    assert px[int(c.y), int(c.x)] == accent  # filled track is past the middle
+    ui.close()
+
+
+def test_menubar_background_follows_theme():
+    # Issue #10: MenuBar painted theme.surface (white) in the Light theme.
+    ui = slikui.App(300, 100)
+    ui.ctx.theme = slikui.Theme.light()
+    bar = ui.set_root(slikui.Column).add(slikui.MenuBar)
+    bar.add_menu("File")
+    px = frame(ui)
+    x, y = int(bar.bounds.right() - 4), int(bar.bounds.y + 4)
+    assert px[y, x] == ui.ctx.theme.background.to_abgr()
+    bar.set_background(slikui.Color(255, 0, 0))
+    px = frame(ui, 0.1)
+    assert px[y, x] == slikui.Color(255, 0, 0).to_abgr()
+    ui.close()
+
+
+def test_searchbox_placeholder_is_clipped():
+    # Issue #14: a long placeholder drew past the field, under the button.
+    ui = slikui.App(240, 80)
+    row = ui.set_root(slikui.Column).add(slikui.Row)
+    sb = row.add(slikui.SearchBox, expand=True)
+    sb.set_placeholder("Search title, composer, style, technique")
+    btn = row.add(slikui.IconButton, slikui.Icon.Folder)
+    clean = slikui.App(240, 80)
+    crow = clean.set_root(slikui.Column).add(slikui.Row)
+    crow.add(slikui.SearchBox, expand=True)
+    cbtn = crow.add(slikui.IconButton, slikui.Icon.Folder)
+    px, ref = frame(ui), frame(clean)
+    b = btn.bounds
+    assert b.x == cbtn.bounds.x
+    y0, y1, x0, x1 = int(b.y), int(b.bottom()), int(b.x), int(b.right())
+    assert (px[y0:y1, x0:x1] == ref[y0:y1, x0:x1]).all()  # nothing drew under it
+    ui.close()
+    clean.close()
+
+
+def test_textfield_scrolls_long_text():
+    ui = slikui.App(200, 60)
+    tf = ui.set_root(slikui.Column).add(slikui.TextField)
+    frame(ui)
+    tf.request_focus()
+    for e in slikui.text_input_str("the quick brown fox jumps over the lazy dog"):
+        ui.handle(e)
+    frame(ui, 0.1)
+    assert tf.scroll_x > 0
+    ui.handle(slikui.key_press(slikui.Key.Home))
+    frame(ui, 0.2)
+    assert tf.scroll_x == 0
+    ui.close()
+
+
+def _touch(d, *names):
+    for n in names:
+        (d / n).touch()
+
+
+def test_filebrowser_big_folder_and_programmatic_pick(tmp_path):
+    # Issue #17: 150 files pushed Open/Cancel off-screen, and
+    # list.set_selected() did not reach selection().
+    _touch(tmp_path, *[f"song{i:03}.gp5" for i in range(150)])
+    ui = slikui.App(800, 600)
+    ui.set_root(slikui.Column)
+    dlg = slikui.FileBrowser(slikui.FileBrowser.Mode.Open, "Open")
+    dlg.set_path(str(tmp_path))
+    picked = []
+    dlg.on_pick(picked.append)
+    ui.ctx.open_dialog(dlg)
+    frame(ui)
+    frame(ui, 0.1)
+    assert dlg.open_button.bounds.bottom() <= 600
+    assert dlg.list_scroll.max_scroll > 0
+    dlg.list.set_selected(3)  # ".." is row 0
+    assert dlg.selection() == str(tmp_path / "song002.gp5")
+    assert dlg.commit()
+    assert picked == [str(tmp_path / "song002.gp5")]
+    ui.close()
+
+
+def test_filebrowser_filters_and_hidden(tmp_path):
+    # Issue #18: no extension filter, and dotfiles were listed.
+    _touch(tmp_path, ".DS_Store", "a.GP5", "b.mid", "c.txt")
+    dlg = slikui.FileBrowser(slikui.FileBrowser.Mode.Open)
+    dlg.set_path(str(tmp_path))
+    dlg.list.set_selected(1)  # "..", then "a.GP5" (".DS_Store" hidden)
+    assert dlg.selection().endswith("a.GP5")
+    dlg.set_filters(["*.gp5", "*.mid"])
+    assert dlg.filters == ["*.gp5", "*.mid"]
+    dlg.list.set_selected(2)
+    assert dlg.selection().endswith("b.mid")
+    dlg.list.set_selected(3)  # "c.txt" is filtered out: no row 3
+    assert dlg.selection().endswith("b.mid")
+    dlg.set_filters([]).set_show_hidden(True)
+    dlg.list.set_selected(1)
+    assert dlg.selection().endswith(".DS_Store")
+
+
+def test_keypad_keys():
+    # Issue #30: no keypad keys, so keypad zoom needed raw GLFW codes.
+    K = slikui.Key
+    ui = slikui.App(100, 100)
+    ui.set_root(slikui.Column)
+    hits = []
+    ui.ctx.add_shortcut(K.KpAdd, slikui.Mod.ModCtrl, lambda: hits.append("+"))
+    ui.handle(slikui.key_press(K.KpAdd, "ctrl"))
+    assert hits == ["+"]
+    assert slikui.shortcut_label(K.Kp0, slikui.Mod.ModCtrl) == "Ctrl+Num0"
+    ui.close()

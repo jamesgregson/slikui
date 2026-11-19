@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Python subclasses of `Panel`, `Column` and `Row`** dispatch overrides
+  (`on_event`, `paint`, `measure`, ...) like `slikui.Widget` subclasses, and
+  `super()` reaches the built-in behaviour. A `Panel` subclass used as a popup
+  root now receives `PopupClosed`. `Column()` / `Row()` gain constructors for
+  this.
+- `FileBrowser::set_filters(globs)` (case-insensitive `*` / `?`; folders
+  always listed), `set_show_hidden(bool)`, `commit()` and `list_scroll()`.
+- `ListView::on_activate(fn)`: double-click on an item.
+- `MenuBar::set_background(Color)`.
+- `TextField::scroll_x()`.
+- Keypad keys: `Key::Kp0`-`Kp9`, `KpDecimal`, `KpDivide`, `KpMultiply`,
+  `KpSubtract`, `KpAdd`, `KpEqual`, mapped by the GLFW and SDL backends (C++
+  and Python) and labelled `Num0`, `Num+`, ... by `shortcut_label`.
+- `Widget::destroy_hook`: a process-wide callback run from `~Widget` (null by
+  default; the Python bindings use it).
+
+### Changed
+
+- **`MenuBar` no longer fills `theme.surface`**: like `Toolbar`, it is
+  transparent by default, so the window background shows (in the Light theme
+  it used to be a white strip). `set_background` restores a fill.
+- **`FileBrowser`: a single click on a folder selects it; double-click enters
+  it** (it used to enter on one click). Double-clicking a file picks it, and
+  Enter in the name field or Open with a folder selected acts likewise.
+  Dotfiles are hidden by default.
+- Python: defining a protocol method (`on_event`, `paint`, `measure`, ...) on
+  a subclass of a built-in other than `Widget` / `Panel` / `Column` / `Row`
+  raises `TypeError` at class creation; such overrides were silently ignored.
+- Python: using a wrapper of a built-in widget after the tree destroyed it
+  (`remove`, `clear_children`, `App.close()`) raises `TypeError` with a
+  nanobind `RuntimeWarning`, instead of reading freed memory.
+- The vendored nanobind carries a small patch (`nb_inst_forget_refs`); see
+  `third_party/nanobind/SLIKUI_PATCHES.md`.
+
+### Fixed
+
+- `TextField` / `SearchBox`: text is clipped to the field. A long placeholder
+  elides with an ellipsis instead of drawing over neighbouring widgets, and typed text
+  wider than the field scrolls horizontally to keep the caret visible.
+  Password fields place the caret and selection by the shown `*` glyphs.
+- `Slider` and `Switch` no longer animate from the minimum / off position to
+  their initial state: state set before the first tick snaps (a `tick(dt=0)`
+  snapshot shows the real value). Later changes still animate.
+- `FileBrowser` in a big folder grew past the window and hid the name field
+  and Open/Cancel; the list now scrolls inside a dialog that fits the window.
+  `list().set_selected(i)` now updates `selection()`.
+- Python: `.children` (and any other widget-returning call) could hand back a
+  stale wrapper of a different type when a new widget reused a destroyed
+  one's address.
+
 ## 0.5.0
 
 ### Added

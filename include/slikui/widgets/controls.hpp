@@ -334,6 +334,7 @@ public:
     Switch& set_checked(bool c, bool fire_callback = false) {
         checked_ = c;
         knob_.target = c ? 1.f : 0.f;
+        if (!ticked_) knob_.value = knob_.target; // initial state: no slide-in
         if (fire_callback && on_change_) on_change_(checked_);
         return *this;
     }
@@ -364,7 +365,10 @@ public:
         return false;
     }
 
-    void tick(Time t) override { knob_.advance(t.dt); }
+    void tick(Time t) override {
+        ticked_ = true;
+        knob_.advance(t.dt);
+    }
 
     const char* widget_type() const override { return "Switch"; }
 
@@ -372,6 +376,7 @@ public:
 
 private:
     bool checked_ = false;
+    bool ticked_ = false; // until the first tick, state changes snap
     Anim knob_{0, 0, 18};
     std::function<void(bool)> on_change_;
 };
@@ -397,6 +402,7 @@ public:
         if (v == value_) return *this;
         value_ = v;
         fraction_.target = fraction();
+        if (!ticked_) fraction_.value = fraction_.target; // initial value: no sweep
         label_valid_ = false;
         if (fire_callback && on_change_) on_change_(value_);
         return *this;
@@ -485,6 +491,8 @@ public:
 
     void tick(Time t) override {
         fraction_.target = fraction();
+        if (!ticked_) fraction_.value = fraction_.target; // range/log/step set before showing
+        ticked_ = true;
         fraction_.advance(t.dt);
     }
 
@@ -524,6 +532,7 @@ private:
     bool fmt_set_ = false, log_ = false;
     float step_ = 0;
     bool dragging_ = false;
+    bool ticked_ = false; // until the first tick, value changes snap
     Anim fraction_{0, 0, 20};
     std::function<void(float)> on_change_;
     mutable text::TextLayout label_lay_, value_lay_;

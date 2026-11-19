@@ -148,7 +148,10 @@ for `Spinner`s or scale indicators.
 ## FileBrowser
 
 Lists real directories for Open/Save flows. `set_path` starts it somewhere;
-`on_pick(path)` receives the result.
+`on_pick(path)` receives the result. Click a file to choose it; double-click
+a file to pick it at once, or a folder to enter it (Enter in the name field
+picks too). The list scrolls inside the dialog, which shrinks to fit the
+window, so the buttons stay reachable in big folders.
 
 === "C++"
 
@@ -167,6 +170,16 @@ Lists real directories for Open/Save flows. `set_path` starts it somewhere;
     ```
 
 ![The FileBrowser dialog open on the shell layer over real directories](../images/browser.png)
+
+| API | Signature |
+|-----|-----------|
+| `set_path` / `path` | `(std::string)` / `() -> std::string` |
+| `set_filters` | `(std::vector<std::string>)` - globs (`*`, `?`, case-insensitive) a file must match one of; empty = all. Folders always show |
+| `set_show_hidden` | `(bool)` - dotfiles are hidden by default |
+| `selection` | `() -> std::string` - chosen file, `""` if none; follows `list().set_selected(i)` too |
+| `commit` | `() -> bool` - pick the selection, as the Open/Save button does |
+| `on_pick` | `(std::function<void(std::string)>)` |
+| `list` / `list_scroll` / `name_field` / `open_button` | the parts |
 
 ## ImageView and CompareView
 

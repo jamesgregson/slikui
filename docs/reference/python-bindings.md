@@ -225,11 +225,19 @@ Subclass `slikui.Widget` and implement `measure` / `paint` / `on_event`
 events to your class. Full details:
 [Custom widgets](../guide/custom-widgets.md).
 
-Rules: `super().__init__()` is required; subclassing the *bound* C++ widget
-types (`Column`, `Row`, ...) is rejected - build layouts from Python code
-instead. Add instances with `container.add_widget(obj)` or
-`container.add(Meter, ...)`; a custom root is
-`context.set_root_widget(...)`.
+Rules: `super().__init__()` is required. `Panel`, `Column` and `Row` can be
+subclassed the same way (overrides dispatch, and `super().paint(env)` /
+`super().measure(c)` reach the built-in behaviour) - e.g. a `Panel` subclass
+as a popup root that sees `PopupClosed`. Other bound widget types (`Button`,
+`Slider`, ...) have no override seam: defining `on_event`, `paint`, ... on
+such a subclass raises `TypeError` when the class is created. Add instances
+with `container.add_widget(obj)` or `container.add(Meter, ...)`; a custom
+root is `context.set_root_widget(...)`.
+
+Wrappers of built-in widgets are views of widgets the C++ tree owns. Once
+the tree destroys one (`remove`, `clear_children`, `App.close()`), using an
+old wrapper raises `TypeError` (with a "nanobind: attempted to access an
+uninitialized instance" `RuntimeWarning`) instead of touching freed memory.
 
 ## Versions, wheels, sources
 

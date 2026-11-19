@@ -79,6 +79,10 @@ void mapping() {
            sdl::map_key(SDLK_BACKSLASH) == Key::Backslash &&
            sdl::map_key(SDLK_SEMICOLON) == Key::Semicolon &&
            sdl::map_key(SDLK_GRAVE) == Key::Grave);
+    EXPECT(sdl::map_key(SDLK_KP_0) == Key::Kp0 && sdl::map_key(SDLK_KP_9) == Key::Kp9 &&
+           sdl::map_key(SDLK_KP_PLUS) == Key::KpAdd && sdl::map_key(SDLK_KP_MINUS) == Key::KpSubtract &&
+           sdl::map_key(SDLK_KP_PERIOD) == Key::KpDecimal &&
+           sdl::map_key(SDLK_KP_EQUALS) == Key::KpEqual);
     EXPECT(sdl::map_key(SDLK_KP_ENTER) == Key::Enter && sdl::map_key(SDLK_RETURN) == Key::Enter);
     EXPECT(sdl::map_key(SDLK_PAGEDOWN) == Key::PageDown && sdl::map_key(SDLK_F12) == Key::F12);
     EXPECT(sdl::map_key(SDLK_F13) == Key::Unknown);

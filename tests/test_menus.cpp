@@ -467,8 +467,10 @@ TEST(shortcut_label_format) {
     CHECK(slikui::shortcut_label(slikui::Key::Equal, slikui::ModCtrl) == "Ctrl+=");
     CHECK(slikui::shortcut_label(slikui::Key::LeftBracket, 0) == "[");
     CHECK(slikui::shortcut_label(slikui::Key::Backslash, 0) == "\\");
+    CHECK(slikui::shortcut_label(slikui::Key::Kp0, slikui::ModCtrl) == "Ctrl+Num0");
+    CHECK(slikui::shortcut_label(slikui::Key::KpAdd, slikui::ModCtrl) == "Ctrl+Num+");
     for (unsigned mods = 0; mods < 16; ++mods)
-        for (int k = 1; k <= int(slikui::Key::Grave); ++k)
+        for (int k = 1; k <= int(slikui::Key::KpEqual); ++k)
             for (char c : slikui::shortcut_label(slikui::Key(k), mods))
                 CHECK((unsigned char)c < 0x80);
 }

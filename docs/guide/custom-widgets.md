@@ -218,18 +218,21 @@ Python state lives in ordinary instance attributes.
 ## Rules and gotchas
 
 - Python subclasses **must call `super().__init__()`**.
-- Subclassing the *bound* C++ widget types (`Column`, `Row`, `Slider`, ...)
-  is rejected - build layouts from Python code instead. Only
-  `slikui.Widget` subclasses are the extension seam. To decorate a built-in,
-  wrap it: delegate `measure`/`arrange` to the child and draw in
-  `paint_over` (`LimitSlider` in `slikui.examples.controls`).
+- Besides `slikui.Widget`, you can subclass `Panel`, `Column` and `Row`:
+  overrides dispatch, and `super()` calls reach the built-in behaviour
+  (`super().paint(env)` draws the panel, `super().measure(c)` lays out the
+  children). Other bound types (`Slider`, `Button`, ...) have no override
+  seam - overriding `on_event`, `paint`, ... on them raises `TypeError` at
+  class creation. To decorate one of those, wrap it: delegate
+  `measure`/`arrange` to the child and draw in `paint_over` (`LimitSlider`
+  in `slikui.examples.controls`).
 - Draw text with `env.text` / `env.text_in` (see
   [Drawing text](#drawing-text)); `Label` widgets beside a custom widget
   still work for captions.
 - Keep the wrappers `add()` returns (`self.slider = self.add(slikui.Slider)`)
   and capture them in callbacks freely. They are views of widgets the tree
-  owns: valid until the tree drops the widget (`App.close()`, or its
-  container being destroyed), so don't use them after that.
+  owns: valid until the tree drops the widget (`remove`, `App.close()`, or
+  its container being destroyed). Using one after that raises `TypeError`.
 - Callbacks into Python must outlive the tree: `App.close()` (context manager
   exit, `atexit`) releases them; see
   [Python bindings](../reference/python-bindings.md).
