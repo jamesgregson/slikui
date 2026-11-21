@@ -123,6 +123,21 @@ text. `Toolbar::add_button(icon, fn, tip?)` renders an icon button;
 | `Toolbar::set_icon_px` / `set_background` | strip styling |
 | `IconButton::set_icon` | `(Icon)` | `set_icon_px` | `set_variant` | `on_click` |
 
+### Built-in icons
+
+`slikui::Icon` (Python: `slikui.Icon`) has 156 procedural icons. They're drawn
+from `DrawList` lines and shapes on a 24x24 grid, so they take the theme
+colour and stay sharp at any size. The labels below are `icon_name(icon)`.
+The enum names are the CamelCase form, so `more_horizontal` is
+`Icon::MoreHorizontal`. New icons are added at the end, so existing enum
+values don't change.
+
+![icons](../images/icons.png)
+
+To draw an icon in a custom widget, call
+`paint_icon(env.list, icon, rect, color)`. `icon_count` is the number of
+icons, so `static_cast<Icon>(i)` is valid for every `i` in `[0, icon_count)`.
+
 ## The icon set
 
 The icon set in `slikui/widgets/icons.hpp` (~26 icons: play, pause, step,

@@ -326,6 +326,24 @@ def test_icon_button_and_toolbar():
     assert len(patch) > 2  # strokes vs fill vs background
 
 
+def test_every_icon_paints():
+    icons = list(slikui.Icon)
+    assert len(icons) == 156
+    # Values are stable: new icons are appended after Sun.
+    assert slikui.Icon.Play.value == 0 and slikui.Icon.Sun.value == 25
+    assert slikui.Icon.Pin.value > slikui.Icon.Sun.value
+    ui, root = make_ui(120, 120)
+    btn = root.add(slikui.IconButton, slikui.Icon.Play)
+    for icon in icons:
+        btn.set_icon(icon)
+        ui.tick(0.0, 1 / 60)
+        frame = ui.render()
+        r = btn.bounds
+        cx, cy = int(r.x + r.w / 2), int(r.y + r.h / 2)
+        patch = {frame[cy + dy, cx + dx] for dy in range(-9, 10) for dx in range(-9, 10)}
+        assert len(patch) > 1, icon  # something drew inside the button
+
+
 def test_shortcut_label_format():
     # Plain ASCII on every platform; MOD_SHORTCUT is Cmd on Apple, Ctrl elsewhere.
     name = "Cmd" if sys.platform == "darwin" else "Ctrl"

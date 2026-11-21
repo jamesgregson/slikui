@@ -187,6 +187,266 @@ class Icon(enum.Enum):
 
     Sun = 25
 
+    ArrowLeft = 26
+
+    ArrowRight = 27
+
+    ArrowUp = 28
+
+    ArrowDown = 29
+
+    Home = 30
+
+    Menu = 31
+
+    MoreHorizontal = 32
+
+    MoreVertical = 33
+
+    ExternalLink = 34
+
+    Maximize = 35
+
+    Minimize = 36
+
+    Edit = 37
+
+    Cut = 38
+
+    Paste = 39
+
+    Undo = 40
+
+    Redo = 41
+
+    Link = 42
+
+    Filter = 43
+
+    Sort = 44
+
+    DragHandle = 45
+
+    File = 46
+
+    FolderOpen = 47
+
+    Download = 48
+
+    Upload = 49
+
+    Share = 50
+
+    Print = 51
+
+    ZoomIn = 52
+
+    ZoomOut = 53
+
+    List = 54
+
+    EyeOff = 55
+
+    Image = 56
+
+    Sidebar = 57
+
+    Layers = 58
+
+    Info = 59
+
+    Warning = 60
+
+    Error = 61
+
+    Help = 62
+
+    Bell = 63
+
+    Star = 64
+
+    Heart = 65
+
+    Pin = 66
+
+    Bookmark = 67
+
+    Flag = 68
+
+    Tag = 69
+
+    FastForward = 70
+
+    Rewind = 71
+
+    Repeat = 72
+
+    Shuffle = 73
+
+    Volume = 74
+
+    Mute = 75
+
+    Mic = 76
+
+    Music = 77
+
+    Unlock = 78
+
+    Moon = 79
+
+    User = 80
+
+    Mail = 81
+
+    Calendar = 82
+
+    Clock = 83
+
+    Globe = 84
+
+    Power = 85
+
+    Code = 86
+
+    Terminal = 87
+
+    Pan = 88
+
+    RotateX = 89
+
+    RotateY = 90
+
+    RotateZ = 91
+
+    RotateFree = 92
+
+    Vertex = 93
+
+    Edge = 94
+
+    Face = 95
+
+    Cube = 96
+
+    Sphere = 97
+
+    Cylinder = 98
+
+    Cone = 99
+
+    Plane = 100
+
+    Mesh = 101
+
+    Wireframe = 102
+
+    Solid = 103
+
+    Texture = 104
+
+    Material = 105
+
+    UV = 106
+
+    Normal = 107
+
+    Modifier = 108
+
+    Light = 109
+
+    Bone = 110
+
+    Keyframe = 111
+
+    Curve = 112
+
+    Extrude = 113
+
+    Scale = 114
+
+    Axes = 115
+
+    Snap = 116
+
+    Pivot = 117
+
+    Hierarchy = 118
+
+    Torus = 119
+
+    Brush = 120
+
+    Eraser = 121
+
+    Fill = 122
+
+    Eyedropper = 123
+
+    Airbrush = 124
+
+    Select = 125
+
+    Lasso = 126
+
+    MagicWand = 127
+
+    Crop = 128
+
+    Gradient = 129
+
+    Palette = 130
+
+    Text = 131
+
+    Stamp = 132
+
+    Blur = 133
+
+    Pointer = 134
+
+    DirectSelect = 135
+
+    Pen = 136
+
+    Rectangle = 137
+
+    Ellipse = 138
+
+    Polygon = 139
+
+    Line = 140
+
+    Union = 141
+
+    Subtract = 142
+
+    Intersect = 143
+
+    AlignLeft = 144
+
+    AlignCenter = 145
+
+    AlignRight = 146
+
+    AlignTop = 147
+
+    AlignMiddle = 148
+
+    AlignBottom = 149
+
+    Group = 150
+
+    Ungroup = 151
+
+    BringForward = 152
+
+    SendBackward = 153
+
+    FlipH = 154
+
+    FlipV = 155
+
 class CrossMode(enum.Enum):
     Stretch = 0
 

@@ -19,9 +19,36 @@
   and Python) and labelled `Num0`, `Num+`, ... by `shortcut_label`.
 - `Widget::destroy_hook`: a process-wide callback run from `~Widget` (null by
   default; the Python bindings use it).
+- **130 new built-in icons** (156 in all), covering navigation (`ArrowLeft` -
+  `ArrowDown`, `Home`, `Menu`, `MoreHorizontal`, `MoreVertical`,
+  `ExternalLink`, `Maximize`, `Minimize`), editing (`Edit`, `Cut`, `Paste`,
+  `Undo`, `Redo`, `Link`, `Filter`, `Sort`, `DragHandle`), files (`File`,
+  `FolderOpen`, `Download`, `Upload`, `Share`, `Print`), view (`ZoomIn`,
+  `ZoomOut`, `List`, `EyeOff`, `Image`, `Sidebar`, `Layers`), status
+  (`Info`, `Warning`, `Error`, `Help`, `Bell`), marking (`Star`, `Heart`,
+  `Pin`, `Bookmark`, `Flag`, `Tag`), media (`FastForward`, `Rewind`,
+  `Repeat`, `Shuffle`, `Volume`, `Mute`, `Mic`, `Music`) and misc (`Unlock`,
+  `Moon`, `User`, `Mail`, `Calendar`, `Clock`, `Globe`, `Power`, `Code`,
+  `Terminal`) and 3D view manipulation (`Pan`, `RotateX`, `RotateY`,
+  `RotateZ`, `RotateFree`; zoom uses `ZoomIn` / `ZoomOut` / `Search`) and
+  3D editing (`Vertex`, `Edge`, `Face` selection modes; `Cube`, `Sphere`,
+  `Cylinder`, `Cone`, `Plane` primitives; `Mesh`, `Wireframe`, `Solid`,
+  `Texture`, `Material`, `UV`, `Normal`; `Modifier`, `Light`, `Bone`,
+  `Keyframe`, `Curve`, `Extrude`, `Scale`, `Axes`, `Snap`, `Pivot`,
+  `Hierarchy`, `Torus`), painting (`Brush`, `Eraser`, `Fill`, `Eyedropper`,
+  `Airbrush`, `Select`, `Lasso`, `MagicWand`, `Crop`, `Gradient`, `Palette`,
+  `Text`, `Stamp`, `Blur`) and vector drawing (`Pointer`, `DirectSelect`,
+  `Pen`, `Rectangle`, `Ellipse`, `Polygon`, `Line`, `Union`, `Subtract`,
+  `Intersect`, `AlignLeft` / `AlignCenter` / `AlignRight` / `AlignTop` /
+  `AlignMiddle` / `AlignBottom`, `Group`, `Ungroup`, `BringForward`,
+  `SendBackward`, `FlipH`, `FlipV`). Existing enum values are unchanged. `icon_count` gives the
+  size of the set, and the docs show all icons in one image
+  (`docs/images/icons.png`).
 
 ### Changed
 
+- `Icon::Folder` and `Icon::Trash` are redrawn to be easier to recognise: a
+  single folder outline with its tab, and a lidded bin with a handle.
 - **`MenuBar` no longer fills `theme.surface`**: like `Toolbar`, it is
   transparent by default, so the window background shows (in the Light theme
   it used to be a white strip). `set_background` restores a fill.

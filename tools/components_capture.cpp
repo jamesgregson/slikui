@@ -183,6 +183,35 @@ private:
     float value_ = 0.f;
 };
 
+// ---------------------------------------------------------------------------
+// IconSheet: every built-in Icon in a labelled grid (docs/images/icons.png).
+// ---------------------------------------------------------------------------
+class IconSheet : public Widget {
+public:
+    static constexpr int kCols = 8;
+    static constexpr float kCellW = 84.f, kCellH = 62.f;
+
+    Size measure(const Constraints& c) override {
+        int rows = (icon_count + kCols - 1) / kCols;
+        return c.clamp({kCols * kCellW, float(rows) * kCellH});
+    }
+
+    void paint(const PaintEnv& env) const override {
+        for (int i = 0; i < icon_count; ++i) {
+            auto icon = static_cast<Icon>(i);
+            float x = bounds.x + float(i % kCols) * kCellW;
+            float y = bounds.y + float(i / kCols) * kCellH;
+            paint_icon(env.list, icon, {x + kCellW / 2 - 12, y + 6, 24, 24}, env.theme.text);
+            TextOpts o;
+            o.size = 10.5f;
+            o.color = env.theme.text_dim;
+            o.align = TextAlign::Center;
+            o.overflow = TextOverflow::Ellipsis;
+            env.text_in({x + 2, y + 36, kCellW - 4, 16}, icon_name(icon), o);
+        }
+    }
+};
+
 int main(int argc, char** argv) {
     const char* dir = argc > 1 ? argv[1] : "docs/images";
 
@@ -295,6 +324,11 @@ int main(int argc, char** argv) {
         edit.add_item("Undo", [] {}, "Ctrl+Z");
         edit.add_item("Redo", [] {}, "Ctrl+Shift+Z", false);
     }, {.hover = {44.f, 40.f}, .click_at_hover = true, .frames = 80});
+
+    // ---- icons: the full built-in set -----------------------------------
+    capture(dir, "icons", 720, 48 + 62 * ((icon_count + 7) / 8), [](Context&, Column& root) {
+        root.add<IconSheet>();
+    });
 
     // ---- toolbar: icon buttons, separator, labeled button ----------------
     capture(dir, "toolbar", 560, 120, [](Context&, Column& root) {

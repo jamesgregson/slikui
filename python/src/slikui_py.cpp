@@ -649,33 +649,12 @@ NB_MODULE(_slikui, m) {
         .value("Right", PopupDir::Right)
         .value("Left", PopupDir::Left);
 
-    nb::enum_<Icon>(m, "Icon")
-        .value("Play", Icon::Play)
-        .value("Pause", Icon::Pause)
-        .value("Stop", Icon::Stop)
-        .value("Record", Icon::Record)
-        .value("StepForward", Icon::StepForward)
-        .value("StepBack", Icon::StepBack)
-        .value("Grid", Icon::Grid)
-        .value("Camera", Icon::Camera)
-        .value("Save", Icon::Save)
-        .value("Folder", Icon::Folder)
-        .value("Refresh", Icon::Refresh)
-        .value("Plus", Icon::Plus)
-        .value("Minus", Icon::Minus)
-        .value("Close", Icon::Close)
-        .value("Check", Icon::Check)
-        .value("ChevronLeft", Icon::ChevronLeft)
-        .value("ChevronRight", Icon::ChevronRight)
-        .value("ChevronUp", Icon::ChevronUp)
-        .value("ChevronDown", Icon::ChevronDown)
-        .value("Eye", Icon::Eye)
-        .value("Gear", Icon::Gear)
-        .value("Search", Icon::Search)
-        .value("Trash", Icon::Trash)
-        .value("Copy", Icon::Copy)
-        .value("Lock", Icon::Lock)
-        .value("Sun", Icon::Sun);
+    {
+        auto icon_enum = nb::enum_<Icon>(m, "Icon");
+#define SLIKUI_PY_ICON_(name, str) icon_enum.value(#name, Icon::name);
+        SLIKUI_ICONS(SLIKUI_PY_ICON_)
+#undef SLIKUI_PY_ICON_
+    }
 
     nb::enum_<CrossMode>(m, "CrossMode")
         .value("Stretch", CrossMode::Stretch)

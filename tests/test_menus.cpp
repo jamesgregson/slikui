@@ -403,7 +403,7 @@ TEST(context_menu_right_click) {
 TEST(icon_painter_covers_all_icons) {
     Fixture f; // (target unused; painter test needs no context)
     (void)f;
-    for (int i = 0; i <= int(slikui::Icon::Sun); ++i) {
+    for (int i = 0; i < slikui::icon_count; ++i) {
         auto icon = static_cast<slikui::Icon>(i);
         slikui::DrawList list;
         slikui::paint_icon(list, icon, {0, 0, 24, 24}, slikui::Color::white());
