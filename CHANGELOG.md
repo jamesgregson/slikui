@@ -154,6 +154,10 @@
 - Python: `.children` (and any other widget-returning call) could hand back a
   stale wrapper of a different type when a new widget reused a destroyed
   one's address.
+- `Context::handle_event` raised a `-Wswitch` warning on Clang/GCC (no
+  `PopupClosed` case). No behaviour change.
+- The `FileBrowser` tests failed on Windows: they compared paths as strings
+  with `/` separators against native `\` paths, and used a hard-coded `/tmp`.
 
 ## 0.5.0
 

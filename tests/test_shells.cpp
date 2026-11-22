@@ -398,10 +398,21 @@ TEST(cursor_shape_requests) {
 // ---------------------------------------------------------------------------
 // FileBrowser (real temp directory)
 // ---------------------------------------------------------------------------
+// FileBrowser hands back native paths (backslashes on Windows), so the
+// tests compare them as paths, not strings, and work under the system temp
+// directory rather than a hard-coded /tmp.
+static bool same_path(const std::string& a, const std::string& b) {
+    return std::filesystem::path(a).lexically_normal() ==
+           std::filesystem::path(b).lexically_normal();
+}
+static std::string fb_temp(const char* name) {
+    return (std::filesystem::temp_directory_path() / name).generic_string();
+}
+
 TEST(filebrowser_lists_navigates_picks) {
     Fixture f;
     // Temp dir with two files and one subdir.
-    std::string dir = "/tmp/slikui_fbtest";
+    std::string dir = fb_temp("slikui_fbtest");
     std::filesystem::create_directories(dir + "/sub");
     { std::FILE* fp = std::fopen((dir + "/scene.png").c_str(), "wb"); if (fp) std::fclose(fp); }
     { std::FILE* fp = std::fopen((dir + "/mat.png").c_str(), "wb"); if (fp) std::fclose(fp); }
@@ -432,10 +443,10 @@ TEST(filebrowser_lists_navigates_picks) {
     // enters it.
     click_row(1);
     f.frame();
-    CHECK(ref.path() == dir);
+    CHECK(same_path(ref.path(), dir));
     click_row(1); // second press: clicks == 2
     f.frame();
-    CHECK(ref.path() == dir + "/sub");
+    CHECK(same_path(ref.path(), dir + "/sub"));
     CHECK(f.ctx.dialog_count() == 1); // still open
 
     // Back up via ".." (row 0, double-click), then pick a file: click row 2
@@ -443,7 +454,7 @@ TEST(filebrowser_lists_navigates_picks) {
     click_row(0);
     click_row(0);
     f.frame();
-    CHECK(ref.path() == dir);
+    CHECK(same_path(ref.path(), dir));
     click_row(2);
     f.frame();
     auto& open_btn = ref.open_button();
@@ -460,7 +471,7 @@ TEST(filebrowser_lists_navigates_picks) {
 // selected folder - or the one being shown.
 TEST(filebrowser_folder_mode_picks_directories) {
     Fixture f;
-    std::string dir = "/tmp/slikui_fbtest_folder";
+    std::string dir = fb_temp("slikui_fbtest_folder");
     std::filesystem::create_directories(dir + "/beta");
     std::filesystem::create_directories(dir + "/alpha/inner");
     { std::FILE* fp = std::fopen((dir + "/song.gp5").c_str(), "wb"); if (fp) std::fclose(fp); }
@@ -483,15 +494,15 @@ TEST(filebrowser_folder_mode_picks_directories) {
     CHECK(list.row_rect(3).empty());
 
     // Nothing selected (or ".."): the folder being shown.
-    CHECK(ref.selection() == dir);
+    CHECK(same_path(ref.selection(), dir));
     list.set_selected(0);
-    CHECK(ref.selection() == dir);
+    CHECK(same_path(ref.selection(), dir));
     // A selected folder is the pick (Choose doesn't enter it).
     list.set_selected(1);
-    CHECK(ref.selection() == dir + "/alpha");
+    CHECK(same_path(ref.selection(), dir + "/alpha"));
     f.click(ref.open_button().bounds.center().x, ref.open_button().bounds.center().y);
     REQUIRE(picks.size() == 1);
-    CHECK(picks[0] == dir + "/alpha");
+    CHECK(same_path(picks[0], dir + "/alpha"));
     CHECK(f.ctx.dialog_count() == 0);
 
     std::filesystem::remove_all(dir);
@@ -501,7 +512,7 @@ TEST(filebrowser_folder_mode_picks_directories) {
 // field and Open/Cancel off-screen. The list now scrolls inside the dialog.
 TEST(filebrowser_big_folder_keeps_buttons_on_screen) {
     Fixture f; // 320x240 frame
-    std::string dir = "/tmp/slikui_fbtest_big";
+    std::string dir = fb_temp("slikui_fbtest_big");
     std::filesystem::create_directories(dir);
     for (int i = 0; i < 150; ++i) {
         std::string name = dir + "/file" + std::to_string(1000 + i) + ".txt";
@@ -534,7 +545,7 @@ TEST(filebrowser_big_folder_keeps_buttons_on_screen) {
 // Regression: list().set_selected() did not reach selection().
 TEST(filebrowser_programmatic_selection) {
     Fixture f;
-    std::string dir = "/tmp/slikui_fbtest_sel";
+    std::string dir = fb_temp("slikui_fbtest_sel");
     std::filesystem::create_directories(dir + "/sub");
     for (const char* n : {"/a.gp5", "/b.mid"})
         if (std::FILE* fp = std::fopen((dir + n).c_str(), "wb")) std::fclose(fp);
@@ -543,19 +554,19 @@ TEST(filebrowser_programmatic_selection) {
     // entries: "..", "sub/", "a.gp5", "b.mid"
     CHECK(fb.selection().empty());
     fb.list().set_selected(3);
-    CHECK(fb.selection() == dir + "/b.mid");
+    CHECK(same_path(fb.selection(), dir + "/b.mid"));
     CHECK(fb.name_field().text() == "b.mid");
     fb.list().set_selected(1); // a directory: the chosen file stays
-    CHECK(fb.selection() == dir + "/b.mid");
+    CHECK(same_path(fb.selection(), dir + "/b.mid"));
     std::string picked;
     fb.on_pick([&](std::string p) { picked = p; });
     CHECK(fb.commit());
-    CHECK(picked == dir + "/b.mid");
+    CHECK(same_path(picked, dir + "/b.mid"));
     std::filesystem::remove_all(dir);
 }
 
 TEST(filebrowser_filters_and_hidden_files) {
-    std::string dir = "/tmp/slikui_fbtest_filter";
+    std::string dir = fb_temp("slikui_fbtest_filter");
     std::filesystem::create_directories(dir + "/sub");
     std::filesystem::create_directories(dir + "/.git");
     for (const char* n : {"/song.GP5", "/tune.mid", "/notes.txt", "/.DS_Store"})
@@ -565,17 +576,17 @@ TEST(filebrowser_filters_and_hidden_files) {
     // Hidden entries are off by default: "..", "sub/", then "notes.txt"
     // (".DS_Store" would sort first).
     fb.list().set_selected(2);
-    CHECK(fb.selection() == dir + "/notes.txt");
+    CHECK(same_path(fb.selection(), dir + "/notes.txt"));
     fb.set_filters({"*.gp5", "*.mid"});
     fb.list().set_selected(2); // "..", "sub/", then filtered files
-    CHECK(fb.selection() == dir + "/song.GP5"); // case-insensitive match
+    CHECK(same_path(fb.selection(), dir + "/song.GP5")); // case-insensitive match
     fb.list().set_selected(3);
-    CHECK(fb.selection() == dir + "/tune.mid");
+    CHECK(same_path(fb.selection(), dir + "/tune.mid"));
     fb.list().set_selected(4); // notes.txt filtered out: no row 4
-    CHECK(fb.selection() == dir + "/tune.mid");
+    CHECK(same_path(fb.selection(), dir + "/tune.mid"));
     fb.set_show_hidden(true);
     fb.list().set_selected(1); // ".git/" now sorts before "sub/"
     fb.list().set_selected(3);
-    CHECK(fb.selection() == dir + "/song.GP5");
+    CHECK(same_path(fb.selection(), dir + "/song.GP5"));
     std::filesystem::remove_all(dir);
 }

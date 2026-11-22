@@ -1245,6 +1245,7 @@ inline void Context::handle_event(const Event& e) {
     case T::MouseEnter:
     case T::MouseLeave:
     case T::FocusGained:
+    case T::PopupClosed:
         return;
     }
 }
