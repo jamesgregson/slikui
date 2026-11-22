@@ -77,6 +77,7 @@ Every widget class, grouped by reference page. All are exported from
 |--------|---------|
 | `MenuBar`, `Menu`, `MenuItem` | menus, checkables, submenus, shortcut hints |
 | `Toolbar`, `IconButton` | icon strips with a procedural icon set (`slikui::Icon`) |
+| `IconPainter` | custom icon drawing for `IconButton::set_icon_painter` |
 
 ## Base class
 

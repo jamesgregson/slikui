@@ -46,7 +46,7 @@ CPP_EXTRAS = {
     "IRenderSink", "DrawList", "DrawCmd", "TexUpload", "PaintEnv", "Anim",
     "software", "opengl", "glfw", "sdl", "text",
     "theme_presets", "apply_preset", "use_theme", "find_system_font",
-    "shortcut_label", "find_system_font_face", "SystemFont",
+    "shortcut_label", "find_system_font_face", "SystemFont", "paint_icon", "icon_name",
     "TextOpts", "TextAlign", "TextVAlign", "TextOverflow", "TextMetrics", "TextBlock",
 }
 

@@ -49,6 +49,7 @@ The capture below opens the **File** menu by simulating a click on it:
 | API | Signature |
 |-----|-----------|
 | `MenuBar::add_menu` | `(title) -> Menu&` |
+| `MenuBar::set_background` | `(Color)` - default transparent: the window background shows, as with `Toolbar` |
 | `Menu::add_item` | `(label, fn, hint = "", enabled = true)` |
 | `Menu::add_checkable` | `(label, is_checked_fn, on_toggle_fn)` |
 | `Menu::add_submenu` | `(label) -> Menu&` |
@@ -121,6 +122,23 @@ text. `Toolbar::add_button(icon, fn, tip?)` renders an icon button;
 | `Toolbar::add_button` (labeled) | `(Icon, label, fn)` | Python: `add_labeled_button` |
 | `Toolbar::set_icon_px` / `set_background` | strip styling |
 | `IconButton::set_icon` | `(Icon)` | `set_icon_px` | `set_variant` | `on_click` |
+| `IconButton::set_icon_painter` | `(IconPainter)` - a custom icon, see below |
+
+### Built-in icons
+
+`slikui::Icon` (Python: `slikui.Icon`) has 156 procedural icons. They're drawn
+from `DrawList` lines and shapes on a 24x24 grid, so they take the theme
+colour and stay sharp at any size. The labels below are `icon_name(icon)`.
+The enum names are the CamelCase form, so `more_horizontal` is
+`Icon::MoreHorizontal`. New icons are added at the end, so existing enum
+values don't change.
+
+![icons](../images/icons.png)
+
+To draw an icon in a custom widget, call
+`paint_icon(env.list, icon, rect, color)` (Python: `slikui.paint_icon`;
+`slikui.icon_name(icon)` gives the name). `icon_count` is the number of
+icons, so `static_cast<Icon>(i)` is valid for every `i` in `[0, icon_count)`.
 
 ## The icon set
 
@@ -129,3 +147,36 @@ grid, camera, save, refresh, search, ...) is painted from DrawList
 primitives - no icon font, no assets, resolution-independent and
 theme-tinted. The full list is the `slikui::Icon` enum (`slikui.Icon.*` in
 Python).
+
+### Custom icons
+
+For an icon the set doesn't have, give the button a painter. It's called
+each frame with the icon's square `area` and the `color` a built-in icon
+would get (theme text, accent text on Primary/Danger, dimmed when disabled),
+so a custom icon follows the theme like the rest. Draw on the same 24x24 grid
+as the built-ins by scaling with `area.w / 24`, or start from a built-in and
+add to it. `set_icon(Icon)` switches back.
+
+=== "C++"
+
+    ```cpp
+    auto& pin = bar.add_button(slikui::Icon::Pin, toggle_pin);
+    pin.set_icon_painter([](slikui::DrawList& l, slikui::Rect a, slikui::Color c) {
+        slikui::paint_icon(l, slikui::Icon::Pin, a, c);
+        l.circle({a.x + a.w * .85f, a.y + a.h * .15f}, a.w * .15f, c); // a badge
+    });
+    ```
+
+=== "Python"
+
+    ```python
+    def pinned_icon(lst, area, color):
+        slikui.paint_icon(lst, slikui.Icon.Pin, area, color)
+        lst.circle(slikui.Vec2(area.x + area.w * .85, area.y + area.h * .15),
+                   area.w * .15, color)  # a badge
+
+    bar.add_button(slikui.Icon.Pin, toggle_pin).set_icon_painter(pinned_icon)
+    ```
+
+In Python the list handed to the painter is valid only during the call.
+

@@ -5,6 +5,8 @@
 #include "slikui/widgets/env.hpp"
 #include "slikui/widgets/widget.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <string>
 #include <utility>
@@ -55,32 +57,44 @@ public:
         const_cast<TextField*>(this)->refresh_metrics();
         std::string shown = display_text();
         float px = t.s(t.base_font_px); // raster size
-        float pad_x = 8.f;
+        // Text is clipped to the padded interior; a long value scrolls
+        // horizontally to keep the caret in view, a long placeholder elides.
+        float inner_w = std::fmax(bounds.w - 2 * kPadX, 0.f);
+        env.list.push_clip({bounds.x + kPadX - 1, bounds.y + 1, inner_w + 2,
+                            std::fmax(bounds.h - 2, 0.f)});
         // Center by the tight text block, not the leading - the block now
         // starts at the ascent, so this is typographically centered.
 
         if (!shown.empty()) {
+            update_scroll();
             text::TextLayout lay = ctx->font().layout(shown, px);
             float text_y = bounds.center().y - lay.size.h * inv * .5f;
+            float x0 = bounds.x + kPadX - scroll_x_;
             if (focused && has_sel()) {
                 auto [lo, hi] = sel_range();
-                float sx = bounds.x + pad_x + ctx->font().advance_upto(text_, lo, px) * inv;
-                float ex = bounds.x + pad_x + ctx->font().advance_upto(text_, hi, px) * inv;
+                float sx = x0 + x_of(lo), ex = x0 + x_of(hi);
                 env.list.rect({sx, text_y, ex - sx, lay.size.h * inv}, t.accent.faded(.35f), 2);
             }
-            paint_lay(env, lay, bounds.x + pad_x, text_y, t.text, inv);
+            paint_lay(env, lay, x0, text_y, t.text, inv);
             if (focused && caret_visible_) {
-                float cx = bounds.x + pad_x +
-                           ctx->font().advance_upto(text_, caret_, px) * inv;
+                float cx = x0 + x_of(caret_);
                 env.list.line({cx, text_y + 2}, {cx, text_y + lay.size.h * inv - 2},
                               t.text, 1);
             }
-        } else if (!placeholder_.empty()) {
-            text::TextLayout lay = ctx->font().layout(placeholder_, px);
-            float text_y = bounds.center().y - lay.size.h * inv * .5f;
-            paint_lay(env, lay, bounds.x + pad_x, text_y, t.text_dim.faded(.6f), inv);
+        } else {
+            scroll_x_ = 0;
+            if (!placeholder_.empty()) {
+                text::TextLayout lay =
+                    text::layout_fitted(ctx->font(), placeholder_, px, 0, inner_w * sc, 0);
+                float text_y = bounds.center().y - lay.size.h * inv * .5f;
+                paint_lay(env, lay, bounds.x + kPadX, text_y, t.text_dim.faded(.6f), inv);
+            }
         }
+        env.list.pop_clip();
     }
+
+    // Horizontal scroll offset of the text (logical px; 0 = start visible).
+    float scroll_x() const { return scroll_x_; }
 
     bool on_event(const Event& e) override {
         switch (e.type) {
@@ -221,16 +235,11 @@ public:
             case Key::Enter:
                 if (on_submit_) on_submit_(text_);
                 return true;
-            case Key::Space:
-                // Space arrives as TextInput in most backends; also accept here.
-                erase_selection();
-                text_.insert(caret_, " ");
-                ++caret_;
-                clear_sel();
-                if (on_change_) on_change_(text_);
-                return true;
             default:
-                return false;
+                // Typing keys are ours: the character arrives as TextInput
+                // (Space included - inserting it here too typed it twice),
+                // and the KeyPress must not reach shortcuts above the field.
+                return is_text_key(e.key);
             }
         }
         default:
@@ -302,15 +311,34 @@ private:
         caret_ = lo;
         clear_sel();
     }
+    // Logical x of byte offset `i` from the text start, measured on what is
+    // shown (password fields draw one '*' per byte).
+    float x_of(size_t i) const {
+        float px = ctx->theme().s(ctx->theme().base_font_px);
+        float inv = 1.f / ui_scale();
+        return password_ ? ctx->font().advance_upto(std::string(text_.size(), '*'), i, px) * inv
+                         : ctx->font().advance_upto(text_, i, px) * inv;
+    }
+    // Keep the caret inside the padded interior while focused; snap back to
+    // the start on blur. Clamped so no empty space opens up on the right.
+    void update_scroll() const {
+        float inner_w = std::fmax(bounds.w - 2 * kPadX - 1, 0.f); // -1: caret width
+        if (!focused) {
+            scroll_x_ = 0;
+            return;
+        }
+        float cx = x_of(caret_);
+        if (cx - scroll_x_ < 0) scroll_x_ = cx;
+        if (cx - scroll_x_ > inner_w) scroll_x_ = cx - inner_w;
+        float max_scroll = std::fmax(0.f, x_of(text_.size()) - inner_w);
+        scroll_x_ = std::clamp(scroll_x_, 0.f, max_scroll);
+    }
     // Place the caret at a click position (approximate: walk codepoints).
     size_t caret_at(float x) const {
-        float inv = 1.f / ui_scale();
-        float px = ctx->theme().s(ctx->theme().base_font_px);
-        float rel = x - bounds.x - 8;
+        float rel = x - bounds.x - kPadX + scroll_x_;
         size_t n = 0;
-        while (n < text_.size() &&
-               ctx->font().advance_upto(text_, n + 1, px) * inv < rel)
-            ++n;
+        while (n < text_.size() && x_of(next_cp_boundary(n)) < rel)
+            n = next_cp_boundary(n);
         return n;
     }
 
@@ -334,8 +362,11 @@ private:
             ctx->font().line_height(ctx->theme().s(ctx->theme().base_font_px));
     }
 
+    static constexpr float kPadX = 8.f; // text inset from the left/right edge
+
     std::string text_, placeholder_;
     size_t caret_ = 0;
+    mutable float scroll_x_ = 0;
     long sel_anchor_ = -1; // byte offset where the selection was anchored
     bool selecting_ = false;
     bool password_ = false;
@@ -501,13 +532,13 @@ public:
             case Key::Enter:
                 insert("\n");
                 return true;
-            case Key::Space:
-                insert(" ");
-                return true;
             case Key::Tab:
                 return false; // Tab keeps its focus-cycling meaning
             default:
-                return false;
+                // Typing keys (Space included) insert via TextInput; consume
+                // the KeyPress so it never reaches shortcuts above the area.
+                // Ctrl/Cmd chords still bubble.
+                return !e.shortcut_mod() && is_text_key(e.key);
             }
         }
         default:

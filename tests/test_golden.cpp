@@ -239,3 +239,84 @@ TEST(golden_textured_quad_covers_pixel_centers_only) {
         CHECK(exact);
     }
 }
+
+// Regression: a new Slider eased its thumb in from the minimum, so a
+// headless dt=0 snapshot showed it at the left edge. The initial value snaps.
+TEST(golden_slider_initial_value_snaps) {
+    Golden g;
+    auto& root = g.ctx.set_root<slikui::Column>();
+    auto& slider = root.add<slikui::Slider>(0.f, 100.f);
+    slider.set_value(80, false);
+    g.ctx.tick(slikui::Time{0, 0});
+    g.ctx.render();
+    // The filled (accent) track reaches past the middle at once.
+    float cy = slider.bounds.center().y;
+    CHECK(g.pixel(int(slider.bounds.center().x), int(cy)) == g.ctx.theme().accent);
+    // Later changes still animate: one short tick moves only part way.
+    slider.set_value(0, false);
+    g.ctx.tick(slikui::Time{0.016, 0.016});
+    g.ctx.render();
+    CHECK(g.pixel(int(slider.bounds.center().x), int(cy)) == g.ctx.theme().accent);
+}
+
+// Same for Switch: built checked, it starts on rather than sliding over.
+TEST(golden_switch_initial_state_snaps) {
+    Golden g;
+    auto& root = g.ctx.set_root<slikui::Column>();
+    root.set_cross(slikui::CrossMode::Start);
+    auto& sw = root.add<slikui::Switch>();
+    sw.set_checked(true);
+    g.ctx.tick(slikui::Time{0, 0});
+    g.ctx.render();
+    CHECK(g.pixel(int(sw.bounds.x + 6), int(sw.bounds.center().y)) == g.ctx.theme().accent);
+}
+
+// Regression: MenuBar always filled theme.surface (white in Light) instead of
+// matching Toolbar, which shows the window background unless told otherwise.
+TEST(golden_menubar_background_follows_theme) {
+    Golden g;
+    g.ctx.theme().use_light();
+    auto& root = g.ctx.set_root<slikui::Column>();
+    root.set_padding(0);
+    auto& bar = root.add<slikui::MenuBar>();
+    bar.add_menu("File");
+    g.frame();
+    int x = int(bar.bounds.right() - 4), y = int(bar.bounds.y + 4);
+    CHECK(g.pixel(x, y) == g.ctx.theme().background);
+    bar.set_background(slikui::Color::from_hex(0xFF0000));
+    g.frame();
+    CHECK(g.pixel(x, y) == slikui::Color::from_hex(0xFF0000));
+}
+
+// Regression: a placeholder (or typed text) longer than the field drew past
+// its right edge. Text is clipped to the field; the placeholder elides.
+TEST(golden_textfield_text_stays_inside) {
+    Golden g;
+    auto& root = g.ctx.set_root<slikui::Column>();
+    root.set_padding(slikui::Padding{0, 0, 60, 0}); // field spans x 0..100; 100..160 is padding
+    auto& field = root.add<slikui::TextField>();
+    field.set_placeholder("Search title, composer, style, technique");
+    g.frame();
+    REQUIRE(g.has_font);
+    slikui::Rect outside{field.bounds.right() + 1, field.bounds.y, 58, field.bounds.h};
+    slikui::Color bg = g.ctx.theme().background;
+    CHECK(g.count_non_background(outside, bg) == 0);
+
+    // Typed text past the width scrolls to keep the caret in view.
+    g.ctx.set_focus(&field);
+    for (char c : std::string("the quick brown fox jumps over the lazy dog")) {
+        slikui::Event e{};
+        e.type = slikui::Event::Type::TextInput;
+        e.codepoint = std::uint32_t(c);
+        g.ctx.handle(e);
+    }
+    g.frame();
+    CHECK(g.count_non_background(outside, bg) == 0);
+    CHECK(field.scroll_x() > 0);
+    slikui::Event home{};
+    home.type = slikui::Event::Type::KeyPress;
+    home.key = slikui::Key::Home;
+    g.ctx.handle(home);
+    g.frame();
+    CHECK(field.scroll_x() == 0);
+}

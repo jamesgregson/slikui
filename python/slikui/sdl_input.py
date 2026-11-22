@@ -81,6 +81,10 @@ def map_key(keycode):
             **{f"F{i}": getattr(K, f"F{i}") for i in range(1, 13)},
             **{c: getattr(K, c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
             **{str(d): getattr(K, f"Num{d}") for d in range(10)},
+            **{f"KP_{d}": getattr(K, f"Kp{d}") for d in range(10)},
+            "KP_PERIOD": K.KpDecimal, "KP_DIVIDE": K.KpDivide,
+            "KP_MULTIPLY": K.KpMultiply, "KP_MINUS": K.KpSubtract,
+            "KP_PLUS": K.KpAdd, "KP_EQUALS": K.KpEqual,
         }
         _KEYS = {int(getattr(s, f"SDLK_{n}")): k for n, k in named.items()}
     return _KEYS.get(int(keycode), slikui.Key.Unknown)

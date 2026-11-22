@@ -244,7 +244,13 @@ public:
         key.append(s);
         auto it = cache_.find(key);
         if (it == cache_.end()) {
-            if (cache_.size() >= kMaxCache) evict(frame_); // runaway text: drop all but this frame
+            if (cache_.size() >= evict_at_) {
+                evict(frame_); // runaway text: drop all but this frame
+                // Whatever survived was used this frame (e.g. a big list
+                // measured in one tick). Let the cache grow instead of
+                // rescanning it on every later miss: amortized O(1).
+                evict_at_ = std::max(kMaxCache, cache_.size() * 2);
+            }
             it = cache_.emplace(std::move(key),
                                 Entry{layout_fitted(*rq.font, s, rq.px, wrap, ellipsis_w, rq.flags), 0})
                      .first;
@@ -257,6 +263,7 @@ public:
     void end_frame() {
         ++frame_;
         if (frame_ > kKeepFrames) evict(frame_ - kKeepFrames);
+        evict_at_ = std::max(kMaxCache, cache_.size() * 2);
     }
     size_t cache_size() const { return cache_.size(); }
 
@@ -310,6 +317,7 @@ private:
     std::vector<Family> families_;
     std::function<std::uint32_t()> id_source_;
     std::unordered_map<std::string, Entry> cache_;
+    size_t evict_at_ = kMaxCache; // cache size that triggers a mid-frame evict
     std::uint64_t frame_ = 0;
 };
 

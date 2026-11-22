@@ -398,50 +398,195 @@ TEST(cursor_shape_requests) {
 // ---------------------------------------------------------------------------
 // FileBrowser (real temp directory)
 // ---------------------------------------------------------------------------
+// FileBrowser hands back native paths (backslashes on Windows), so the
+// tests compare them as paths, not strings, and work under the system temp
+// directory rather than a hard-coded /tmp.
+static bool same_path(const std::string& a, const std::string& b) {
+    return std::filesystem::path(a).lexically_normal() ==
+           std::filesystem::path(b).lexically_normal();
+}
+static std::string fb_temp(const char* name) {
+    return (std::filesystem::temp_directory_path() / name).generic_string();
+}
+
 TEST(filebrowser_lists_navigates_picks) {
     Fixture f;
     // Temp dir with two files and one subdir.
-    std::string dir = "/tmp/slikui_fbtest";
+    std::string dir = fb_temp("slikui_fbtest");
     std::filesystem::create_directories(dir + "/sub");
     { std::FILE* fp = std::fopen((dir + "/scene.png").c_str(), "wb"); if (fp) std::fclose(fp); }
     { std::FILE* fp = std::fopen((dir + "/mat.png").c_str(), "wb"); if (fp) std::fclose(fp); }
 
-    auto& root = f.ctx.set_root<slikui::Column>();
+    f.ctx.set_root<slikui::Column>();
     auto fb = std::make_unique<slikui::FileBrowser>(slikui::FileBrowser::Mode::Open);
     fb->set_path(dir);
     std::string picked;
     fb->on_pick([&](std::string p) { picked = p; });
-    auto& ref = f.ctx.open_dialog(std::move(fb));
+    auto& ref = static_cast<slikui::FileBrowser&>(f.ctx.open_dialog(std::move(fb)));
     f.frame();
     REQUIRE(f.has_font);
     CHECK(f.ctx.dialog_count() == 1);
 
-    // Directory listing: ".." + subdir + 2 files (dirs first).
-    auto& list = *dynamic_cast<slikui::ListView*>(ref.children[1]->children[1].get());
+    // Directory listing: ".." + subdir + 2 files (dirs first). The list
+    // pane is short in this small frame: scroll a row into view, then click
+    // it (the fixture clock is fixed, so a repeat press is a double-click).
+    auto& list = ref.list();
     CHECK(list.bounds.h > 0);
+    auto click_row = [&](size_t i) {
+        ref.list_scroll().scroll_to(list.row_rect(i));
+        f.frame();
+        slikui::Rect r = list.row_rect(i);
+        f.click(r.x + 30, r.center().y);
+    };
 
-    // Click the subdir entry (row 1) -> navigates into it.
-    float row_y = list.bounds.y + 1.5f * 24.f;
-    f.click(list.bounds.x + 30, row_y);
+    // A single click on the subdir (row 1) only selects it; a double-click
+    // enters it.
+    click_row(1);
     f.frame();
+    CHECK(same_path(ref.path(), dir));
+    click_row(1); // second press: clicks == 2
+    f.frame();
+    CHECK(same_path(ref.path(), dir + "/sub"));
     CHECK(f.ctx.dialog_count() == 1); // still open
 
-    // Navigate back up via ".." (row 0), then pick a file: click row 1
-    // ("mat.png" or "scene.png"), then Open.
-    f.click(list.bounds.x + 30, list.bounds.y + 12.f); // ".."
+    // Back up via ".." (row 0, double-click), then pick a file: click row 2
+    // (the first file), then Open.
+    click_row(0);
+    click_row(0);
     f.frame();
-    // entries: "..", "sub/", then sorted files - first file is row 2.
-    f.click(list.bounds.x + 30, list.bounds.y + 2 * 24.f + 12.f);
+    CHECK(same_path(ref.path(), dir));
+    click_row(2);
     f.frame();
-    // Open = the primary button in the button row (content last Row, 3rd child).
-    auto& content = *ref.children[1];
-    auto& buttons = *content.children[content.children.size() - 1];
-    auto& open_btn = *buttons.children[2];
+    auto& open_btn = ref.open_button();
     f.click(open_btn.bounds.center().x, open_btn.bounds.center().y);
     CHECK(!picked.empty());
     CHECK(picked.find("slikui_fbtest") != std::string::npos);
     CHECK(picked.find(".png") != std::string::npos);
     CHECK(f.ctx.dialog_count() == 0); // commit closes the dialog
 
+    std::filesystem::remove_all(dir);
+}
+
+// Mode::Folder (geetar #18): folders only, no name field, Choose picks the
+// selected folder - or the one being shown.
+TEST(filebrowser_folder_mode_picks_directories) {
+    Fixture f;
+    std::string dir = fb_temp("slikui_fbtest_folder");
+    std::filesystem::create_directories(dir + "/beta");
+    std::filesystem::create_directories(dir + "/alpha/inner");
+    { std::FILE* fp = std::fopen((dir + "/song.gp5").c_str(), "wb"); if (fp) std::fclose(fp); }
+
+    f.ctx.set_root<slikui::Column>();
+    auto fb = std::make_unique<slikui::FileBrowser>(slikui::FileBrowser::Mode::Folder);
+    fb->set_path(dir);
+    std::vector<std::string> picks;
+    fb->on_pick([&](std::string p) { picks.push_back(p); });
+    auto& ref = static_cast<slikui::FileBrowser&>(f.ctx.open_dialog(std::move(fb)));
+    f.frame();
+    REQUIRE(f.has_font);
+    CHECK(ref.mode() == slikui::FileBrowser::Mode::Folder);
+    CHECK(ref.open_button().text() == "Choose");
+    CHECK(!ref.name_field().visible);
+
+    // Only "..", alpha/, beta/ - the file is not listed.
+    auto& list = ref.list();
+    CHECK(list.row_rect(2).h > 0);
+    CHECK(list.row_rect(3).empty());
+
+    // Nothing selected (or ".."): the folder being shown.
+    CHECK(same_path(ref.selection(), dir));
+    list.set_selected(0);
+    CHECK(same_path(ref.selection(), dir));
+    // A selected folder is the pick (Choose doesn't enter it).
+    list.set_selected(1);
+    CHECK(same_path(ref.selection(), dir + "/alpha"));
+    f.click(ref.open_button().bounds.center().x, ref.open_button().bounds.center().y);
+    REQUIRE(picks.size() == 1);
+    CHECK(same_path(picks[0], dir + "/alpha"));
+    CHECK(f.ctx.dialog_count() == 0);
+
+    std::filesystem::remove_all(dir);
+}
+
+// Regression: a big folder grew the dialog past the window, pushing the name
+// field and Open/Cancel off-screen. The list now scrolls inside the dialog.
+TEST(filebrowser_big_folder_keeps_buttons_on_screen) {
+    Fixture f; // 320x240 frame
+    std::string dir = fb_temp("slikui_fbtest_big");
+    std::filesystem::create_directories(dir);
+    for (int i = 0; i < 150; ++i) {
+        std::string name = dir + "/file" + std::to_string(1000 + i) + ".txt";
+        if (std::FILE* fp = std::fopen(name.c_str(), "wb")) std::fclose(fp);
+    }
+    f.ctx.set_root<slikui::Column>();
+    auto fb = std::make_unique<slikui::FileBrowser>(slikui::FileBrowser::Mode::Open);
+    fb->set_path(dir);
+    std::string picked;
+    fb->on_pick([&](std::string p) { picked = p; });
+    auto& ref = static_cast<slikui::FileBrowser&>(f.ctx.open_dialog(std::move(fb)));
+    f.frame();
+    f.frame();
+    REQUIRE(f.has_font);
+    CHECK(ref.bounds.bottom() <= 240.f);
+    CHECK(ref.open_button().bounds.bottom() <= ref.bounds.bottom());
+    CHECK(ref.open_button().bounds.h > 0);
+    CHECK(ref.name_field().bounds.bottom() <= ref.open_button().bounds.y);
+    CHECK(ref.list_scroll().max_scroll() > 0); // the list scrolls instead
+
+    // Double-clicking a file picks it.
+    slikui::Rect row = ref.list().row_rect(1); // the first file (row 0 is "..")
+    f.click(row.x + 30, row.center().y);
+    f.click(row.x + 30, row.center().y);
+    CHECK(!picked.empty());
+    CHECK(f.ctx.dialog_count() == 0);
+    std::filesystem::remove_all(dir);
+}
+
+// Regression: list().set_selected() did not reach selection().
+TEST(filebrowser_programmatic_selection) {
+    Fixture f;
+    std::string dir = fb_temp("slikui_fbtest_sel");
+    std::filesystem::create_directories(dir + "/sub");
+    for (const char* n : {"/a.gp5", "/b.mid"})
+        if (std::FILE* fp = std::fopen((dir + n).c_str(), "wb")) std::fclose(fp);
+    slikui::FileBrowser fb(slikui::FileBrowser::Mode::Open);
+    fb.set_path(dir);
+    // entries: "..", "sub/", "a.gp5", "b.mid"
+    CHECK(fb.selection().empty());
+    fb.list().set_selected(3);
+    CHECK(same_path(fb.selection(), dir + "/b.mid"));
+    CHECK(fb.name_field().text() == "b.mid");
+    fb.list().set_selected(1); // a directory: the chosen file stays
+    CHECK(same_path(fb.selection(), dir + "/b.mid"));
+    std::string picked;
+    fb.on_pick([&](std::string p) { picked = p; });
+    CHECK(fb.commit());
+    CHECK(same_path(picked, dir + "/b.mid"));
+    std::filesystem::remove_all(dir);
+}
+
+TEST(filebrowser_filters_and_hidden_files) {
+    std::string dir = fb_temp("slikui_fbtest_filter");
+    std::filesystem::create_directories(dir + "/sub");
+    std::filesystem::create_directories(dir + "/.git");
+    for (const char* n : {"/song.GP5", "/tune.mid", "/notes.txt", "/.DS_Store"})
+        if (std::FILE* fp = std::fopen((dir + n).c_str(), "wb")) std::fclose(fp);
+    slikui::FileBrowser fb(slikui::FileBrowser::Mode::Open);
+    fb.set_path(dir);
+    // Hidden entries are off by default: "..", "sub/", then "notes.txt"
+    // (".DS_Store" would sort first).
+    fb.list().set_selected(2);
+    CHECK(same_path(fb.selection(), dir + "/notes.txt"));
+    fb.set_filters({"*.gp5", "*.mid"});
+    fb.list().set_selected(2); // "..", "sub/", then filtered files
+    CHECK(same_path(fb.selection(), dir + "/song.GP5")); // case-insensitive match
+    fb.list().set_selected(3);
+    CHECK(same_path(fb.selection(), dir + "/tune.mid"));
+    fb.list().set_selected(4); // notes.txt filtered out: no row 4
+    CHECK(same_path(fb.selection(), dir + "/tune.mid"));
+    fb.set_show_hidden(true);
+    fb.list().set_selected(1); // ".git/" now sorts before "sub/"
+    fb.list().set_selected(3);
+    CHECK(same_path(fb.selection(), dir + "/song.GP5"));
     std::filesystem::remove_all(dir);
 }

@@ -33,9 +33,9 @@ class Dialog; // widgets/shells.hpp - floating shell layer (see open_dialog)
 // and is then clamped fully inside the frame.
 enum class PopupDir : std::uint8_t { Below, Above, Right, Left };
 
-// Builds the tooltip popup for `w` at `pos`. Defined after Context (needs the
-// complete type); declared here so Context::show_tooltip can call it.
-void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos);
+// Pushes a tooltip popup showing `text` at `pos`; returns it. Defined after
+// Context (needs the complete type); declared here so Context can call it.
+Widget& show_tooltip_for(Context& ctx, const std::string& text, Vec2 pos);
 
 class Context {
 public:
@@ -192,13 +192,17 @@ public:
         hover_ = nullptr;
         reset_press_state();
         tooltip_open_ = false;
+        tooltip_popup_ = nullptr;
+        tooltip_text_.clear();
+        pending_tip_.clear();
+        tooltip_dismissed_ = false;
         hover_since_ = -1;
         inside_press_ = false;
         popups_.clear();  // popup widgets may hold callbacks
         dialogs_.clear(); // dialog entries (owned dialogs move to closing_)
         toasts_.clear();  // owned toast widgets
         root_.reset();    // the tree itself
-        closing_.clear(); // widgets deferred by close_popups()
+        flush_closing();  // widgets deferred by close_popups()
         shortcuts_.clear(); // may hold Python callables
     }
 
@@ -211,7 +215,7 @@ public:
             Busy busy(*this); // focus notifications flush when this closes
             handle_event(e);
         }
-        closing_.clear();
+        flush_closing();
     }
 
     Widget* focused() { return focused_; }
@@ -243,7 +247,7 @@ public:
             tick_pass(t);
         }
         // Widgets retired during the pass (Widget::remove, expired toasts).
-        if (busy_ == 0) closing_.clear();
+        if (busy_ == 0) flush_closing();
     }
 
 private:
@@ -289,7 +293,7 @@ public:
     void render(bool clear = true) {
         if (!sink_) return;
         DrawList list;
-        const PaintEnv env{list, theme_, fonts_.body(), &fonts_};
+        const PaintEnv env{list, theme_, fonts_.body(), &fonts_, {0, 0, frame_.x, frame_.y}};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
@@ -361,6 +365,11 @@ public:
         popups_.clear();
     }
     bool has_popups() const { return !popups_.empty(); }
+    // The text of the tooltip showing now; "" when none is.
+    const std::string& tooltip_text() const {
+        static const std::string none;
+        return tooltip_open_ ? tooltip_text_ : none;
+    }
     size_t popup_count() const { return popups_.size(); }
     Widget* popup(size_t i) { return popups_[i].widget; }
     // Index of the popup whose widget is exactly `w`, or -1 (menus use this to
@@ -420,11 +429,34 @@ public:
                 focus_notes_.push_back({dialogs_[i].widget, Event::Type::PopupClosed});
                 if (dialogs_[i].owned)
                     closing_.push_back(std::move(dialogs_[i].owned));
+                if (dialogs_[i].hold)
+                    closing_holds_.push_back({dialogs_[i].widget, std::move(dialogs_[i].hold)});
                 dialogs_.erase(dialogs_.begin() + long(i));
             }
         }
     }
     size_t dialog_count() const { return dialogs_.size(); }
+
+    // Keep `hold` alive while `w` is open as a popup or dialog; it is
+    // released once `w` has closed (after its PopupClosed, at the same safe
+    // point owned popups are destroyed). For a borrowed widget whose
+    // lifetime something else manages - the Python bindings pin the
+    // widget's Python object this way, so a temporary passed to push_popup
+    // or open_dialog can't be freed while it is on screen. False when `w`
+    // isn't open.
+    bool hold_while_open(const Widget& w, std::shared_ptr<void> hold) {
+        for (size_t i = popups_.size(); i-- > 0;)
+            if (popups_[i].widget == &w) {
+                popups_[i].hold = std::move(hold);
+                return true;
+            }
+        for (auto& d : dialogs_)
+            if (d.widget == &w) {
+                d.hold = std::move(hold);
+                return true;
+            }
+        return false;
+    }
     Widget* dialog(size_t i) { return dialogs_[i].widget; }
 
     // --- toasts ---
@@ -526,6 +558,7 @@ private:
         Widget::WidgetPtr owned; // null for borrowed dialogs
         Widget* widget = nullptr;
         bool modal = false;
+        std::shared_ptr<void> hold; // see hold_while_open
         bool placed = false; // false until the first layout centers it
     };
     struct ToastEntry {
@@ -554,6 +587,7 @@ private:
         Widget* anchor = nullptr; // position beside this widget (null = at pos)
         Vec2 pos;
         PopupDir dir = PopupDir::Below;
+        std::shared_ptr<void> hold; // see hold_while_open
     };
 
     static bool inside(Widget* w, Widget* root) {
@@ -727,6 +761,24 @@ private:
         if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
         focus_notes_.push_back({p.widget, Event::Type::PopupClosed});
         if (p.owned) closing_.push_back(std::move(p.owned));
+        if (p.hold) closing_holds_.push_back({p.widget, std::move(p.hold)});
+    }
+
+    // Deferred destruction: retired widgets first, then the holds that kept
+    // borrowed ones alive (releasing one may destroy its widget). A widget
+    // closed and reopened in the same pass (a menu re-pushing itself) gets
+    // its hold back instead.
+    void flush_closing() {
+        closing_.clear();
+        auto holds = std::move(closing_holds_);
+        closing_holds_.clear();
+        for (auto& [w, hold] : holds) {
+            for (auto& p : popups_)
+                if (hold && p.widget == w && !p.hold) p.hold = std::move(hold);
+            for (auto& d : dialogs_)
+                if (hold && d.widget == w && !d.hold) d.hold = std::move(hold);
+        }
+        holds.clear(); // releases what wasn't handed back
     }
 
     // Dispatch an event up the chain from `w` to the root, until consumed.
@@ -779,10 +831,8 @@ private:
         Widget* old = hover_;
         hover_ = w;
         hover_since_ = -1;
-        if (tooltip_open_) {
-            close_popups();
-            tooltip_open_ = false;
-        }
+        tooltip_dismissed_ = false;
+        close_tooltip();
         Event ev{};
         ev.pos = pos;
         ev.type = Event::Type::MouseLeave;
@@ -799,28 +849,59 @@ private:
         }
     }
 
+    // Each tick: the hovered widget's tooltip text at the pointer decides.
+    // After a 0.6 s hover with the same text, it shows; while it shows, new
+    // text swaps it at once (moving between rows of a list), "" closes it.
     void update_tooltip(Time t) {
+        std::string want = hover_ && !inside_press_ ? hover_->tooltip_at(hover_pos_)
+                                                    : std::string();
         if (tooltip_open_) {
-            // Closed implicitly when the hover target changed (set_hover);
-            // also close if the widget lost its tooltip text.
-            if ((!hover_ || hover_->tooltip_.empty()) && popups_.empty())
+            if (popup_index(tooltip_popup_) < 0) {
+                // Closed by someone else (close_popups, a press): stay closed
+                // until the text changes or the pointer moves on.
                 tooltip_open_ = false;
+                tooltip_popup_ = nullptr;
+                tooltip_dismissed_ = true;
+                pending_tip_ = tooltip_text_;
+                return;
+            }
+            if (want == tooltip_text_) return;
+            close_tooltip();
+            if (!want.empty() && popups_.empty()) open_tooltip(std::move(want));
+            else hover_since_ = -1;
             return;
         }
-        if (!hover_ || hover_->tooltip_.empty() || !popups_.empty() || inside_press_) {
+        if (want.empty() || !popups_.empty()) {
             hover_since_ = -1;
+            pending_tip_.clear();
+            tooltip_dismissed_ = false;
             return;
         }
-        if (hover_since_ < 0) {
+        if (want == pending_tip_ && tooltip_dismissed_) return;
+        if (hover_since_ < 0 || want != pending_tip_) { // new text: restart the delay
             hover_since_ = t.now;
+            pending_tip_ = std::move(want);
+            tooltip_dismissed_ = false;
             return;
         }
-        if (t.now - hover_since_ >= 0.6) show_tooltip(*hover_);
+        if (t.now - hover_since_ >= 0.6) open_tooltip(std::move(want));
     }
 
-    void show_tooltip(Widget& w) {
-        show_tooltip_for(*this, w, {hover_pos_.x + 12, hover_pos_.y + 18});
+    void open_tooltip(std::string text) {
+        tooltip_popup_ =
+            &show_tooltip_for(*this, text, {hover_pos_.x + 12, hover_pos_.y + 18});
+        tooltip_text_ = std::move(text);
         tooltip_open_ = true;
+    }
+
+    // Close just the tooltip (and anything pushed above it).
+    void close_tooltip() {
+        if (!tooltip_open_) return;
+        long i = popup_index(tooltip_popup_);
+        if (i >= 0) close_popups_above_index(i - 1);
+        tooltip_open_ = false;
+        tooltip_popup_ = nullptr;
+        tooltip_text_.clear();
     }
 
     Widget* hit_test(Vec2 pos) {
@@ -912,6 +993,9 @@ private:
     std::uint32_t next_tex_id_ = 1;
     std::vector<Popup> popups_;
     std::vector<Widget::WidgetPtr> closing_; // deferred destruction
+    // Holds of closed popups/dialogs, released after closing_ (with the
+    // widget they kept alive, to hand back if it reopened).
+    std::vector<std::pair<const Widget*, std::shared_ptr<void>>> closing_holds_;
     bool inside_press_ = false; // mouse button held from a press inside the tree
     Widget* mouse_capture_ = nullptr;
 
@@ -969,6 +1053,10 @@ private:
     Vec2 hover_pos_{};
     double hover_since_ = -1;
     bool tooltip_open_ = false;
+    Widget* tooltip_popup_ = nullptr; // the open tooltip (compared, never dereferenced)
+    std::string tooltip_text_;        // its text
+    std::string pending_tip_;         // text waiting out the hover delay
+    bool tooltip_dismissed_ = false;  // closed early; stays shut until the text changes
     std::vector<TexUpload> uploads_;
 };
 
@@ -1062,8 +1150,8 @@ public:
     const char* widget_type() const override { return "TooltipBox"; }
 };
 
-inline void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos) {
-    ctx.push_popup(std::make_unique<TooltipBox>(w.tooltip()), pos);
+inline Widget& show_tooltip_for(Context& ctx, const std::string& text, Vec2 pos) {
+    return ctx.push_popup(std::make_unique<TooltipBox>(text), pos);
 }
 
 // --- input routing ---------------------------------------------------------
@@ -1157,6 +1245,7 @@ inline void Context::handle_event(const Event& e) {
     case T::MouseEnter:
     case T::MouseLeave:
     case T::FocusGained:
+    case T::PopupClosed:
         return;
     }
 }
@@ -1182,8 +1271,7 @@ inline void Context::handle_press(const Event& in) {
     }
 
     if (tooltip_open_) {
-        close_popups();
-        tooltip_open_ = false;
+        close_tooltip();
         hover_since_ = -1;
     }
 

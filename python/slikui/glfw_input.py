@@ -60,7 +60,11 @@ def _g():
 _KEY_NAMES = {"PageUp": "PAGE_UP", "PageDown": "PAGE_DOWN",
               "CapsLock": "CAPS_LOCK", "LeftBracket": "LEFT_BRACKET",
               "RightBracket": "RIGHT_BRACKET", "Grave": "GRAVE_ACCENT",
-              **{f"Num{d}": str(d) for d in range(10)}}
+              **{f"Num{d}": str(d) for d in range(10)},
+              **{f"Kp{d}": f"KP_{d}" for d in range(10)},
+              "KpDecimal": "KP_DECIMAL", "KpDivide": "KP_DIVIDE",
+              "KpMultiply": "KP_MULTIPLY", "KpSubtract": "KP_SUBTRACT",
+              "KpAdd": "KP_ADD", "KpEqual": "KP_EQUAL"}
 _key_map = None
 
 

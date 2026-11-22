@@ -292,7 +292,19 @@ enum class Key : std::uint32_t {
     // Remaining US-layout punctuation (appended in 0.5; keys by physical
     // position, like the rest): = [ ] \ ; `
     Equal, LeftBracket, RightBracket, Backslash, Semicolon, Grave,
+    // Numeric keypad (appended after 0.5.0). Keypad Enter still maps to Enter.
+    Kp0, Kp1, Kp2, Kp3, Kp4, Kp5, Kp6, Kp7, Kp8, Kp9,
+    KpDecimal, KpDivide, KpMultiply, KpSubtract, KpAdd, KpEqual,
 };
+
+// Keys that type a character (letters, digits, punctuation, Space, keypad).
+// A focused text field consumes their KeyPress - the character itself
+// arrives as TextInput - so typing never triggers a key handler above it.
+inline bool is_text_key(Key k) {
+    return k == Key::Space || (k >= Key::Apostrophe && k <= Key::Slash) ||
+           (k >= Key::A && k <= Key::Z) || (k >= Key::Num0 && k <= Key::Grave) ||
+           (k >= Key::Kp0 && k <= Key::KpEqual);
+}
 
 enum Mod : std::uint32_t {
     ModNone   = 0,
@@ -651,10 +663,25 @@ public:
     void push_clip(Rect r) { push({DrawCmd::Type::ClipPush, r}); }
     void pop_clip() { push({DrawCmd::Type::ClipPop, {}}); }
 
-    // Appends `other`, offsetting geometry by `offset` (keeps one list per frame).
-    void append(const DrawList& other, Vec2 offset) {
-        for (const auto& c : other.commands()) {
-            DrawCmd copy = c;
+    // Appends `other`, offsetting geometry by `offset` (keeps one list per
+    // frame). Replaying a recorded list this way is how a widget whose
+    // drawing rarely changes avoids re-issuing it command by command.
+    void append(const DrawList& other, Vec2 offset = {}) {
+        append(other.cmds_.data(), other.cmds_.size(), offset);
+    }
+    // Appends `n` commands, offsetting geometry by `offset`. (Every
+    // command's position is rect.x/rect.y - a Line's start point too - so
+    // the offset moves the whole command.)
+    void append(const DrawCmd* cmds, size_t n, Vec2 offset = {}) {
+        if (n && cmds >= cmds_.data() && cmds < cmds_.data() + cmds_.size()) {
+            // Our own commands (list.append(list)): growing would move them.
+            std::vector<DrawCmd> own(cmds, cmds + n);
+            append(own.data(), n, offset);
+            return;
+        }
+        cmds_.reserve(cmds_.size() + n);
+        for (size_t i = 0; i < n; ++i) {
+            DrawCmd copy = cmds[i];
             copy.rect.x += offset.x;
             copy.rect.y += offset.y;
             cmds_.push_back(copy);
@@ -7922,7 +7949,13 @@ public:
         key.append(s);
         auto it = cache_.find(key);
         if (it == cache_.end()) {
-            if (cache_.size() >= kMaxCache) evict(frame_); // runaway text: drop all but this frame
+            if (cache_.size() >= evict_at_) {
+                evict(frame_); // runaway text: drop all but this frame
+                // Whatever survived was used this frame (e.g. a big list
+                // measured in one tick). Let the cache grow instead of
+                // rescanning it on every later miss: amortized O(1).
+                evict_at_ = std::max(kMaxCache, cache_.size() * 2);
+            }
             it = cache_.emplace(std::move(key),
                                 Entry{layout_fitted(*rq.font, s, rq.px, wrap, ellipsis_w, rq.flags), 0})
                      .first;
@@ -7935,6 +7968,7 @@ public:
     void end_frame() {
         ++frame_;
         if (frame_ > kKeepFrames) evict(frame_ - kKeepFrames);
+        evict_at_ = std::max(kMaxCache, cache_.size() * 2);
     }
     size_t cache_size() const { return cache_.size(); }
 
@@ -7988,6 +8022,7 @@ private:
     std::vector<Family> families_;
     std::function<std::uint32_t()> id_source_;
     std::unordered_map<std::string, Entry> cache_;
+    size_t evict_at_ = kMaxCache; // cache size that triggers a mid-frame evict
     std::uint64_t frame_ = 0;
 };
 
@@ -9830,6 +9865,19 @@ struct PaintEnv {
     const Theme& theme;
     const text::Font& font;            // body font, regular face
     text::FontLibrary* fonts = nullptr; // set by Context::render (null: hand-built env)
+    // The part of the frame this widget's drawing can show through: the
+    // window, narrowed by every clip pushed on the way down the tree (a
+    // ScrollArea's viewport, ...). Anything outside it is clipped away, so
+    // paint() can skip it - e.g. a long list drawing only its on-screen
+    // rows. Logical px, same space as bounds. Unbounded in a hand-built env.
+    Rect visible_rect{-1e9f, -1e9f, 2e9f, 2e9f};
+
+    // A copy whose visible_rect is narrowed to `clip`.
+    PaintEnv clipped(Rect clip) const {
+        PaintEnv e = *this;
+        e.visible_rect = visible_rect.intersect(clip);
+        return e;
+    }
 
     // Draws `s` anchored at `pos` (logical px) and returns the rect it
     // occupies. With default options `pos` is the top-left corner; align /
@@ -9926,8 +9974,14 @@ public:
     // would later dispatch into freed memory. ctx_alive_ guards the reverse
     // case - a borrowed widget (Menu, Dialog) outliving its Context.
     virtual ~Widget() {
+        if (destroy_hook) destroy_hook(this);
         if (ctx && !ctx_alive_.expired()) context_forget(ctx, this);
     }
+
+    // Called from every ~Widget with the dying widget (by then only its
+    // address is meaningful). Null by default; the Python bindings set it to
+    // invalidate wrappers of widgets the tree destroys.
+    static inline void (*destroy_hook)(Widget*) noexcept = nullptr;
 
     Widget(const Widget&) = delete;
     Widget& operator=(const Widget&) = delete;
@@ -10015,11 +10069,16 @@ public:
         paint(env);
         std::optional<Rect> clip = clip_rect();
         if (clip) env.list.push_clip(*clip);
+        const PaintEnv inner = clip ? env.clipped(*clip) : env;
         for (const auto& c : children) {
             std::optional<Rect> child_clip = child_clip_rect(*c);
-            if (child_clip) env.list.push_clip(*child_clip);
-            c->paint_tree(env);
-            if (child_clip) env.list.pop_clip();
+            if (child_clip) {
+                env.list.push_clip(*child_clip);
+                c->paint_tree(inner.clipped(*child_clip));
+                env.list.pop_clip();
+            } else {
+                c->paint_tree(inner);
+            }
         }
         if (clip) env.list.pop_clip();
         paint_over(env);
@@ -10120,8 +10179,19 @@ public:
     // popup: 0.6 s hover delay, dismissed by moving away or pressing).
     // NOTE: returns Widget& - in fluent chains, call base-class setters last
     // (pre-C++23 has no deducing-this, so Widget& can't know the leaf type).
+    // A tooltip that is showing follows changes (new text swaps it, "" closes it).
     Widget& set_tooltip(std::string t) { tooltip_ = std::move(t); return *this; }
     const std::string& tooltip() const { return tooltip_; }
+
+    // The tooltip text for the pointer at `pos` (logical px, inside this
+    // widget); "" = none. Defaults to set_tooltip's text. Widgets with parts
+    // override it for per-part tips - TreeView / ListView rows, Segmented
+    // segments. The Context asks each tick while the pointer hovers: new
+    // text swaps a showing tooltip, "" closes it.
+    virtual std::string tooltip_at(Vec2 pos) const {
+        (void)pos;
+        return tooltip_;
+    }
 
     // --- context menu ---
     //
@@ -10242,9 +10312,9 @@ class Dialog; // widgets/shells.hpp - floating shell layer (see open_dialog)
 // and is then clamped fully inside the frame.
 enum class PopupDir : std::uint8_t { Below, Above, Right, Left };
 
-// Builds the tooltip popup for `w` at `pos`. Defined after Context (needs the
-// complete type); declared here so Context::show_tooltip can call it.
-void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos);
+// Pushes a tooltip popup showing `text` at `pos`; returns it. Defined after
+// Context (needs the complete type); declared here so Context can call it.
+Widget& show_tooltip_for(Context& ctx, const std::string& text, Vec2 pos);
 
 class Context {
 public:
@@ -10401,13 +10471,17 @@ public:
         hover_ = nullptr;
         reset_press_state();
         tooltip_open_ = false;
+        tooltip_popup_ = nullptr;
+        tooltip_text_.clear();
+        pending_tip_.clear();
+        tooltip_dismissed_ = false;
         hover_since_ = -1;
         inside_press_ = false;
         popups_.clear();  // popup widgets may hold callbacks
         dialogs_.clear(); // dialog entries (owned dialogs move to closing_)
         toasts_.clear();  // owned toast widgets
         root_.reset();    // the tree itself
-        closing_.clear(); // widgets deferred by close_popups()
+        flush_closing();  // widgets deferred by close_popups()
         shortcuts_.clear(); // may hold Python callables
     }
 
@@ -10420,7 +10494,7 @@ public:
             Busy busy(*this); // focus notifications flush when this closes
             handle_event(e);
         }
-        closing_.clear();
+        flush_closing();
     }
 
     Widget* focused() { return focused_; }
@@ -10452,7 +10526,7 @@ public:
             tick_pass(t);
         }
         // Widgets retired during the pass (Widget::remove, expired toasts).
-        if (busy_ == 0) closing_.clear();
+        if (busy_ == 0) flush_closing();
     }
 
 private:
@@ -10498,7 +10572,7 @@ public:
     void render(bool clear = true) {
         if (!sink_) return;
         DrawList list;
-        const PaintEnv env{list, theme_, fonts_.body(), &fonts_};
+        const PaintEnv env{list, theme_, fonts_.body(), &fonts_, {0, 0, frame_.x, frame_.y}};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
@@ -10570,6 +10644,11 @@ public:
         popups_.clear();
     }
     bool has_popups() const { return !popups_.empty(); }
+    // The text of the tooltip showing now; "" when none is.
+    const std::string& tooltip_text() const {
+        static const std::string none;
+        return tooltip_open_ ? tooltip_text_ : none;
+    }
     size_t popup_count() const { return popups_.size(); }
     Widget* popup(size_t i) { return popups_[i].widget; }
     // Index of the popup whose widget is exactly `w`, or -1 (menus use this to
@@ -10629,11 +10708,34 @@ public:
                 focus_notes_.push_back({dialogs_[i].widget, Event::Type::PopupClosed});
                 if (dialogs_[i].owned)
                     closing_.push_back(std::move(dialogs_[i].owned));
+                if (dialogs_[i].hold)
+                    closing_holds_.push_back({dialogs_[i].widget, std::move(dialogs_[i].hold)});
                 dialogs_.erase(dialogs_.begin() + long(i));
             }
         }
     }
     size_t dialog_count() const { return dialogs_.size(); }
+
+    // Keep `hold` alive while `w` is open as a popup or dialog; it is
+    // released once `w` has closed (after its PopupClosed, at the same safe
+    // point owned popups are destroyed). For a borrowed widget whose
+    // lifetime something else manages - the Python bindings pin the
+    // widget's Python object this way, so a temporary passed to push_popup
+    // or open_dialog can't be freed while it is on screen. False when `w`
+    // isn't open.
+    bool hold_while_open(const Widget& w, std::shared_ptr<void> hold) {
+        for (size_t i = popups_.size(); i-- > 0;)
+            if (popups_[i].widget == &w) {
+                popups_[i].hold = std::move(hold);
+                return true;
+            }
+        for (auto& d : dialogs_)
+            if (d.widget == &w) {
+                d.hold = std::move(hold);
+                return true;
+            }
+        return false;
+    }
     Widget* dialog(size_t i) { return dialogs_[i].widget; }
 
     // --- toasts ---
@@ -10735,6 +10837,7 @@ private:
         Widget::WidgetPtr owned; // null for borrowed dialogs
         Widget* widget = nullptr;
         bool modal = false;
+        std::shared_ptr<void> hold; // see hold_while_open
         bool placed = false; // false until the first layout centers it
     };
     struct ToastEntry {
@@ -10763,6 +10866,7 @@ private:
         Widget* anchor = nullptr; // position beside this widget (null = at pos)
         Vec2 pos;
         PopupDir dir = PopupDir::Below;
+        std::shared_ptr<void> hold; // see hold_while_open
     };
 
     static bool inside(Widget* w, Widget* root) {
@@ -10936,6 +11040,24 @@ private:
         if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
         focus_notes_.push_back({p.widget, Event::Type::PopupClosed});
         if (p.owned) closing_.push_back(std::move(p.owned));
+        if (p.hold) closing_holds_.push_back({p.widget, std::move(p.hold)});
+    }
+
+    // Deferred destruction: retired widgets first, then the holds that kept
+    // borrowed ones alive (releasing one may destroy its widget). A widget
+    // closed and reopened in the same pass (a menu re-pushing itself) gets
+    // its hold back instead.
+    void flush_closing() {
+        closing_.clear();
+        auto holds = std::move(closing_holds_);
+        closing_holds_.clear();
+        for (auto& [w, hold] : holds) {
+            for (auto& p : popups_)
+                if (hold && p.widget == w && !p.hold) p.hold = std::move(hold);
+            for (auto& d : dialogs_)
+                if (hold && d.widget == w && !d.hold) d.hold = std::move(hold);
+        }
+        holds.clear(); // releases what wasn't handed back
     }
 
     // Dispatch an event up the chain from `w` to the root, until consumed.
@@ -10988,10 +11110,8 @@ private:
         Widget* old = hover_;
         hover_ = w;
         hover_since_ = -1;
-        if (tooltip_open_) {
-            close_popups();
-            tooltip_open_ = false;
-        }
+        tooltip_dismissed_ = false;
+        close_tooltip();
         Event ev{};
         ev.pos = pos;
         ev.type = Event::Type::MouseLeave;
@@ -11008,28 +11128,59 @@ private:
         }
     }
 
+    // Each tick: the hovered widget's tooltip text at the pointer decides.
+    // After a 0.6 s hover with the same text, it shows; while it shows, new
+    // text swaps it at once (moving between rows of a list), "" closes it.
     void update_tooltip(Time t) {
+        std::string want = hover_ && !inside_press_ ? hover_->tooltip_at(hover_pos_)
+                                                    : std::string();
         if (tooltip_open_) {
-            // Closed implicitly when the hover target changed (set_hover);
-            // also close if the widget lost its tooltip text.
-            if ((!hover_ || hover_->tooltip_.empty()) && popups_.empty())
+            if (popup_index(tooltip_popup_) < 0) {
+                // Closed by someone else (close_popups, a press): stay closed
+                // until the text changes or the pointer moves on.
                 tooltip_open_ = false;
+                tooltip_popup_ = nullptr;
+                tooltip_dismissed_ = true;
+                pending_tip_ = tooltip_text_;
+                return;
+            }
+            if (want == tooltip_text_) return;
+            close_tooltip();
+            if (!want.empty() && popups_.empty()) open_tooltip(std::move(want));
+            else hover_since_ = -1;
             return;
         }
-        if (!hover_ || hover_->tooltip_.empty() || !popups_.empty() || inside_press_) {
+        if (want.empty() || !popups_.empty()) {
             hover_since_ = -1;
+            pending_tip_.clear();
+            tooltip_dismissed_ = false;
             return;
         }
-        if (hover_since_ < 0) {
+        if (want == pending_tip_ && tooltip_dismissed_) return;
+        if (hover_since_ < 0 || want != pending_tip_) { // new text: restart the delay
             hover_since_ = t.now;
+            pending_tip_ = std::move(want);
+            tooltip_dismissed_ = false;
             return;
         }
-        if (t.now - hover_since_ >= 0.6) show_tooltip(*hover_);
+        if (t.now - hover_since_ >= 0.6) open_tooltip(std::move(want));
     }
 
-    void show_tooltip(Widget& w) {
-        show_tooltip_for(*this, w, {hover_pos_.x + 12, hover_pos_.y + 18});
+    void open_tooltip(std::string text) {
+        tooltip_popup_ =
+            &show_tooltip_for(*this, text, {hover_pos_.x + 12, hover_pos_.y + 18});
+        tooltip_text_ = std::move(text);
         tooltip_open_ = true;
+    }
+
+    // Close just the tooltip (and anything pushed above it).
+    void close_tooltip() {
+        if (!tooltip_open_) return;
+        long i = popup_index(tooltip_popup_);
+        if (i >= 0) close_popups_above_index(i - 1);
+        tooltip_open_ = false;
+        tooltip_popup_ = nullptr;
+        tooltip_text_.clear();
     }
 
     Widget* hit_test(Vec2 pos) {
@@ -11121,6 +11272,9 @@ private:
     std::uint32_t next_tex_id_ = 1;
     std::vector<Popup> popups_;
     std::vector<Widget::WidgetPtr> closing_; // deferred destruction
+    // Holds of closed popups/dialogs, released after closing_ (with the
+    // widget they kept alive, to hand back if it reopened).
+    std::vector<std::pair<const Widget*, std::shared_ptr<void>>> closing_holds_;
     bool inside_press_ = false; // mouse button held from a press inside the tree
     Widget* mouse_capture_ = nullptr;
 
@@ -11178,6 +11332,10 @@ private:
     Vec2 hover_pos_{};
     double hover_since_ = -1;
     bool tooltip_open_ = false;
+    Widget* tooltip_popup_ = nullptr; // the open tooltip (compared, never dereferenced)
+    std::string tooltip_text_;        // its text
+    std::string pending_tip_;         // text waiting out the hover delay
+    bool tooltip_dismissed_ = false;  // closed early; stays shut until the text changes
     std::vector<TexUpload> uploads_;
 };
 
@@ -11271,8 +11429,8 @@ public:
     const char* widget_type() const override { return "TooltipBox"; }
 };
 
-inline void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos) {
-    ctx.push_popup(std::make_unique<TooltipBox>(w.tooltip()), pos);
+inline Widget& show_tooltip_for(Context& ctx, const std::string& text, Vec2 pos) {
+    return ctx.push_popup(std::make_unique<TooltipBox>(text), pos);
 }
 
 // --- input routing ---------------------------------------------------------
@@ -11366,6 +11524,7 @@ inline void Context::handle_event(const Event& e) {
     case T::MouseEnter:
     case T::MouseLeave:
     case T::FocusGained:
+    case T::PopupClosed:
         return;
     }
 }
@@ -11391,8 +11550,7 @@ inline void Context::handle_press(const Event& in) {
     }
 
     if (tooltip_open_) {
-        close_popups();
-        tooltip_open_ = false;
+        close_tooltip();
         hover_since_ = -1;
     }
 
@@ -12339,6 +12497,7 @@ public:
     Switch& set_checked(bool c, bool fire_callback = false) {
         checked_ = c;
         knob_.target = c ? 1.f : 0.f;
+        if (!ticked_) knob_.value = knob_.target; // initial state: no slide-in
         if (fire_callback && on_change_) on_change_(checked_);
         return *this;
     }
@@ -12369,7 +12528,10 @@ public:
         return false;
     }
 
-    void tick(Time t) override { knob_.advance(t.dt); }
+    void tick(Time t) override {
+        ticked_ = true;
+        knob_.advance(t.dt);
+    }
 
     const char* widget_type() const override { return "Switch"; }
 
@@ -12377,6 +12539,7 @@ public:
 
 private:
     bool checked_ = false;
+    bool ticked_ = false; // until the first tick, state changes snap
     Anim knob_{0, 0, 18};
     std::function<void(bool)> on_change_;
 };
@@ -12402,6 +12565,7 @@ public:
         if (v == value_) return *this;
         value_ = v;
         fraction_.target = fraction();
+        if (!ticked_) fraction_.value = fraction_.target; // initial value: no sweep
         label_valid_ = false;
         if (fire_callback && on_change_) on_change_(value_);
         return *this;
@@ -12490,6 +12654,8 @@ public:
 
     void tick(Time t) override {
         fraction_.target = fraction();
+        if (!ticked_) fraction_.value = fraction_.target; // range/log/step set before showing
+        ticked_ = true;
         fraction_.advance(t.dt);
     }
 
@@ -12529,6 +12695,7 @@ private:
     bool fmt_set_ = false, log_ = false;
     float step_ = 0;
     bool dragging_ = false;
+    bool ticked_ = false; // until the first tick, value changes snap
     Anim fraction_{0, 0, 20};
     std::function<void(float)> on_change_;
     mutable text::TextLayout label_lay_, value_lay_;
@@ -12558,24 +12725,48 @@ public:
     long selected() const { return selected_; }
     Segmented& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
 
-    bool stretch_cross() const override { return false; }
+    // Fill: span the parent (a Column's width, a Row's leftover space)
+    // instead of hugging the labels; segments then share the width as
+    // evenly as their labels allow. Default off.
+    Segmented& set_fill(bool on = true) { fill_ = on; return *this; }
+    bool fill() const { return fill_; }
+
+    // Absolute rect of segment `index` in the current layout (empty if out
+    // of range) - e.g. to anchor a popover under one segment.
+    Rect segment_rect(size_t index) const {
+        if (index >= widths_.size()) return {};
+        float x = bounds.x;
+        for (size_t i = 0; i < index; ++i) x += widths_[i];
+        return {x, bounds.y, widths_[index], bounds.h};
+    }
+
+    bool stretch_cross() const override { return fill_; }
+    bool expands_main() const override { return fill_ || Widget::expands_main(); }
 
     Size measure(const Constraints& c) override {
         float w = 0;
         for (const auto& it : items_) w += natural(it);
-        return c.clamp({std::fmax(w, 60.f), 26.f});
+        return c.clamp({std::fmax(w, 60.f), kHeight});
     }
 
     // Segments keep their natural width (text + padding) when they fit.
     // Narrower than that, the width is shared out so short labels stay
     // whole and the long ones shrink (their text elides with "...").
+    // With fill, spare width evens the segments out: ones narrower than an
+    // equal share grow to it, wider ones keep their natural width.
     void arrange(const Rect& area) override {
-        bounds = area;
+        // Fixed height, centered when stretched (fill in a Row).
+        float h = std::fmin(area.h, kHeight);
+        bounds = {area.x, area.y + (area.h - h) * .5f, area.w, h};
         size_t n = items_.size();
         widths_.assign(n, 0.f);
         float total = 0;
         for (size_t i = 0; i < n; ++i) total += (widths_[i] = natural(items_[i]));
-        if (n == 0 || total <= area.w) return;
+        if (n == 0) return;
+        if (total <= area.w) {
+            if (fill_) even_out(area.w);
+            return;
+        }
         // Water-fill: segments narrower than the fair share keep their width;
         // the rest split what's left equally.
         std::vector<bool> fixed(n, false);
@@ -12645,7 +12836,46 @@ public:
 
     const char* widget_type() const override { return "Segmented"; }
 
+    // A segment drawn cut off with "..." shows its full label; else the
+    // widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long i = bounds.contains(pos) ? index_at(pos.x) : -1;
+        if (i >= 0 && ctx) {
+            float w = widths_[size_t(i)];
+            float box = std::fmax(w - 2 * std::fmin(12.f, w * .2f), 0.f); // as in paint
+            const std::string& it = items_[size_t(i)];
+            if (ctx->text_size(it).w > box + 0.01f) return it;
+        }
+        return Widget::tooltip_at(pos);
+    }
+
 private:
+    static constexpr float kHeight = 26.f;
+
+    // Spread `width` (>= the natural total) so segments are as equal as
+    // possible: any segment wider than the fair share keeps its natural
+    // width; the others split the rest equally.
+    void even_out(float width) {
+        size_t n = widths_.size();
+        std::vector<bool> keep(n, false);
+        float avail = width;
+        size_t open = n;
+        for (bool changed = true; changed && open > 0;) {
+            changed = false;
+            float share = avail / float(open);
+            for (size_t i = 0; i < n; ++i) {
+                if (keep[i] || widths_[i] <= share) continue;
+                keep[i] = true;
+                avail -= widths_[i];
+                --open;
+                changed = true;
+            }
+        }
+        float share = open > 0 ? avail / float(open) : 0.f;
+        for (size_t i = 0; i < n; ++i)
+            if (!keep[i]) widths_[i] = share;
+    }
+
     // Text width + 12 px padding each side (logical px). Context caches the
     // layout per raster size, so this follows UI-scale changes.
     float natural(const std::string& item) const {
@@ -12664,6 +12894,7 @@ private:
     long selected_ = -1, hovered_ = -1;
     std::function<void(size_t)> on_select_;
     std::vector<float> widths_; // per segment, set by arrange
+    bool fill_ = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -12736,6 +12967,8 @@ private:
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <string>
 #include <utility>
@@ -12786,32 +13019,44 @@ public:
         const_cast<TextField*>(this)->refresh_metrics();
         std::string shown = display_text();
         float px = t.s(t.base_font_px); // raster size
-        float pad_x = 8.f;
+        // Text is clipped to the padded interior; a long value scrolls
+        // horizontally to keep the caret in view, a long placeholder elides.
+        float inner_w = std::fmax(bounds.w - 2 * kPadX, 0.f);
+        env.list.push_clip({bounds.x + kPadX - 1, bounds.y + 1, inner_w + 2,
+                            std::fmax(bounds.h - 2, 0.f)});
         // Center by the tight text block, not the leading - the block now
         // starts at the ascent, so this is typographically centered.
 
         if (!shown.empty()) {
+            update_scroll();
             text::TextLayout lay = ctx->font().layout(shown, px);
             float text_y = bounds.center().y - lay.size.h * inv * .5f;
+            float x0 = bounds.x + kPadX - scroll_x_;
             if (focused && has_sel()) {
                 auto [lo, hi] = sel_range();
-                float sx = bounds.x + pad_x + ctx->font().advance_upto(text_, lo, px) * inv;
-                float ex = bounds.x + pad_x + ctx->font().advance_upto(text_, hi, px) * inv;
+                float sx = x0 + x_of(lo), ex = x0 + x_of(hi);
                 env.list.rect({sx, text_y, ex - sx, lay.size.h * inv}, t.accent.faded(.35f), 2);
             }
-            paint_lay(env, lay, bounds.x + pad_x, text_y, t.text, inv);
+            paint_lay(env, lay, x0, text_y, t.text, inv);
             if (focused && caret_visible_) {
-                float cx = bounds.x + pad_x +
-                           ctx->font().advance_upto(text_, caret_, px) * inv;
+                float cx = x0 + x_of(caret_);
                 env.list.line({cx, text_y + 2}, {cx, text_y + lay.size.h * inv - 2},
                               t.text, 1);
             }
-        } else if (!placeholder_.empty()) {
-            text::TextLayout lay = ctx->font().layout(placeholder_, px);
-            float text_y = bounds.center().y - lay.size.h * inv * .5f;
-            paint_lay(env, lay, bounds.x + pad_x, text_y, t.text_dim.faded(.6f), inv);
+        } else {
+            scroll_x_ = 0;
+            if (!placeholder_.empty()) {
+                text::TextLayout lay =
+                    text::layout_fitted(ctx->font(), placeholder_, px, 0, inner_w * sc, 0);
+                float text_y = bounds.center().y - lay.size.h * inv * .5f;
+                paint_lay(env, lay, bounds.x + kPadX, text_y, t.text_dim.faded(.6f), inv);
+            }
         }
+        env.list.pop_clip();
     }
+
+    // Horizontal scroll offset of the text (logical px; 0 = start visible).
+    float scroll_x() const { return scroll_x_; }
 
     bool on_event(const Event& e) override {
         switch (e.type) {
@@ -12952,16 +13197,11 @@ public:
             case Key::Enter:
                 if (on_submit_) on_submit_(text_);
                 return true;
-            case Key::Space:
-                // Space arrives as TextInput in most backends; also accept here.
-                erase_selection();
-                text_.insert(caret_, " ");
-                ++caret_;
-                clear_sel();
-                if (on_change_) on_change_(text_);
-                return true;
             default:
-                return false;
+                // Typing keys are ours: the character arrives as TextInput
+                // (Space included - inserting it here too typed it twice),
+                // and the KeyPress must not reach shortcuts above the field.
+                return is_text_key(e.key);
             }
         }
         default:
@@ -13033,15 +13273,34 @@ private:
         caret_ = lo;
         clear_sel();
     }
+    // Logical x of byte offset `i` from the text start, measured on what is
+    // shown (password fields draw one '*' per byte).
+    float x_of(size_t i) const {
+        float px = ctx->theme().s(ctx->theme().base_font_px);
+        float inv = 1.f / ui_scale();
+        return password_ ? ctx->font().advance_upto(std::string(text_.size(), '*'), i, px) * inv
+                         : ctx->font().advance_upto(text_, i, px) * inv;
+    }
+    // Keep the caret inside the padded interior while focused; snap back to
+    // the start on blur. Clamped so no empty space opens up on the right.
+    void update_scroll() const {
+        float inner_w = std::fmax(bounds.w - 2 * kPadX - 1, 0.f); // -1: caret width
+        if (!focused) {
+            scroll_x_ = 0;
+            return;
+        }
+        float cx = x_of(caret_);
+        if (cx - scroll_x_ < 0) scroll_x_ = cx;
+        if (cx - scroll_x_ > inner_w) scroll_x_ = cx - inner_w;
+        float max_scroll = std::fmax(0.f, x_of(text_.size()) - inner_w);
+        scroll_x_ = std::clamp(scroll_x_, 0.f, max_scroll);
+    }
     // Place the caret at a click position (approximate: walk codepoints).
     size_t caret_at(float x) const {
-        float inv = 1.f / ui_scale();
-        float px = ctx->theme().s(ctx->theme().base_font_px);
-        float rel = x - bounds.x - 8;
+        float rel = x - bounds.x - kPadX + scroll_x_;
         size_t n = 0;
-        while (n < text_.size() &&
-               ctx->font().advance_upto(text_, n + 1, px) * inv < rel)
-            ++n;
+        while (n < text_.size() && x_of(next_cp_boundary(n)) < rel)
+            n = next_cp_boundary(n);
         return n;
     }
 
@@ -13065,8 +13324,11 @@ private:
             ctx->font().line_height(ctx->theme().s(ctx->theme().base_font_px));
     }
 
+    static constexpr float kPadX = 8.f; // text inset from the left/right edge
+
     std::string text_, placeholder_;
     size_t caret_ = 0;
+    mutable float scroll_x_ = 0;
     long sel_anchor_ = -1; // byte offset where the selection was anchored
     bool selecting_ = false;
     bool password_ = false;
@@ -13232,13 +13494,13 @@ public:
             case Key::Enter:
                 insert("\n");
                 return true;
-            case Key::Space:
-                insert(" ");
-                return true;
             case Key::Tab:
                 return false; // Tab keeps its focus-cycling meaning
             default:
-                return false;
+                // Typing keys (Space included) insert via TextInput; consume
+                // the KeyPress so it never reaches shortcuts above the area.
+                // Ctrl/Cmd chords still bubble.
+                return !e.shortcut_mod() && is_text_key(e.key);
             }
         }
         default:
@@ -13388,6 +13650,7 @@ private:
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
 
+#include <cmath>
 #include <string>
 
 namespace slikui {
@@ -13407,6 +13670,16 @@ public:
     Label& set_font_size(float px) { font_px_ = px; valid_ = false; return *this; }
     Label& set_color(Color c) { color_ = c; return *this; } // alpha 0 = theme default
     Label& set_wrap_width(float w) { wrap_width_ = w; valid_ = false; return *this; }
+
+    // Placement inside the label's bounds, for a label laid out larger than
+    // its text (stretched across a Column, given a Row's height, ...).
+    // align: each line within the width (wrapped lines too). valign: the
+    // block within the height (Baseline behaves like Top); text taller than
+    // the label stays top-aligned. Defaults: Left, Top.
+    Label& set_align(TextAlign a) { align_ = a; return *this; }
+    Label& set_valign(TextVAlign v) { valign_ = v; return *this; }
+    TextAlign align() const { return align_; }
+    TextVAlign valign() const { return valign_; }
 
     // Style. Missing bold/italic faces are synthesized from the family's
     // closest face; set_font takes a family registered with
@@ -13453,7 +13726,14 @@ public:
 
     void paint(const PaintEnv& env) const override {
         Color col = color_.a > 0 ? color_ : env.theme.text;
-        paint_text(env, cached_, {bounds.x, bounds.y}, col, 1.f / sc());
+        float s = sc(), inv = 1.f / s;
+        float slack_y = std::fmax(bounds.h - cached_.size.h * inv, 0.f);
+        float y = bounds.y + (valign_ == TextVAlign::Middle   ? slack_y * .5f
+                              : valign_ == TextVAlign::Bottom ? slack_y
+                                                              : 0.f);
+        // Lines align within the bounds' width (raster px), each on its own.
+        text::emit_layout(env.list, cached_, {bounds.x, y}, inv, col, bounds.w * s,
+                          text_align_factor(align_));
     }
 
     const char* widget_type() const override { return "Label"; }
@@ -13484,6 +13764,8 @@ private:
     float font_px_ = 0;    // 0 = theme default (logical)
     float wrap_width_ = 0; // 0 = wrap to the available width (logical)
     Color color_ = Color::transparent();
+    TextAlign align_ = TextAlign::Left;
+    TextVAlign valign_ = TextVAlign::Top;
     std::string family_;   // "" = body
     text::TextLayout cached_;
     float cached_px_ = 0;
@@ -13506,6 +13788,8 @@ private:
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
@@ -13691,6 +13975,8 @@ public:
     }
     long selected() const { return selected_; }
     ListView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+    // Double-click on an item (after its on_select for the first click).
+    ListView& on_activate(std::function<void(size_t)> f) { on_activate_ = std::move(f); return *this; }
 
     // Absolute rect of item `index` in the current layout (empty if out of
     // range) - e.g. ScrollArea::scroll_to(list.row_rect(i)).
@@ -13707,13 +13993,16 @@ public:
     void paint(const PaintEnv& env) const override {
         refresh_metrics();
         const Theme& t = env.theme;
-        float y = bounds.y;
         TextOpts o;
         o.color = t.text;
         o.valign = TextVAlign::Middle;
         o.overflow = TextOverflow::Ellipsis; // long items stay inside the list
-        for (size_t i = 0; i < items_.size(); ++i) {
-            Rect row{bounds.x, y, bounds.w, row_height()};
+        // Only the rows inside the visible rect (fixed height: a division).
+        float rh = row_height(), n = float(items_.size());
+        size_t first = size_t(std::clamp(std::floor((env.visible_rect.y - bounds.y) / rh), 0.f, n));
+        size_t last = size_t(std::clamp(std::ceil((env.visible_rect.bottom() - bounds.y) / rh), 0.f, n));
+        for (size_t i = first; i < last; ++i) {
+            Rect row{bounds.x, bounds.y + float(i) * rh, bounds.w, rh};
             if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
             else if (i == hovered_ && enabled)
                 env.list.rect(row, t.surface_alt, 4);
@@ -13721,7 +14010,6 @@ public:
             if (line_height_ > 0)
                 env.text_in({row.x + 8, row.y, std::fmax(row.w - 16.f, 0.f), row.h},
                             items_[i], o);
-            y += row_height();
         }
     }
 
@@ -13739,6 +14027,7 @@ public:
             if (idx >= 0) {
                 selected_ = idx;
                 if (on_select_) on_select_(size_t(idx));
+                if (e.clicks == 2 && on_activate_) on_activate_(size_t(idx));
             }
             return true;
         }
@@ -13746,6 +14035,17 @@ public:
     }
 
     const char* widget_type() const override { return "ListView"; }
+
+    // An item drawn cut off with "..." shows its full text; else the
+    // widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long idx = bounds.contains(pos) ? row_at(pos.y) : -1;
+        if (idx >= 0 && ctx && line_height_ > 0) {
+            const std::string& it = items_[size_t(idx)];
+            if (ctx->text_size(it).w > bounds.w - 16.f + 0.01f) return it;
+        }
+        return Widget::tooltip_at(pos);
+    }
 
     void theme_changed() override { valid_ = false; } // scale/font may have changed
 
@@ -13777,7 +14077,7 @@ private:
     size_t hovered_ = size_t(-1);
     mutable float line_height_ = 0, natural_w_ = 100, valid_scale_ = 0;
     mutable bool valid_ = false;
-    std::function<void(size_t)> on_select_;
+    std::function<void(size_t)> on_select_, on_activate_;
 };
 
 // ---------------------------------------------------------------------------
@@ -14314,6 +14614,11 @@ private:
 // TreeView - indented hierarchy with expand arrows and selection. Rows are a
 // flat (label, depth) list; expansion state lives here, descendants of a
 // collapsed row are hidden. Apps mutate rows and call set_rows again.
+//
+// Cost scales with the rows on screen, not the row count: paint draws only
+// rows inside PaintEnv::visible_rect, and the natural width measures each
+// label once, when its row first becomes visible (or never, with
+// set_natural_width).
 // ---------------------------------------------------------------------------
 class TreeView : public Widget {
 public:
@@ -14321,20 +14626,24 @@ public:
         std::string label;
         int depth = 0;
         bool expandable = false;
+        bool expanded = true; // initial state for expandable rows
+        std::string tooltip;  // hover text; "" = the full label when elided
     };
 
     explicit TreeView(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
 
     TreeView& set_rows(std::vector<Row> rows) {
         rows_ = std::move(rows);
-        expanded_.assign(rows_.size(), true);
+        expanded_.resize(rows_.size());
+        for (size_t i = 0; i < rows_.size(); ++i) expanded_[i] = rows_[i].expanded;
+        widths_.assign(rows_.size(), -1.f);
         selected_ = -1;
-        metrics_valid_ = false; // natural width
+        hovered_ = -1;
         visible_valid_ = false;
         return *this;
     }
     TreeView& set_expanded(size_t index, bool open) {
-        if (index < expanded_.size()) {
+        if (index < expanded_.size() && expanded_[index] != open) {
             expanded_[index] = open;
             visible_valid_ = false;
         }
@@ -14350,32 +14659,44 @@ public:
         return visible_.size();
     }
     TreeView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+    // An arrow click opened (true) or closed (false) row `index`. Not called
+    // for set_expanded / set_rows.
+    TreeView& on_toggle(std::function<void(size_t, bool)> f) { on_toggle_ = std::move(f); return *this; }
+
+    // Fixed natural width (logical px), so no label is measured; 0 (the
+    // default) = widest visible row, measured as rows first become visible.
+    TreeView& set_natural_width(float w) { fixed_w_ = w; return *this; }
+    float natural_width() const { return fixed_w_; }
 
     // Absolute rect of row `index` in the current layout; empty when it is
     // hidden under a collapsed ancestor or out of range - e.g.
     // ScrollArea::scroll_to(tree.row_rect(i)).
     Rect row_rect(size_t index) const {
         refresh_visible();
-        for (size_t vi = 0; vi < visible_.size(); ++vi)
-            if (visible_[vi] == index)
-                return {bounds.x, bounds.y + float(vi) * row_height(), bounds.w, row_height()};
-        return {};
+        if (index >= vis_pos_.size() || vis_pos_[index] < 0) return {};
+        return {bounds.x, bounds.y + float(vis_pos_[index]) * row_height(), bounds.w,
+                row_height()};
     }
 
     Size measure(const Constraints& c) override {
-        refresh_metrics();
         refresh_visible();
-        return c.clamp({natural_w_, float(visible_.size()) * row_height()});
+        return c.clamp({natural_w(), float(visible_.size()) * row_height()});
     }
 
     void paint(const PaintEnv& env) const override {
         refresh_visible();
         const Theme& t = env.theme;
-        float y = bounds.y;
-        for (size_t vi = 0; vi < visible_.size(); ++vi) {
+        // Rows are fixed-height: the on-screen range is a division.
+        const Rect& vis = env.visible_rect;
+        float rh = row_height();
+        size_t first = size_t(std::clamp(std::floor((vis.y - bounds.y) / rh), 0.f,
+                                         float(visible_.size())));
+        size_t last = size_t(std::clamp(std::ceil((vis.bottom() - bounds.y) / rh), 0.f,
+                                        float(visible_.size())));
+        for (size_t vi = first; vi < last; ++vi) {
             size_t i = visible_[vi];
             const Row& r = rows_[i];
-            Rect row{bounds.x, y, bounds.w, row_height()};
+            Rect row{bounds.x, bounds.y + float(vi) * rh, bounds.w, rh};
             if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
             else if (long(vi) == hovered_ && enabled)
                 env.list.rect(row, t.surface_alt, 4);
@@ -14383,7 +14704,7 @@ public:
             float indent = bounds.x + 6 + float(r.depth) * 16.f;
             if (r.expandable) {
                 // chevron right (closed) / down (open)
-                float cy = row.y + row_height() * .5f;
+                float cy = row.y + rh * .5f;
                 Color mark = t.text_dim;
                 if (expanded_[i]) { // chevron down: v
                     env.list.line({indent - 2, cy - 2}, {indent + 2, cy + 2}, mark, 2);
@@ -14395,13 +14716,12 @@ public:
             }
             float tx = indent + (r.expandable ? 16.f : 4.f);
             // Elide to the row: long labels must not run past the tree.
-            Rect box{tx, row.y, std::fmax(bounds.right() - 4.f - tx, 0.f), row_height()};
+            Rect box{tx, row.y, std::fmax(bounds.right() - 4.f - tx, 0.f), rh};
             TextOpts o;
             o.color = t.text;
             o.valign = TextVAlign::Middle;
             o.overflow = TextOverflow::Ellipsis;
             env.text_in(box, r.label, o);
-            y += row_height();
         }
     }
 
@@ -14420,8 +14740,10 @@ public:
             size_t i = visible_[size_t(vi)];
             float chev_x = bounds.x + 6 + float(rows_[i].depth) * 16.f;
             if (rows_[i].expandable && e.pos.x < chev_x + 14.f) {
-                expanded_[i] = !expanded_[i];
+                bool open = !expanded_[i];
+                expanded_[i] = open;
                 visible_valid_ = false;
+                if (on_toggle_) on_toggle_(i, open);
                 return true;
             }
             selected_ = long(i);
@@ -14433,58 +14755,100 @@ public:
 
     const char* widget_type() const override { return "TreeView"; }
 
-    void theme_changed() override { metrics_valid_ = false; } // scale/font may have changed
+    // Per row: the row's tooltip; else its full label when the row shows it
+    // cut off with "..."; else the widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long vi = bounds.contains(pos) ? row_at(pos.y) : -1;
+        if (vi < 0) return Widget::tooltip_at(pos);
+        size_t i = visible_[size_t(vi)];
+        const Row& r = rows_[i];
+        if (!r.tooltip.empty()) return r.tooltip;
+        if (label_elided(i)) return r.label;
+        return Widget::tooltip_at(pos);
+    }
+
+    void theme_changed() override { metrics_scale_ = 0; } // scale/font may have changed
 
 private:
     float row_height() const { return 24.f; }
     long row_at(float y) const {
+        refresh_visible();
         long r = long(std::floor((y - bounds.y) / row_height()));
         return (r >= 0 && r < long(visible_.size())) ? r : -1;
     }
 
-    // Natural width (logical px): widest indent + label. Recomputed when
-    // the rows or the UI scale change.
-    void refresh_metrics() const {
-        if (!ctx) return;
-        float sc = ui_scale();
-        if (metrics_valid_ && metrics_scale_ == sc) return;
-        natural_w_ = 40.f + (rows_.empty() ? 0.f
-                                           : float(rows_.back().depth) * 16.f);
-        for (const auto& r : rows_)
-            natural_w_ = std::fmax(natural_w_,
-                                   6.f + float(r.depth) * 16.f +
-                                       (r.expandable ? 16.f : 4.f) +
-                                       ctx->text_size(r.label).w);
-        metrics_valid_ = true;
-        metrics_scale_ = sc;
+    // Whether row i's label is wider than its box in paint (so drawn elided).
+    bool label_elided(size_t i) const {
+        if (!ctx) return false;
+        const Row& r = rows_[i];
+        float tx = 6.f + float(r.depth) * 16.f + (r.expandable ? 16.f : 4.f);
+        float avail = bounds.w - 4.f - tx;
+        float w = widths_[i] >= 0 && metrics_scale_ == ui_scale() ? widths_[i]
+                                                                  : ctx->text_size(r.label).w;
+        return w > avail + 0.01f;
     }
 
-    // Rows whose every ancestor is expanded, in display order.
+    // Natural width (logical px): the fixed width, or the widest visible
+    // row (indent + label). Each label is measured once - when its row is
+    // first visible - and again only after a UI scale change.
+    float natural_w() const {
+        if (fixed_w_ > 0) return fixed_w_;
+        if (!ctx) return 40.f;
+        float sc = ui_scale();
+        if (metrics_scale_ != sc) { // scale/font changed: re-measure
+            std::fill(widths_.begin(), widths_.end(), -1.f);
+            metrics_scale_ = sc;
+            natural_cache_ = -1;
+        }
+        if (natural_cache_ >= 0) return natural_cache_;
+        float w = 40.f;
+        for (size_t i : visible_) {
+            const Row& r = rows_[i];
+            if (widths_[i] < 0) widths_[i] = ctx->text_size(r.label).w;
+            w = std::fmax(w, 6.f + float(r.depth) * 16.f + (r.expandable ? 16.f : 4.f) +
+                                 widths_[i]);
+        }
+        natural_cache_ = w;
+        return w;
+    }
+
+    // Rows whose every ancestor is expanded, in display order, and each
+    // row's position among them (-1 = hidden).
     void refresh_visible() const {
         if (visible_valid_) return;
         visible_.clear();
+        vis_pos_.assign(rows_.size(), -1);
+        natural_cache_ = -1; // the widest visible row may have changed
         std::vector<bool> open_stack; // per-depth expansion of ancestors
         for (size_t i = 0; i < rows_.size(); ++i) {
-            int d = rows_[i].depth;
+            int d = std::max(rows_[i].depth, 0);
             if (size_t(d) > open_stack.size()) open_stack.resize(size_t(d), true);
             bool ancestors_open = true;
             for (int k = 0; k < d && ancestors_open; ++k)
                 ancestors_open = open_stack[size_t(k)];
             open_stack.resize(size_t(d));
             open_stack.push_back(expanded_[i]);
-            if (ancestors_open) visible_.push_back(i);
+            if (ancestors_open) {
+                vis_pos_[i] = long(visible_.size());
+                visible_.push_back(i);
+            }
         }
         visible_valid_ = true;
     }
 
     std::vector<Row> rows_;
     std::vector<bool> expanded_;
+    mutable std::vector<float> widths_; // measured label widths, -1 = not yet
     mutable std::vector<size_t> visible_;
-    mutable float natural_w_ = 0, metrics_scale_ = 0;
-    mutable bool metrics_valid_ = false, visible_valid_ = false;
+    mutable std::vector<long> vis_pos_;
+    mutable float metrics_scale_ = 0;
+    mutable float natural_cache_ = -1; // natural_w() result, -1 = stale
+    mutable bool visible_valid_ = false;
+    float fixed_w_ = 0;
     long selected_ = -1;
     long hovered_ = -1;
     std::function<void(size_t)> on_select_;
+    std::function<void(size_t, bool)> on_toggle_;
 };
 
 // ---------------------------------------------------------------------------
@@ -14533,8 +14897,12 @@ public:
                       {bounds.x + grid_w_, bounds.y + header_height()}, t.border, 1);
         paint_row(env, head_lays_, bounds.y, t.text_dim, true);
 
-        float y = bounds.y + header_height();
-        for (size_t r = 0; r < rows_.size(); ++r) {
+        // Only the rows inside the visible rect (fixed height: a division).
+        float top = bounds.y + header_height(), rh = row_height(), n = float(rows_.size());
+        size_t first = size_t(std::clamp(std::floor((env.visible_rect.y - top) / rh), 0.f, n));
+        size_t last = size_t(std::clamp(std::ceil((env.visible_rect.bottom() - top) / rh), 0.f, n));
+        for (size_t r = first; r < last; ++r) {
+            float y = top + float(r) * rh;
             if (long(r) == selected_) {
                 env.list.rect({bounds.x, y, grid_w_, row_height()},
                               t.accent.faded(.25f), 0);
@@ -14542,7 +14910,6 @@ public:
                 env.list.rect({bounds.x, y, grid_w_, row_height()}, t.surface_alt, 0);
             }
             paint_row(env, cell_lays_[r], y, t.text, false);
-            y += row_height();
         }
     }
 
@@ -14861,7 +15228,8 @@ public:
                         label_valid_ = false;
                     }
                     return true;
-                default: return false;
+                default: // typing keys: the text arrives as TextInput
+                    return !e.shortcut_mod() && is_text_key(e.key);
                 }
             }
             if (!focused) return false;
@@ -15312,45 +15680,105 @@ inline void ColorPopup::refresh_fields() {
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 
 namespace slikui {
 
+// The icon list: X(EnumName, "snake_name"). Enum values follow this order, so
+// new icons go at the end (existing values stay stable). The Python enum and
+// icon_name() are generated from it; paint_icon() needs a case per entry.
+#define SLIKUI_ICONS(X)                                                       \
+    /* media */                                                                \
+    X(Play, "play") X(Pause, "pause") X(Stop, "stop") X(Record, "record")      \
+    X(StepForward, "step_forward") X(StepBack, "step_back")                    \
+    /* tools, files */                                                         \
+    X(Grid, "grid") X(Camera, "camera") X(Save, "save") X(Folder, "folder")    \
+    X(Refresh, "refresh")                                                      \
+    /* actions, navigation */                                                  \
+    X(Plus, "plus") X(Minus, "minus") X(Close, "close") X(Check, "check")      \
+    X(ChevronLeft, "chevron_left") X(ChevronRight, "chevron_right")            \
+    X(ChevronUp, "chevron_up") X(ChevronDown, "chevron_down")                  \
+    /* misc */                                                                 \
+    X(Eye, "eye") X(Gear, "gear") X(Search, "search") X(Trash, "trash")        \
+    X(Copy, "copy") X(Lock, "lock") X(Sun, "sun")                              \
+    /* navigation */                                                           \
+    X(ArrowLeft, "arrow_left") X(ArrowRight, "arrow_right")                    \
+    X(ArrowUp, "arrow_up") X(ArrowDown, "arrow_down") X(Home, "home")          \
+    X(Menu, "menu") X(MoreHorizontal, "more_horizontal")                       \
+    X(MoreVertical, "more_vertical") X(ExternalLink, "external_link")          \
+    X(Maximize, "maximize") X(Minimize, "minimize")                            \
+    /* editing */                                                              \
+    X(Edit, "edit") X(Cut, "cut") X(Paste, "paste") X(Undo, "undo")            \
+    X(Redo, "redo") X(Link, "link") X(Filter, "filter") X(Sort, "sort")        \
+    X(DragHandle, "drag_handle")                                               \
+    /* files */                                                                \
+    X(File, "file") X(FolderOpen, "folder_open") X(Download, "download")       \
+    X(Upload, "upload") X(Share, "share") X(Print, "print")                    \
+    /* view */                                                                 \
+    X(ZoomIn, "zoom_in") X(ZoomOut, "zoom_out") X(List, "list")                \
+    X(EyeOff, "eye_off") X(Image, "image") X(Sidebar, "sidebar")               \
+    X(Layers, "layers")                                                        \
+    /* status */                                                               \
+    X(Info, "info") X(Warning, "warning") X(Error, "error") X(Help, "help")    \
+    X(Bell, "bell")                                                            \
+    /* marking */                                                              \
+    X(Star, "star") X(Heart, "heart") X(Pin, "pin") X(Bookmark, "bookmark")    \
+    X(Flag, "flag") X(Tag, "tag")                                              \
+    /* media */                                                                \
+    X(FastForward, "fast_forward") X(Rewind, "rewind") X(Repeat, "repeat")     \
+    X(Shuffle, "shuffle") X(Volume, "volume") X(Mute, "mute") X(Mic, "mic")    \
+    X(Music, "music")                                                          \
+    /* misc */                                                                 \
+    X(Unlock, "unlock") X(Moon, "moon") X(User, "user") X(Mail, "mail")        \
+    X(Calendar, "calendar") X(Clock, "clock") X(Globe, "globe")                \
+    X(Power, "power") X(Code, "code") X(Terminal, "terminal")                 \
+    /* 3D view manipulation */                                                 \
+    X(Pan, "pan") X(RotateX, "rotate_x") X(RotateY, "rotate_y")                \
+    X(RotateZ, "rotate_z") X(RotateFree, "rotate_free")                       \
+    /* 3D editing */                                                           \
+    X(Vertex, "vertex") X(Edge, "edge") X(Face, "face") X(Cube, "cube")        \
+    X(Sphere, "sphere") X(Cylinder, "cylinder") X(Cone, "cone")                \
+    X(Plane, "plane") X(Mesh, "mesh") X(Wireframe, "wireframe")                \
+    X(Solid, "solid") X(Texture, "texture") X(Material, "material")            \
+    X(UV, "uv") X(Normal, "normal") X(Modifier, "modifier") X(Light, "light")  \
+    X(Bone, "bone") X(Keyframe, "keyframe") X(Curve, "curve")                  \
+    X(Extrude, "extrude") X(Scale, "scale") X(Axes, "axes") X(Snap, "snap")    \
+    X(Pivot, "pivot") X(Hierarchy, "hierarchy") X(Torus, "torus")             \
+    /* painting */                                                             \
+    X(Brush, "brush") X(Eraser, "eraser") X(Fill, "fill")                      \
+    X(Eyedropper, "eyedropper") X(Airbrush, "airbrush") X(Select, "select")    \
+    X(Lasso, "lasso") X(MagicWand, "magic_wand") X(Crop, "crop")               \
+    X(Gradient, "gradient") X(Palette, "palette") X(Text, "text")              \
+    X(Stamp, "stamp") X(Blur, "blur")                                          \
+    /* vector drawing */                                                       \
+    X(Pointer, "pointer") X(DirectSelect, "direct_select") X(Pen, "pen")       \
+    X(Rectangle, "rectangle") X(Ellipse, "ellipse") X(Polygon, "polygon")      \
+    X(Line, "line") X(Union, "union") X(Subtract, "subtract")                  \
+    X(Intersect, "intersect") X(AlignLeft, "align_left")                       \
+    X(AlignCenter, "align_center") X(AlignRight, "align_right")                \
+    X(AlignTop, "align_top") X(AlignMiddle, "align_middle")                    \
+    X(AlignBottom, "align_bottom") X(Group, "group") X(Ungroup, "ungroup")     \
+    X(BringForward, "bring_forward") X(SendBackward, "send_backward")          \
+    X(FlipH, "flip_h") X(FlipV, "flip_v")
+
 enum class Icon : std::uint8_t {
-    Play, Pause, Stop, Record, StepForward, StepBack,
-    Grid, Camera, Save, Folder, Refresh,
-    Plus, Minus, Close, Check,
-    ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
-    Eye, Gear, Search, Trash, Copy, Lock, Sun,
+#define SLIKUI_ICON_ENUM_(name, str) name,
+    SLIKUI_ICONS(SLIKUI_ICON_ENUM_)
+#undef SLIKUI_ICON_ENUM_
 };
+
+// Number of icons; every value in [0, icon_count) is a valid Icon.
+inline constexpr int icon_count = 0
+#define SLIKUI_ICON_COUNT_(name, str) +1
+    SLIKUI_ICONS(SLIKUI_ICON_COUNT_)
+#undef SLIKUI_ICON_COUNT_
+    ;
 
 inline const char* icon_name(Icon icon) {
     switch (icon) {
-    case Icon::Play: return "play";
-    case Icon::Pause: return "pause";
-    case Icon::Stop: return "stop";
-    case Icon::Record: return "record";
-    case Icon::StepForward: return "step_forward";
-    case Icon::StepBack: return "step_back";
-    case Icon::Grid: return "grid";
-    case Icon::Camera: return "camera";
-    case Icon::Save: return "save";
-    case Icon::Folder: return "folder";
-    case Icon::Refresh: return "refresh";
-    case Icon::Plus: return "plus";
-    case Icon::Minus: return "minus";
-    case Icon::Close: return "close";
-    case Icon::Check: return "check";
-    case Icon::ChevronLeft: return "chevron_left";
-    case Icon::ChevronRight: return "chevron_right";
-    case Icon::ChevronUp: return "chevron_up";
-    case Icon::ChevronDown: return "chevron_down";
-    case Icon::Eye: return "eye";
-    case Icon::Gear: return "gear";
-    case Icon::Search: return "search";
-    case Icon::Trash: return "trash";
-    case Icon::Copy: return "copy";
-    case Icon::Lock: return "lock";
-    case Icon::Sun: return "sun";
+#define SLIKUI_ICON_NAME_(name, str) case Icon::name: return str;
+        SLIKUI_ICONS(SLIKUI_ICON_NAME_)
+#undef SLIKUI_ICON_NAME_
     }
     return "unknown";
 }
@@ -15366,6 +15794,14 @@ inline void paint_icon(DrawList& list, Icon icon, Rect area, Color color,
     auto L = [&](float x1, float y1, float x2, float y2) {
         list.line(P(x1, y1), P(x2, y2), color, t);
     };
+    // Open polyline through grid points (repeat the first point to close).
+    auto PL = [&](std::initializer_list<Vec2> pts) {
+        const Vec2* prev = nullptr;
+        for (const Vec2& p : pts) {
+            if (prev) L(prev->x, prev->y, p.x, p.y);
+            prev = &p;
+        }
+    };
     auto F = [&](float x, float y, float w, float h, float rad = 0.f) {
         list.rect({area.x + x * k, area.y + y * k, w * k, h * k}, color, rad * k);
     };
@@ -15378,6 +15814,62 @@ inline void paint_icon(DrawList& list, Icon icon, Rect area, Color color,
         list.hollow_rect(
             {area.x + (cx - r) * k, area.y + (cy - r) * k, 2 * r * k, 2 * r * k},
             color, t, r * k);
+    };
+    // Elliptical arc from a0 to a1 degrees (0 = +x, 90 = down, increasing
+    // clockwise on screen), as short segments.
+    auto A = [&](float cx, float cy, float rx, float ry, float a0, float a1) {
+        int n = std::max(3, int(std::ceil(std::fabs(a1 - a0) / 12.f)));
+        constexpr float deg = 3.14159265f / 180.f;
+        float px = cx + std::cos(a0 * deg) * rx, py = cy + std::sin(a0 * deg) * ry;
+        for (int i = 1; i <= n; ++i) {
+            float a = (a0 + (a1 - a0) * float(i) / float(n)) * deg;
+            float x = cx + std::cos(a) * rx, y = cy + std::sin(a) * ry;
+            L(px, py, x, y);
+            px = x;
+            py = y;
+        }
+    };
+    auto Arc = [&](float cx, float cy, float r, float a0, float a1) { A(cx, cy, r, r, a0, a1); };
+    // Heavier stroke, for the highlighted part of an icon (Edge).
+    auto LT = [&](float x1, float y1, float x2, float y2) {
+        list.line(P(x1, y1), P(x2, y2), color, t * 2.f);
+    };
+    // Dashed line (marquees, guides). Round caps lengthen each dash by the
+    // stroke width, so the drawn dashes are short and the spacing wide.
+    auto DL = [&](float x1, float y1, float x2, float y2) {
+        float dx = x2 - x1, dy = y2 - y1, len = std::sqrt(dx * dx + dy * dy);
+        if (len <= 0) return;
+        for (float d = 0; d < len; d += 4.f) {
+            float e = std::fmin(d + .6f, len);
+            L(x1 + dx * d / len, y1 + dy * d / len, x1 + dx * e / len, y1 + dy * e / len);
+        }
+    };
+    auto DRect = [&](float x0, float y0, float x1, float y1) {
+        DL(x0, y0, x1, y0); DL(x1, y0, x1, y1); DL(x1, y1, x0, y1); DL(x0, y1, x0, y0);
+    };
+    // Cube in oblique projection: front face (4,9)-(15,20), back face offset
+    // by (+5,-5). Hidden edges only with `hidden`.
+    auto CubeOutline = [&](bool hidden) {
+        PL({{4, 9}, {15, 9}, {15, 20}, {4, 20}, {4, 9}});
+        PL({{4, 9}, {9, 4}, {20, 4}, {20, 15}, {15, 20}});
+        L(15, 9, 20, 4);
+        if (hidden) { L(9, 4, 9, 15); L(9, 15, 4, 20); L(9, 15, 20, 15); }
+    };
+    // Elliptical arc with an arrowhead at a1, pointing along the direction
+    // of travel.
+    auto ArcArrow = [&](float cx, float cy, float rx, float ry, float a0, float a1) {
+        A(cx, cy, rx, ry, a0, a1);
+        constexpr float deg = 3.14159265f / 180.f;
+        float a = a1 * deg, dir = a1 >= a0 ? 1.f : -1.f;
+        float tx = cx + std::cos(a) * rx, ty = cy + std::sin(a) * ry;
+        float dx = -std::sin(a) * rx * dir, dy = std::cos(a) * ry * dir;
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len <= 0) return;
+        dx /= len;
+        dy /= len;
+        constexpr float head = 3.5f, c = 0.7071f; // 45-degree barbs
+        L(tx, ty, tx - head * (dx * c - dy * c), ty - head * (dy * c + dx * c));
+        L(tx, ty, tx - head * (dx * c + dy * c), ty - head * (dy * c - dx * c));
     };
 
     switch (icon) {
@@ -15409,8 +15901,8 @@ inline void paint_icon(DrawList& list, Icon icon, Rect area, Color color,
         O(5, 5, 14, 14, 2); F(8, 13, 8, 6, 1);
         L(8, 5, 8, 10); L(13, 5, 13, 10); L(8, 10, 13, 10);
         break;
-    case Icon::Folder:
-        O(4, 8, 16, 11, 2); L(4, 5, 10, 5); L(10, 5, 10, 8);
+    case Icon::Folder: // outline with the tab on top
+        PL({{3, 5}, {9, 5}, {11, 8}, {21, 8}, {21, 19}, {3, 19}, {3, 5}});
         break;
     case Icon::Refresh:
         Ring(12, 12, 7); L(16, 3, 20, 6); L(20, 6, 16, 9);
@@ -15453,9 +15945,10 @@ inline void paint_icon(DrawList& list, Icon icon, Rect area, Color color,
     case Icon::Search:
         Ring(10.5f, 10.5f, 6); L(15, 15, 20, 20);
         break;
-    case Icon::Trash:
-        L(5, 7, 19, 7); O(7, 7, 10, 13, 1.5f); O(10, 4, 4, 3, 1);
-        L(10, 10, 10, 17); L(14, 10, 14, 17);
+    case Icon::Trash: // lid with a handle over a tapered bin
+        L(3.5f, 6, 20.5f, 6); PL({{9, 6}, {9, 3.5f}, {15, 3.5f}, {15, 6}});
+        PL({{5.5f, 6}, {7, 20.5f}, {17, 20.5f}, {18.5f, 6}});
+        L(10, 10, 10, 16.5f); L(14, 10, 14, 16.5f);
         break;
     case Icon::Copy:
         O(9, 9, 10, 10, 2); L(5, 15, 5, 7); L(5, 7, 15, 7);
@@ -15471,6 +15964,547 @@ inline void paint_icon(DrawList& list, Icon icon, Rect area, Color color,
             L(12 + std::cos(a) * 7, 12 + std::sin(a) * 7,
               12 + std::cos(a) * 9.5f, 12 + std::sin(a) * 9.5f);
         }
+        break;
+
+    // --- navigation ---
+    case Icon::ArrowLeft:
+        L(19, 12, 5, 12); L(11, 6, 5, 12); L(5, 12, 11, 18);
+        break;
+    case Icon::ArrowRight:
+        L(5, 12, 19, 12); L(13, 6, 19, 12); L(19, 12, 13, 18);
+        break;
+    case Icon::ArrowUp:
+        L(12, 19, 12, 5); L(6, 11, 12, 5); L(12, 5, 18, 11);
+        break;
+    case Icon::ArrowDown:
+        L(12, 5, 12, 19); L(6, 13, 12, 19); L(12, 19, 18, 13);
+        break;
+    case Icon::Home:
+        PL({{3.5f, 11.5f}, {12, 4}, {20.5f, 11.5f}});
+        PL({{6, 10}, {6, 20}, {18, 20}, {18, 10}});
+        PL({{10, 20}, {10, 15}, {14, 15}, {14, 20}});
+        break;
+    case Icon::Menu:
+        L(5, 7, 19, 7); L(5, 12, 19, 12); L(5, 17, 19, 17);
+        break;
+    case Icon::MoreHorizontal:
+        C(6, 12, 1.8f); C(12, 12, 1.8f); C(18, 12, 1.8f);
+        break;
+    case Icon::MoreVertical:
+        C(12, 6, 1.8f); C(12, 12, 1.8f); C(12, 18, 1.8f);
+        break;
+    case Icon::ExternalLink:
+        PL({{11, 5}, {5, 5}, {5, 19}, {19, 19}, {19, 13}});
+        L(11, 13, 19, 5); L(13.5f, 5, 19, 5); L(19, 5, 19, 10.5f);
+        break;
+    case Icon::Maximize:
+        PL({{4, 9}, {4, 4}, {9, 4}});    PL({{15, 4}, {20, 4}, {20, 9}});
+        PL({{20, 15}, {20, 20}, {15, 20}}); PL({{9, 20}, {4, 20}, {4, 15}});
+        break;
+    case Icon::Minimize:
+        PL({{9, 4}, {9, 9}, {4, 9}});    PL({{15, 4}, {15, 9}, {20, 9}});
+        PL({{20, 15}, {15, 15}, {15, 20}}); PL({{9, 20}, {9, 15}, {4, 15}});
+        break;
+
+    // --- editing ---
+    case Icon::Edit: // pencil
+        PL({{5, 19}, {5.5f, 15.5f}, {15.5f, 5.5f}, {18.5f, 8.5f}, {8.5f, 18.5f}, {5, 19}});
+        L(13, 8, 16, 11);
+        break;
+    case Icon::Cut: // scissors
+        Ring(7, 17, 2.8f); Ring(17, 17, 2.8f);
+        L(9, 15, 17, 4); L(15, 15, 7, 4);
+        break;
+    case Icon::Paste: // clipboard
+        O(5.5f, 5, 13, 16, 2); F(9, 3, 6, 4, 1.2f);
+        L(9, 12, 15, 12); L(9, 16, 15, 16);
+        break;
+    case Icon::Undo:
+        Arc(13.5f, 13.5f, 5.5f, -90, 90);
+        L(13.5f, 8, 5, 8); L(13.5f, 19, 9, 19);
+        L(5, 8, 8.5f, 4.5f); L(5, 8, 8.5f, 11.5f);
+        break;
+    case Icon::Redo:
+        Arc(10.5f, 13.5f, 5.5f, 90, 270);
+        L(10.5f, 8, 19, 8); L(10.5f, 19, 15, 19);
+        L(19, 8, 15.5f, 4.5f); L(19, 8, 15.5f, 11.5f);
+        break;
+    case Icon::Link:
+        O(2, 8.5f, 9.5f, 7, 3.5f); O(12.5f, 8.5f, 9.5f, 7, 3.5f); L(8, 12, 16, 12);
+        break;
+    case Icon::Filter: // funnel
+        PL({{4, 5}, {20, 5}, {14, 12}, {14, 19}, {10, 17}, {10, 12}, {4, 5}});
+        break;
+    case Icon::Sort: // up + down arrows
+        L(8, 5, 8, 19); L(4, 9, 8, 5); L(8, 5, 12, 9);
+        L(16, 5, 16, 19); L(12, 15, 16, 19); L(16, 19, 20, 15);
+        break;
+    case Icon::DragHandle: // 2x3 grip dots
+        for (int r = 0; r < 3; ++r) {
+            C(9, 6 + 6 * float(r), 1.6f);
+            C(15, 6 + 6 * float(r), 1.6f);
+        }
+        break;
+
+    // --- files ---
+    case Icon::File: // page with a folded corner
+        PL({{6, 3.5f}, {14, 3.5f}, {18.5f, 8}, {18.5f, 20.5f}, {6, 20.5f}, {6, 3.5f}});
+        PL({{14, 3.5f}, {14, 8}, {18.5f, 8}});
+        break;
+    case Icon::FolderOpen:
+        PL({{4, 19}, {4, 5}, {9, 5}, {11, 8}, {17.5f, 8}, {17.5f, 11}});
+        PL({{4, 19}, {7, 11}, {21, 11}, {18, 19}, {4, 19}});
+        break;
+    case Icon::Download:
+        L(12, 4, 12, 15); L(7, 10, 12, 15); L(12, 15, 17, 10);
+        PL({{5, 15}, {5, 20}, {19, 20}, {19, 15}});
+        break;
+    case Icon::Upload:
+        L(12, 15, 12, 4); L(7, 9, 12, 4); L(12, 4, 17, 9);
+        PL({{5, 15}, {5, 20}, {19, 20}, {19, 15}});
+        break;
+    case Icon::Share: // three connected nodes
+        L(7, 12, 17, 6); L(7, 12, 17, 18);
+        C(17, 6, 2.6f); C(7, 12, 2.6f); C(17, 18, 2.6f);
+        break;
+    case Icon::Print:
+        PL({{8, 9}, {8, 4}, {16, 4}, {16, 9}});
+        PL({{8, 17}, {4, 17}, {4, 9}, {20, 9}, {20, 17}, {16, 17}});
+        PL({{8, 14}, {16, 14}, {16, 20}, {8, 20}, {8, 14}});
+        break;
+
+    // --- view ---
+    case Icon::ZoomIn:
+        Ring(10.5f, 10.5f, 6); L(15, 15, 20, 20);
+        L(10.5f, 8, 10.5f, 13); L(8, 10.5f, 13, 10.5f);
+        break;
+    case Icon::ZoomOut:
+        Ring(10.5f, 10.5f, 6); L(15, 15, 20, 20);
+        L(8, 10.5f, 13, 10.5f);
+        break;
+    case Icon::List: // bulleted lines
+        for (int r = 0; r < 3; ++r) {
+            float y = 7 + 5 * float(r);
+            C(5.5f, y, 1.4f);
+            L(9, y, 19, y);
+        }
+        break;
+    case Icon::EyeOff:
+        Ring(12, 12, 6.5f); C(12, 12, 2.5f); L(4, 4, 20, 20);
+        break;
+    case Icon::Image: // landscape: sun + mountains in a frame
+        O(4, 5, 16, 14, 2); C(9, 9.5f, 1.8f);
+        PL({{5, 17.5f}, {10, 12.5f}, {13, 15.5f}, {15, 13.5f}, {19, 17.5f}});
+        break;
+    case Icon::Sidebar:
+        O(4, 5, 16, 14, 2); L(9.5f, 5, 9.5f, 19);
+        break;
+    case Icon::Layers: // three stacked sheets
+        PL({{12, 4}, {20, 8.5f}, {12, 13}, {4, 8.5f}, {12, 4}});
+        PL({{4, 12.5f}, {12, 17}, {20, 12.5f}});
+        PL({{4, 16.5f}, {12, 21}, {20, 16.5f}});
+        break;
+
+    // --- status ---
+    case Icon::Info:
+        Ring(12, 12, 9); L(12, 11, 12, 16.5f); C(12, 7.8f, 1.3f);
+        break;
+    case Icon::Warning: // triangle with !
+        PL({{12, 4}, {21, 19.5f}, {3, 19.5f}, {12, 4}});
+        L(12, 9.5f, 12, 14); C(12, 16.8f, 1.2f);
+        break;
+    case Icon::Error: // circle with x
+        Ring(12, 12, 9); L(9, 9, 15, 15); L(15, 9, 9, 15);
+        break;
+    case Icon::Help: // circle with ?
+        Ring(12, 12, 9);
+        Arc(12, 9.8f, 2.8f, 180, 400);
+        L(14.15f, 11.6f, 12, 13); L(12, 13, 12, 14);
+        C(12, 16.8f, 1.2f);
+        break;
+    case Icon::Bell:
+        Arc(12, 11, 5.5f, 180, 360);
+        L(6.5f, 11, 6.5f, 15); L(17.5f, 11, 17.5f, 15);
+        L(6.5f, 15, 4.5f, 17); L(17.5f, 15, 19.5f, 17); L(4.5f, 17, 19.5f, 17);
+        L(12, 3.5f, 12, 5.5f); C(12, 19.5f, 1.7f);
+        break;
+
+    // --- marking ---
+    case Icon::Star: { // five-point outline
+        constexpr float deg = 3.14159265f / 180.f;
+        float px = 0, py = 0;
+        for (int i = 0; i <= 10; ++i) {
+            float r = (i % 2) ? 3.9f : 9.f;
+            float a = (-90.f + 36.f * float(i)) * deg;
+            float x = 12 + std::cos(a) * r, y = 12.8f + std::sin(a) * r;
+            if (i) L(px, py, x, y);
+            px = x;
+            py = y;
+        }
+        break;
+    }
+    case Icon::Heart:
+        Arc(8.3f, 9.5f, 3.8f, 135, 360); Arc(15.7f, 9.5f, 3.8f, 180, 405);
+        L(5.6f, 12.2f, 12, 19); L(18.4f, 12.2f, 12, 19);
+        break;
+    case Icon::Pin: // pushpin
+        L(8.5f, 4, 15.5f, 4);
+        PL({{10, 4}, {10, 10}, {6.5f, 14}, {17.5f, 14}, {14, 10}, {14, 4}});
+        L(12, 14, 12, 21);
+        break;
+    case Icon::Bookmark:
+        PL({{6, 3.5f}, {18, 3.5f}, {18, 20.5f}, {12, 15.5f}, {6, 20.5f}, {6, 3.5f}});
+        break;
+    case Icon::Flag:
+        L(5, 3.5f, 5, 21);
+        PL({{5, 4.5f}, {19, 4.5f}, {15.5f, 9}, {19, 13.5f}, {5, 13.5f}});
+        break;
+    case Icon::Tag:
+        PL({{4, 4}, {12, 4}, {20.5f, 12.5f}, {12.5f, 20.5f}, {4, 12}, {4, 4}});
+        C(8.3f, 8.3f, 1.5f);
+        break;
+
+    // --- media ---
+    case Icon::FastForward:
+        PL({{4, 6}, {11.5f, 12}, {4, 18}, {4, 6}});
+        PL({{12.5f, 6}, {20, 12}, {12.5f, 18}, {12.5f, 6}});
+        break;
+    case Icon::Rewind:
+        PL({{20, 6}, {12.5f, 12}, {20, 18}, {20, 6}});
+        PL({{11.5f, 6}, {4, 12}, {11.5f, 18}, {11.5f, 6}});
+        break;
+    case Icon::Repeat:
+        PL({{5, 11}, {5, 7}, {18, 7}}); L(15, 4, 18, 7); L(18, 7, 15, 10);
+        PL({{19, 13}, {19, 17}, {6, 17}}); L(9, 14, 6, 17); L(6, 17, 9, 20);
+        break;
+    case Icon::Shuffle:
+        PL({{4, 17}, {8, 17}, {16, 7}, {20, 7}}); L(17, 4, 20, 7); L(20, 7, 17, 10);
+        PL({{4, 7}, {8, 7}, {16, 17}, {20, 17}}); L(17, 14, 20, 17); L(20, 17, 17, 20);
+        break;
+    case Icon::Volume:
+        PL({{4, 9.5f}, {8, 9.5f}, {12.5f, 5}, {12.5f, 19}, {8, 14.5f}, {4, 14.5f}, {4, 9.5f}});
+        Arc(13, 12, 3.8f, -50, 50); Arc(13, 12, 7.5f, -50, 50);
+        break;
+    case Icon::Mute:
+        PL({{4, 9.5f}, {8, 9.5f}, {12.5f, 5}, {12.5f, 19}, {8, 14.5f}, {4, 14.5f}, {4, 9.5f}});
+        L(15.5f, 9.5f, 20.5f, 14.5f); L(20.5f, 9.5f, 15.5f, 14.5f);
+        break;
+    case Icon::Mic:
+        O(9, 3.5f, 6, 11, 3);
+        Arc(12, 11, 6, 0, 180);
+        L(12, 17, 12, 20.5f); L(8.5f, 20.5f, 15.5f, 20.5f);
+        break;
+    case Icon::Music: // two beamed eighth notes
+        C(7.5f, 17.5f, 2.6f); C(16.5f, 15.5f, 2.6f);
+        L(9.9f, 17.5f, 9.9f, 6); L(18.9f, 15.5f, 18.9f, 4);
+        L(9.9f, 6, 18.9f, 4); L(9.9f, 8.5f, 18.9f, 6.5f);
+        break;
+
+    // --- misc ---
+    case Icon::Unlock:
+        O(6, 11, 12, 9, 2); PL({{9, 11}, {9, 6}, {15, 6}, {15, 8}});
+        F(11, 14, 2, 3, 1);
+        break;
+    case Icon::Moon: // crescent: outer arc + the bite's inner arc
+        Arc(12, 12, 8.5f, 6.9f, 269.2f);
+        Arc(17, 7.5f, 6.5f, 58.1f, 218.0f);
+        break;
+    case Icon::User:
+        Ring(12, 8, 4); Arc(12, 21, 7.5f, 180, 360);
+        break;
+    case Icon::Mail:
+        O(3.5f, 6, 17, 12, 2); PL({{4, 7}, {12, 13}, {20, 7}});
+        break;
+    case Icon::Calendar:
+        O(4, 5, 16, 15, 2); L(4, 10, 20, 10); L(8, 3, 8, 7); L(16, 3, 16, 7);
+        break;
+    case Icon::Clock:
+        Ring(12, 12, 9); L(12, 7, 12, 12); L(12, 12, 15.5f, 14);
+        break;
+    case Icon::Globe:
+        Ring(12, 12, 9); L(3, 12, 21, 12);
+        A(12, 12, 4, 9, -90, 270);
+        break;
+    case Icon::Power:
+        Arc(12, 13, 7.5f, -55, 235); L(12, 3.5f, 12, 12);
+        break;
+    case Icon::Code: // < / >
+        PL({{8, 7}, {3, 12}, {8, 17}}); PL({{16, 7}, {21, 12}, {16, 17}});
+        L(14, 5, 10, 19);
+        break;
+    case Icon::Terminal:
+        O(3, 4.5f, 18, 15, 2); PL({{7, 9}, {10, 12}, {7, 15}}); L(12, 15, 17, 15);
+        break;
+
+    // --- 3D view manipulation ---
+    case Icon::Pan: // four-way arrows
+        L(12, 3, 12, 21); L(3, 12, 21, 12);
+        L(9, 6, 12, 3); L(12, 3, 15, 6);     L(9, 18, 12, 21); L(12, 21, 15, 18);
+        L(6, 9, 3, 12); L(3, 12, 6, 15);     L(18, 9, 21, 12); L(21, 12, 18, 15);
+        break;
+    case Icon::RotateX: // arrowed ring around a horizontal axis
+        L(2.5f, 12, 21.5f, 12);
+        ArcArrow(12, 12, 4.5f, 8.5f, -50, 235);
+        break;
+    case Icon::RotateY: // arrowed ring around a vertical axis
+        L(12, 2.5f, 12, 21.5f);
+        ArcArrow(12, 12, 8.5f, 4.5f, 40, 325);
+        break;
+    case Icon::RotateZ: // arrowed circle around the axis facing the viewer
+        C(12, 12, 1.8f);
+        ArcArrow(12, 12, 8, 8, -50, 235);
+        break;
+    case Icon::RotateFree: // sphere with an orbit arrow: rotate about any axis
+        Ring(12, 12, 7);
+        ArcArrow(12, 12, 10, 4.5f, 190, 0); // front of the orbit, heading up
+        break;
+
+    // --- 3D editing ---
+    case Icon::Vertex: // cube with one vertex picked out
+        CubeOutline(false); C(15, 9, 3);
+        break;
+    case Icon::Edge: // cube with one edge picked out
+        CubeOutline(false); LT(15, 9, 20, 4);
+        break;
+    case Icon::Face: // cube with the front face filled
+        CubeOutline(false); F(4, 9, 11, 11);
+        break;
+    case Icon::Cube:
+        CubeOutline(false);
+        break;
+    case Icon::Sphere: // outline + front half of the equator
+        Ring(12, 12, 8.5f); A(12, 12, 8.5f, 3, 0, 180);
+        break;
+    case Icon::Cylinder:
+        A(12, 6, 7, 2.8f, 0, 360); A(12, 18, 7, 2.8f, 0, 180);
+        L(5, 6, 5, 18); L(19, 6, 19, 18);
+        break;
+    case Icon::Cone:
+        L(12, 3.5f, 5, 18); L(12, 3.5f, 19, 18); A(12, 18, 7, 2.8f, 0, 180);
+        break;
+    case Icon::Plane: // a flat quad in perspective
+        PL({{3, 17}, {15, 17}, {21, 8}, {9, 8}, {3, 17}});
+        break;
+    case Icon::Mesh: // triangulated patch with its vertices
+        O(3, 3, 18, 18, 0); L(4, 12, 20, 12); L(12, 4, 12, 20);
+        L(4, 12, 12, 4); L(12, 12, 20, 4); L(4, 20, 12, 12); L(12, 20, 20, 12);
+        break;
+    case Icon::Wireframe: // cube with its hidden edges
+        CubeOutline(true);
+        break;
+    case Icon::Solid: // solid shading: a filled ball
+        C(12, 12, 8.5f);
+        break;
+    case Icon::Texture: // checkerboard
+        O(4, 4, 16, 16, 1.5f); F(4, 4, 8, 8); F(12, 12, 8, 8);
+        break;
+    case Icon::Material: // glossy ball: outline + specular highlight
+        Ring(12, 12, 8.5f); Arc(12, 12, 5, 195, 255);
+        break;
+    case Icon::UV: // the letters U and V
+        L(4, 6, 4, 14); Arc(7.5f, 14, 3.5f, 180, 0); L(11, 14, 11, 6);
+        PL({{13, 6}, {16.5f, 17.5f}, {20, 6}});
+        break;
+    case Icon::Normal: // surface with a perpendicular arrow
+        L(3, 19, 21, 19);
+        L(12, 19, 12, 5); L(8.5f, 8.5f, 12, 5); L(12, 5, 15.5f, 8.5f);
+        break;
+    case Icon::Modifier: // wrench
+        Arc(16, 8, 4.5f, 30, 260);
+        LT(12.8f, 11.2f, 5.5f, 18.5f);
+        break;
+    case Icon::Light: // light bulb
+        Arc(12, 10, 6, 135, 405);
+        L(7.8f, 14.2f, 9.5f, 17); L(16.2f, 14.2f, 14.5f, 17);
+        L(9.5f, 17, 14.5f, 17); L(10, 20, 14, 20);
+        break;
+    case Icon::Bone: // octahedral armature bone
+        PL({{5, 19}, {8, 12}, {19, 5}, {12, 16}, {5, 19}}); L(8, 12, 12, 16);
+        break;
+    case Icon::Keyframe: // diamond
+        PL({{12, 4}, {20, 12}, {12, 20}, {4, 12}, {12, 4}}); C(12, 12, 2);
+        break;
+    case Icon::Curve: // curve with a tangent handle at its node
+        Arc(12, 21, 9, 195, 345);
+        L(4.5f, 12, 19.5f, 12); C(4.5f, 12, 1.9f); C(19.5f, 12, 1.9f);
+        F(10.25f, 10.25f, 3.5f, 3.5f, .5f);
+        break;
+    case Icon::Extrude: // face with an arrow pulled out of it
+        PL({{3, 19}, {15, 19}, {21, 14}, {9, 14}, {3, 19}});
+        L(12, 16.5f, 12, 4); L(8.5f, 7.5f, 12, 4); L(12, 4, 15.5f, 7.5f);
+        break;
+    case Icon::Scale: // small box growing toward a larger outline
+        O(4, 12, 8, 8, 1); L(11, 13, 19, 5); PL({{13.5f, 5}, {19, 5}, {19, 10.5f}});
+        PL({{4, 9}, {4, 4}, {9, 4}}); PL({{20, 15}, {20, 20}, {15, 20}});
+        break;
+    case Icon::Axes: // X right, Y up, Z toward the viewer
+        L(7, 17, 20, 17); L(17, 14, 20, 17); L(20, 17, 17, 20);
+        L(7, 17, 7, 4); L(4, 7, 7, 4); L(7, 4, 10, 7);
+        L(7, 17, 3, 21);
+        break;
+    case Icon::Snap: // horseshoe magnet
+        Arc(12, 12, 6, 0, 180); L(6, 12, 6, 6); L(18, 12, 18, 6);
+        F(4, 3.5f, 4, 3.5f, .5f); F(16, 3.5f, 4, 3.5f, .5f);
+        break;
+    case Icon::Pivot: // crosshair on the pivot point
+        Ring(12, 12, 5); C(12, 12, 1.4f);
+        L(12, 3, 12, 7); L(12, 17, 12, 21); L(3, 12, 7, 12); L(17, 12, 21, 12);
+        break;
+    case Icon::Hierarchy: // parent node with two children
+        O(4, 3.5f, 7, 5, 1); L(7.5f, 8.5f, 7.5f, 18.5f);
+        L(7.5f, 12, 13, 12); L(7.5f, 18.5f, 13, 18.5f);
+        O(13, 9.5f, 7, 5, 1); O(13, 16, 7, 5, 1);
+        break;
+    case Icon::Torus: // ring outline with the hole's two edges
+        A(12, 12, 10, 6.5f, 0, 360);
+        A(12, 9.5f, 6, 3.5f, 20, 160);         // the hole's lower rim
+        A(12, 12.37f, 3.44f, 1.7f, 180, 360);  // its upper rim, ends on the lower
+        break;
+
+    // --- painting ---
+    case Icon::Brush: // handle, ferrule, loaded tip
+        L(20, 4, 13, 11); LT(13, 11, 11, 13);
+        C(8.3f, 15.7f, 3); PL({{5.5f, 17}, {4, 20.5f}, {7, 18.5f}});
+        break;
+    case Icon::Eraser:
+        PL({{20, 20}, {7, 20}, {3, 16}, {13.5f, 5.5f}, {20, 12}, {12, 20}});
+        L(8.5f, 10.5f, 15, 17);
+        break;
+    case Icon::Fill: // tipped paint bucket with a drip
+        PL({{3, 11}, {10, 4}, {17, 11}, {10, 18}, {3, 11}}); L(3, 11, 17, 11);
+        L(19.5f, 12, 19.5f, 15.5f); C(19.5f, 17.5f, 2);
+        break;
+    case Icon::Eyedropper:
+        C(17.5f, 6.5f, 3); L(12.5f, 7.5f, 16.5f, 11.5f);
+        LT(14, 10, 7.5f, 16.5f); L(7.5f, 16.5f, 4.5f, 19.5f);
+        break;
+    case Icon::Airbrush: // spray can with a cloud of dots
+        O(4, 9, 9, 12, 1.5f); F(6.5f, 5.5f, 4, 3.5f, .8f);
+        C(16, 5, 1.1f); C(19.5f, 4, 1.1f); C(17.5f, 8.5f, 1.1f);
+        C(21, 8, 1.1f); C(16, 12, 1.1f); C(20, 12.5f, 1.1f);
+        break;
+    case Icon::Select: // dashed marquee
+        DRect(4, 5, 20, 19);
+        break;
+    case Icon::Lasso:
+        A(13.5f, 9.5f, 7.5f, 5, 0, 360);
+        PL({{8.5f, 13.3f}, {7, 17}, {9, 19.5f}, {6, 21}});
+        break;
+    case Icon::MagicWand: // stick + sparkle
+        L(4, 20, 14, 10);
+        L(18, 3, 18, 9); L(15, 6, 21, 6);
+        C(13, 4.5f, 1.1f); C(21, 11, 1.1f);
+        break;
+    case Icon::Crop:
+        PL({{7, 3}, {7, 17}, {21, 17}}); PL({{3, 7}, {17, 7}, {17, 21}});
+        break;
+    case Icon::Gradient: // frame filled with a fading ramp
+        for (int i = 0; i < 4; ++i) // fading columns
+            list.rect({area.x + (4 + 4 * float(i)) * k, area.y + 4 * k, 4 * k, 16 * k},
+                      color.faded(1.f - .3f * float(i)));
+        O(4, 4, 16, 16, 0);
+        break;
+    case Icon::Palette: // round palette with a thumb notch and paint dots
+        Arc(12, 12, 9, 50, 340);
+        PL({{20.5f, 8.9f}, {17, 11}, {16, 14}, {17.8f, 18.9f}});
+        C(7.5f, 11, 1.6f); C(10.5f, 7, 1.6f); C(15, 6.8f, 1.6f); C(8.5f, 15.5f, 1.6f);
+        break;
+    case Icon::Text: // serif T
+        L(5, 5, 19, 5); L(5, 5, 5, 7.5f); L(19, 5, 19, 7.5f);
+        L(12, 5, 12, 19); L(9, 19, 15, 19);
+        break;
+    case Icon::Stamp: // rubber stamp
+        Ring(12, 6, 2.8f); L(12, 8.8f, 12, 12.5f);
+        O(4, 12.5f, 16, 4.5f, 1.5f); L(5, 20, 19, 20);
+        break;
+    case Icon::Blur: // water drop
+        Arc(12, 14.5f, 6, -33.1f, 213.1f);
+        L(12, 3.5f, 6.97f, 11.23f); L(12, 3.5f, 17.03f, 11.23f);
+        break;
+
+    // --- vector drawing ---
+    case Icon::Pointer: // selection arrow
+        PL({{6, 3}, {6, 19}, {10, 15}, {13, 21}, {15.5f, 20}, {12.5f, 14}, {18, 14}, {6, 3}});
+        break;
+    case Icon::DirectSelect: // arrow + the anchor it grabs
+        PL({{4, 2.5f}, {4, 16}, {7.5f, 12.8f}, {10, 18}, {12, 17}, {9.5f, 12}, {14, 12}, {4, 2.5f}});
+        F(15.5f, 15.5f, 5, 5, .5f);
+        break;
+    case Icon::Pen: // fountain-pen nib
+        PL({{12, 21}, {6, 12}, {9, 6}, {15, 6}, {18, 12}, {12, 21}});
+        L(12, 21, 12, 14.5f); C(12, 12.5f, 1.6f); L(8.5f, 3.5f, 15.5f, 3.5f);
+        break;
+    case Icon::Rectangle:
+        O(4, 6, 16, 12, 1);
+        break;
+    case Icon::Ellipse:
+        A(12, 12, 9, 6.5f, 0, 360);
+        break;
+    case Icon::Polygon: { // hexagon
+        constexpr float deg = 3.14159265f / 180.f;
+        float px = 0, py = 0;
+        for (int i = 0; i <= 6; ++i) {
+            float a = (-90.f + 60.f * float(i)) * deg;
+            float x = 12 + std::cos(a) * 9, y = 12 + std::sin(a) * 9;
+            if (i) L(px, py, x, y);
+            px = x;
+            py = y;
+        }
+        break;
+    }
+    case Icon::Line: // segment with its end points
+        L(5.5f, 18.5f, 18.5f, 5.5f); C(5, 19, 2); C(19, 5, 2);
+        break;
+    case Icon::Union: // outline of two merged squares
+        PL({{4, 4}, {14, 4}, {14, 10}, {20, 10}, {20, 20}, {10, 20}, {10, 14}, {4, 14}, {4, 4}});
+        break;
+    case Icon::Subtract: // front square cut out of the back one
+        PL({{4, 4}, {14, 4}, {14, 10}, {10, 10}, {10, 14}, {4, 14}, {4, 4}});
+        DRect(10, 10, 20, 20);
+        break;
+    case Icon::Intersect: // only the overlap is kept
+        DRect(4, 4, 14, 14); DRect(10, 10, 20, 20); F(10, 10, 4, 4);
+        break;
+    case Icon::AlignLeft:
+        L(4, 3, 4, 21); F(6.5f, 6, 13, 4, 1); F(6.5f, 14, 8, 4, 1);
+        break;
+    case Icon::AlignCenter:
+        L(12, 3, 12, 21); F(5, 6, 14, 4, 1); F(8, 14, 8, 4, 1);
+        break;
+    case Icon::AlignRight:
+        L(20, 3, 20, 21); F(4.5f, 6, 13, 4, 1); F(9.5f, 14, 8, 4, 1);
+        break;
+    case Icon::AlignTop:
+        L(3, 4, 21, 4); F(6, 6.5f, 4, 13, 1); F(14, 6.5f, 4, 8, 1);
+        break;
+    case Icon::AlignMiddle:
+        L(3, 12, 21, 12); F(6, 5, 4, 14, 1); F(14, 8, 4, 8, 1);
+        break;
+    case Icon::AlignBottom:
+        L(3, 20, 21, 20); F(6, 4.5f, 4, 13, 1); F(14, 9.5f, 4, 8, 1);
+        break;
+    case Icon::Group: // two shapes inside one selection frame
+        DRect(3, 3, 21, 21); O(6, 6, 7, 7, 1); Ring(15, 15, 3.5f);
+        break;
+    case Icon::Ungroup: // the same shapes, each on its own
+        DRect(2.5f, 2.5f, 12.5f, 12.5f); O(5, 5, 5, 5, 1);
+        DRect(11.5f, 11.5f, 21.5f, 21.5f); Ring(16.5f, 16.5f, 2.8f);
+        break;
+    case Icon::BringForward: // the filled square is in front
+        O(4, 4, 11, 11, 1.5f); F(9, 9, 11, 11, 1.5f);
+        break;
+    case Icon::SendBackward: // the filled square is behind
+        F(9, 9, 11, 11, 1.5f); PL({{9, 15}, {4, 15}, {4, 4}, {15, 4}, {15, 9}});
+        break;
+    case Icon::FlipH: // mirrored triangles across a dashed axis
+        DL(12, 3, 12, 21);
+        PL({{9.5f, 6}, {9.5f, 18}, {3, 18}, {9.5f, 6}});
+        PL({{14.5f, 6}, {14.5f, 18}, {21, 18}, {14.5f, 6}});
+        break;
+    case Icon::FlipV:
+        DL(3, 12, 21, 12);
+        PL({{6, 9.5f}, {18, 9.5f}, {18, 3}, {6, 9.5f}});
+        PL({{6, 14.5f}, {18, 14.5f}, {18, 21}, {6, 14.5f}});
         break;
     }
 }
@@ -23637,6 +24671,11 @@ inline std::string shortcut_label(Key key, unsigned mods) {
         out += char('0' + k - int(Key::Num0));
         return out;
     }
+    if (k >= int(Key::Kp0) && k <= int(Key::Kp9)) {
+        out += "Num";
+        out += char('0' + k - int(Key::Kp0));
+        return out;
+    }
     switch (key) {
     case Key::Enter: out += "Enter"; break;
     case Key::Escape: out += "Esc"; break;
@@ -23664,6 +24703,12 @@ inline std::string shortcut_label(Key key, unsigned mods) {
     case Key::Backslash: out += "\\"; break;
     case Key::Semicolon: out += ";"; break;
     case Key::Grave: out += "`"; break;
+    case Key::KpDecimal: out += "Num."; break;
+    case Key::KpDivide: out += "Num/"; break;
+    case Key::KpMultiply: out += "Num*"; break;
+    case Key::KpSubtract: out += "Num-"; break;
+    case Key::KpAdd: out += "Num+"; break;
+    case Key::KpEqual: out += "Num="; break;
     default:
         if (k >= int(Key::F1) && k <= int(Key::F12))
             out += "F" + std::to_string(k - int(Key::F1) + 1);
@@ -24038,8 +25083,12 @@ public:
         return c.clamp(s);
     }
 
+    // Fill behind the bar; transparent (the default) shows the window
+    // background, like Toolbar.
+    MenuBar& set_background(Color c) { background_ = c; return *this; }
+
     void paint(const PaintEnv& env) const override {
-        env.list.rect(bounds, env.theme.surface, 0);
+        if (background_.a > 0) env.list.rect(bounds, background_, 0);
         env.list.line({bounds.x, bounds.bottom() - 1},
                       {bounds.right(), bounds.bottom() - 1}, env.theme.border, 1);
     }
@@ -24130,6 +25179,7 @@ public:
     };
 
     std::vector<std::unique_ptr<Menu>> menus_;
+    Color background_ = Color::transparent();
 };
 
 } // namespace slikui
@@ -24177,16 +25227,37 @@ public:
 
 namespace slikui {
 
+// Draws a custom icon: `area` is the icon's square (logical px), `color` the
+// tint the button would give a built-in icon (theme / variant / disabled).
+using IconPainter = std::function<void(DrawList& list, Rect area, Color color)>;
+
 // ---------------------------------------------------------------------------
-// IconButton - small square button with an icon instead of text.
+// IconButton - small square button with an icon instead of text: a built-in
+// Icon, or any drawing via set_icon_painter.
 // ---------------------------------------------------------------------------
 class IconButton : public Widget {
 public:
     IconButton(Icon icon, std::string widget_id = {})
         : Widget(std::move(widget_id)), icon_(icon) {}
 
-    IconButton& set_icon(Icon i) { icon_ = i; return *this; }
+    // A built-in icon (drops a custom painter).
+    IconButton& set_icon(Icon i) {
+        icon_ = i;
+        painter_ = nullptr;
+        return *this;
+    }
     Icon icon() const { return icon_; }
+    // A custom icon, drawn instead of the built-in one - e.g. on the same
+    // 24x24 grid the built-ins use, scaled by area.w / 24:
+    //   btn.set_icon_painter([](DrawList& l, Rect a, Color c) {
+    //       paint_icon(l, Icon::Pin, a, c);           // reuse a built-in...
+    //       l.circle(a.center(), a.w * .1f, c);        // ...and add to it
+    //   });
+    IconButton& set_icon_painter(IconPainter p) {
+        painter_ = std::move(p);
+        return *this;
+    }
+    bool has_icon_painter() const { return bool(painter_); }
     IconButton& set_variant(Button::Variant v) { variant_ = v; return *this; }
     Button::Variant variant() const { return variant_; }
     IconButton& set_icon_px(float px) { icon_px_ = px; return *this; }
@@ -24213,10 +25284,10 @@ public:
             env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
 
         float side = std::fmin(bounds.w, bounds.h);
-        paint_icon(env.list, icon_,
-                   {bounds.center().x - side * .5f, bounds.center().y - side * .5f,
-                    side, side},
-                   enabled ? icon_color(t) : t.text_dim);
+        Rect area{bounds.center().x - side * .5f, bounds.center().y - side * .5f, side, side};
+        Color c = enabled ? icon_color(t) : t.text_dim;
+        if (painter_) painter_(env.list, area, c);
+        else paint_icon(env.list, icon_, area, c);
     }
 
     bool on_event(const Event& e) override {
@@ -24289,6 +25360,7 @@ private:
     }
 
     Icon icon_;
+    IconPainter painter_;
     Button::Variant variant_ = Button::Variant::Ghost;
     float icon_px_ = 16, pad_h_ = 7, pad_v_ = 5;
     Anim hover_{0, 0, 15}, pressed_{0, 0, 25};
@@ -24773,28 +25845,38 @@ private:
 
 // ---------------------------------------------------------------------------
 // FileBrowser - in-UI directory listing + name field on a Dialog shell.
-// Directories navigate on click; files land in the name field. Open/Save
-// commits through on_pick; Cancel closes. `..` navigates up.
+// Directories navigate on double-click; files land in the name field.
+// Open/Save commits through on_pick; Cancel closes. `..` navigates up.
+// Mode::Folder picks a directory instead: only folders are listed, there is
+// no name field, and Choose picks the selected folder (or, with none
+// selected, the one being shown).
 // ---------------------------------------------------------------------------
 class FileBrowser : public Dialog {
 public:
-    enum class Mode : std::uint8_t { Open, Save };
+    enum class Mode : std::uint8_t { Open, Save, Folder };
 
     FileBrowser(Mode mode, std::string title = {}, std::string widget_id = {})
-        : Dialog(title.empty() ? (mode == Mode::Open ? "Open" : "Save As")
-                               : std::move(title),
+        : Dialog(title.empty() ? default_title(mode) : std::move(title),
                  std::move(widget_id)),
           mode_(mode) {
         path_label_ = &content().add<Label>("");
-        list_ = &content().add<ListView>();
-        list_->on_select([this](size_t i) { entry_clicked(long(i)); });
+        // The list scrolls inside a pane that shrinks to fit the window, so
+        // the name field and buttons below it stay reachable.
+        pane_ = &content().add<ListPane>();
+        list_ = &pane_->add<ListView>();
+        list_->on_select([this](size_t i) { entry_selected(long(i)); });
+        list_->on_activate([this](size_t i) { entry_activated(long(i)); });
         name_ = &content().add<TextField>();
         name_->set_placeholder("file name");
+        name_->on_submit([this](std::string_view) { commit(); });
+        name_->visible = mode_ != Mode::Folder; // a folder needs no name
         auto& buttons = content().add<Row>();
         buttons.set_gap(8);
         buttons.add<Spacer>();
         buttons.add<Button>("Cancel").on_click([this] { request_close(); });
-        open_button_ = &buttons.add<Button>(mode_ == Mode::Open ? "Open" : "Save");
+        open_button_ = &buttons.add<Button>(mode_ == Mode::Open   ? "Open"
+                                            : mode_ == Mode::Save ? "Save"
+                                                                  : "Choose");
         open_button_->set_variant(Button::Variant::Primary)
             .on_click([this] { commit(); });
         set_path(".");
@@ -24806,27 +25888,144 @@ public:
         return *this;
     }
     std::string path() const { return path_.string(); }
+    // Glob patterns (`*` and `?`, case-insensitive) a file name must match
+    // one of, e.g. {"*.png", "*.jpg"}; empty (the default) lists every file.
+    // Directories are always listed (Folder mode lists nothing else).
+    FileBrowser& set_filters(std::vector<std::string> patterns) {
+        filters_ = std::move(patterns);
+        refresh();
+        return *this;
+    }
+    const std::vector<std::string>& filters() const { return filters_; }
+    // Dotfiles and dot-directories are hidden by default.
+    FileBrowser& set_show_hidden(bool on) {
+        show_hidden_ = on;
+        refresh();
+        return *this;
+    }
+    bool show_hidden() const { return show_hidden_; }
     // The selected file (path + name field); empty when nothing is chosen.
+    // A file selected via list().set_selected() counts as chosen.
+    // Folder mode: the selected folder, or the folder being shown when none
+    // (or "..") is selected - never empty.
     std::string selection() const {
+        if (mode_ == Mode::Folder) {
+            long i = list_->selected();
+            if (i >= 0 && size_t(i) < entries_.size() && entries_[size_t(i)] != "..") {
+                const std::string& d = entries_[size_t(i)];
+                return (path_ / d.substr(0, d.size() - 1)).lexically_normal().string();
+            }
+            return path_.string();
+        }
+        sync_from_list();
         if (name_->text().empty()) return {};
         return (path_ / name_->text()).lexically_normal().string();
     }
+    Mode mode() const { return mode_; }
     FileBrowser& on_pick(std::function<void(std::string)> f) {
         on_pick_ = std::move(f);
         return *this;
     }
     ListView& list() { return *list_; }
+    ScrollArea& list_scroll() { return *pane_; }
     TextField& name_field() { return *name_; }
     Button& open_button() { return *open_button_; }
+    // Pick the current selection (as the Open/Save button does). False when
+    // nothing is chosen; a selected directory is entered instead.
+    // Folder mode always picks (see selection()).
+    bool commit() {
+        if (mode_ == Mode::Folder) {
+            std::string sel = selection();
+            if (on_pick_) on_pick_(sel);
+            request_close();
+            return true;
+        }
+        sync_from_list();
+        if (name_->text().empty()) {
+            long i = list_->selected();
+            if (i >= 0 && size_t(i) < entries_.size() && is_dir_[size_t(i)]) enter(size_t(i));
+            return false;
+        }
+        std::string sel = selection();
+        if (on_pick_) on_pick_(sel);
+        request_close();
+        return true;
+    }
 
     void attached(Context& c) override {
         Dialog::attached(c);
         path_label_->set_color(c.theme().text_dim);
     }
 
+    // The list pane takes its preferred height, less whatever the dialog
+    // would overflow the space it is given (measure: the window; arrange:
+    // the area the Context settled on, which may be smaller still).
+    Size measure(const Constraints& c) override {
+        pane_->cap = kListHeight;
+        Size s = Dialog::measure(c);
+        if (s.h > c.max.y) {
+            pane_->cap = std::fmax(kMinListHeight, kListHeight - (s.h - c.max.y));
+            s = Dialog::measure(c);
+        }
+        return s;
+    }
+    void arrange(const Rect& area) override {
+        Size want = Dialog::measure(Constraints::loose({area.w, kInfinite}));
+        if (want.h > area.h)
+            pane_->cap = std::fmax(kMinListHeight, pane_->cap - (want.h - area.h));
+        Dialog::arrange(area);
+    }
+
+    void tick(Time t) override {
+        Dialog::tick(t);
+        sync_from_list(); // show a programmatic selection in the name field
+    }
+
     const char* widget_type() const override { return "FileBrowser"; }
 
+    // Implementation detail, public only so add<ListPane> can instantiate.
+    class ListPane : public ScrollArea {
+    public:
+        float cap = 320.f;
+        Size measure(const Constraints& c) override { return c.clamp({420.f, cap}); }
+    };
+
 private:
+    static constexpr float kListHeight = 320.f, kMinListHeight = 48.f;
+
+    static const char* default_title(Mode m) {
+        return m == Mode::Open ? "Open" : m == Mode::Save ? "Save As" : "Choose Folder";
+    }
+
+    static bool glob_match(std::string_view pat, std::string_view name) {
+        auto lower = [](char ch) {
+            return (ch >= 'A' && ch <= 'Z') ? char(ch - 'A' + 'a') : ch;
+        };
+        size_t p = 0, n = 0, star = std::string_view::npos, mark = 0;
+        while (n < name.size()) {
+            if (p < pat.size() && (pat[p] == '?' || lower(pat[p]) == lower(name[n]))) {
+                ++p;
+                ++n;
+            } else if (p < pat.size() && pat[p] == '*') {
+                star = p++;
+                mark = n;
+            } else if (star != std::string_view::npos) {
+                p = star + 1;
+                n = ++mark;
+            } else {
+                return false;
+            }
+        }
+        while (p < pat.size() && pat[p] == '*') ++p;
+        return p == pat.size();
+    }
+    bool passes_filter(const std::string& name) const {
+        if (filters_.empty()) return true;
+        for (const auto& f : filters_)
+            if (glob_match(f, name)) return true;
+        return false;
+    }
+
     void refresh() {
         entries_.clear();
         is_dir_.clear();
@@ -24838,12 +26037,11 @@ private:
         }
         std::vector<std::string> files;
         for (const auto& it : std::filesystem::directory_iterator(path_, ec)) {
+            std::string name = it.path().filename().string();
+            if (!show_hidden_ && !name.empty() && name[0] == '.') continue;
             bool dir = it.is_directory(ec);
-            if (dir) {
-                dirs.push_back(it.path().filename().string() + "/");
-            } else {
-                files.push_back(it.path().filename().string());
-            }
+            if (dir) dirs.push_back(name + "/");
+            else if (mode_ != Mode::Folder && passes_filter(name)) files.push_back(name);
         }
         std::sort(dirs.begin(), dirs.end());
         std::sort(files.begin(), files.end());
@@ -24856,36 +26054,57 @@ private:
             is_dir_.push_back(false);
         }
         list_->set_items(entries_).set_selected(-1);
+        synced_sel_ = -1;
+        pane_->scroll_to_top();
         path_label_->set_text(path_.string());
     }
 
-    void entry_clicked(long i) {
+    // A selected file fills the name field; a directory leaves it alone.
+    void entry_selected(long i) {
+        synced_sel_ = i;
+        if (mode_ == Mode::Folder) return; // no name field
+        if (i < 0 || size_t(i) >= entries_.size() || is_dir_[size_t(i)]) return;
+        name_->set_text(entries_[size_t(i)]);
+    }
+    // Double-click: enter a directory, pick a file.
+    void entry_activated(long i) {
         if (i < 0 || size_t(i) >= entries_.size()) return;
         if (is_dir_[size_t(i)]) {
-            std::string name = entries_[size_t(i)];
-            if (name == "..") path_ = path_.parent_path();
-            else path_ /= name.substr(0, name.size() - 1); // strip "/"
-            refresh();
+            enter(size_t(i));
         } else {
-            name_->set_text(entries_[size_t(i)]);
+            entry_selected(i);
+            commit();
         }
     }
-
-    void commit() {
-        std::string sel = selection();
-        if (sel.empty()) return;
-        if (on_pick_) on_pick_(sel);
-        request_close();
+    void enter(size_t i) {
+        std::string name = entries_[i];
+        if (name == "..") path_ = path_.parent_path();
+        else path_ /= name.substr(0, name.size() - 1); // strip "/"
+        refresh();
+    }
+    // Keep the name field in step with a selection made through list()
+    // directly (set_selected does not fire on_select).
+    void sync_from_list() const {
+        if (mode_ == Mode::Folder) return;
+        long i = list_->selected();
+        if (i == synced_sel_) return;
+        synced_sel_ = i;
+        if (i >= 0 && size_t(i) < entries_.size() && !is_dir_[size_t(i)])
+            name_->set_text(entries_[size_t(i)]);
     }
 
     Mode mode_;
     Label* path_label_ = nullptr;
+    ListPane* pane_ = nullptr;
     ListView* list_ = nullptr;
     TextField* name_ = nullptr;
     Button* open_button_ = nullptr;
     std::filesystem::path path_;
     std::vector<std::string> entries_;
     std::vector<bool> is_dir_;
+    std::vector<std::string> filters_;
+    bool show_hidden_ = false;
+    mutable long synced_sel_ = -1;
     std::function<void(std::string)> on_pick_;
 };
 
@@ -25913,6 +27132,22 @@ inline Key map_key(int glfw_key) {
     case GLFW_KEY_7: return Key::Num7;
     case GLFW_KEY_8: return Key::Num8;
     case GLFW_KEY_9: return Key::Num9;
+    case GLFW_KEY_KP_0: return Key::Kp0;
+    case GLFW_KEY_KP_1: return Key::Kp1;
+    case GLFW_KEY_KP_2: return Key::Kp2;
+    case GLFW_KEY_KP_3: return Key::Kp3;
+    case GLFW_KEY_KP_4: return Key::Kp4;
+    case GLFW_KEY_KP_5: return Key::Kp5;
+    case GLFW_KEY_KP_6: return Key::Kp6;
+    case GLFW_KEY_KP_7: return Key::Kp7;
+    case GLFW_KEY_KP_8: return Key::Kp8;
+    case GLFW_KEY_KP_9: return Key::Kp9;
+    case GLFW_KEY_KP_DECIMAL: return Key::KpDecimal;
+    case GLFW_KEY_KP_DIVIDE: return Key::KpDivide;
+    case GLFW_KEY_KP_MULTIPLY: return Key::KpMultiply;
+    case GLFW_KEY_KP_SUBTRACT: return Key::KpSubtract;
+    case GLFW_KEY_KP_ADD: return Key::KpAdd;
+    case GLFW_KEY_KP_EQUAL: return Key::KpEqual;
     default: return Key::Unknown;
     }
 }
@@ -26403,6 +27638,22 @@ inline Key map_key(SDL_Keycode k) {
     case SDLK_BACKSLASH: return Key::Backslash;
     case SDLK_SEMICOLON: return Key::Semicolon;
     case SDLK_GRAVE: return Key::Grave;
+    case SDLK_KP_0: return Key::Kp0;
+    case SDLK_KP_1: return Key::Kp1;
+    case SDLK_KP_2: return Key::Kp2;
+    case SDLK_KP_3: return Key::Kp3;
+    case SDLK_KP_4: return Key::Kp4;
+    case SDLK_KP_5: return Key::Kp5;
+    case SDLK_KP_6: return Key::Kp6;
+    case SDLK_KP_7: return Key::Kp7;
+    case SDLK_KP_8: return Key::Kp8;
+    case SDLK_KP_9: return Key::Kp9;
+    case SDLK_KP_PERIOD: return Key::KpDecimal;
+    case SDLK_KP_DIVIDE: return Key::KpDivide;
+    case SDLK_KP_MULTIPLY: return Key::KpMultiply;
+    case SDLK_KP_MINUS: return Key::KpSubtract;
+    case SDLK_KP_PLUS: return Key::KpAdd;
+    case SDLK_KP_EQUALS: return Key::KpEqual;
     case SDLK_LEFT: return Key::Left;
     case SDLK_RIGHT: return Key::Right;
     case SDLK_UP: return Key::Up;
@@ -26816,7 +28067,7 @@ private:
 // Keep the three #define lines in this exact form: those parsers rely on it.
 
 #define SLIKUI_VERSION_MAJOR 0
-#define SLIKUI_VERSION_MINOR 5
+#define SLIKUI_VERSION_MINOR 6
 #define SLIKUI_VERSION_PATCH 0
 
 #define SLIKUI_VERSION_STR_(x) #x

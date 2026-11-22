@@ -87,6 +87,41 @@ def context_set_root(self, cls, *args, **props):
     raise TypeError(f"{cls!r} is not a slikui widget or a custom-widget subclass")
 
 
+# The widget protocol a Python subclass may override - the names the C++
+# trampoline dispatches. Only these bound classes carry the trampoline.
+PROTOCOL = frozenset({
+    "measure", "arrange", "paint", "paint_over", "clip_rect", "attached",
+    "on_event", "tick", "theme_changed", "stretch_cross", "expands_main",
+    "mouse_transparent", "focusable", "widget_type", "tooltip_at",
+})
+OVERRIDABLE = ("Widget", "Panel", "Column", "Row")
+
+
+def check_subclass(cls):
+    """Reject protocol overrides that could never be called.
+
+    Overrides on a subclass of slikui.Widget / Panel / Column / Row dispatch
+    through the C++ trampoline. Any other bound widget type has none, so an
+    ``on_event`` or ``paint`` defined on, say, a Button subclass would be
+    silently ignored - fail when the class is defined instead.
+    """
+    base = next((b for b in cls.__mro__[1:] if _is_bound(b)), None)
+    if base is None or base.__name__ in OVERRIDABLE:
+        return
+    overridden = sorted(PROTOCOL.intersection(vars(cls)))
+    if overridden:
+        raise TypeError(
+            f"{cls.__name__}: overriding {', '.join(overridden)} on a subclass of "
+            f"slikui.{base.__name__} has no effect - only subclasses of "
+            f"slikui.{', slikui.'.join(OVERRIDABLE)} dispatch the widget protocol. "
+            f"Subclass one of those and add a {base.__name__} inside it instead."
+        )
+
+
+def _init_subclass(cls, **kwargs):
+    check_subclass(cls)
+
+
 def try_patch():
     """Attach `add`/`set_root` to the bound classes. True on success."""
     try:
@@ -94,6 +129,7 @@ def try_patch():
 
         Widget.add = container_add  # inherited by every widget, incl. ScrollArea
         Context.set_root = context_set_root
+        Widget.__init_subclass__ = classmethod(_init_subclass)
         return True
     except (AttributeError, TypeError):
         return False

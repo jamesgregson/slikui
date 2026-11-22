@@ -56,8 +56,14 @@ public:
     // would later dispatch into freed memory. ctx_alive_ guards the reverse
     // case - a borrowed widget (Menu, Dialog) outliving its Context.
     virtual ~Widget() {
+        if (destroy_hook) destroy_hook(this);
         if (ctx && !ctx_alive_.expired()) context_forget(ctx, this);
     }
+
+    // Called from every ~Widget with the dying widget (by then only its
+    // address is meaningful). Null by default; the Python bindings set it to
+    // invalidate wrappers of widgets the tree destroys.
+    static inline void (*destroy_hook)(Widget*) noexcept = nullptr;
 
     Widget(const Widget&) = delete;
     Widget& operator=(const Widget&) = delete;
@@ -145,11 +151,16 @@ public:
         paint(env);
         std::optional<Rect> clip = clip_rect();
         if (clip) env.list.push_clip(*clip);
+        const PaintEnv inner = clip ? env.clipped(*clip) : env;
         for (const auto& c : children) {
             std::optional<Rect> child_clip = child_clip_rect(*c);
-            if (child_clip) env.list.push_clip(*child_clip);
-            c->paint_tree(env);
-            if (child_clip) env.list.pop_clip();
+            if (child_clip) {
+                env.list.push_clip(*child_clip);
+                c->paint_tree(inner.clipped(*child_clip));
+                env.list.pop_clip();
+            } else {
+                c->paint_tree(inner);
+            }
         }
         if (clip) env.list.pop_clip();
         paint_over(env);
@@ -250,8 +261,19 @@ public:
     // popup: 0.6 s hover delay, dismissed by moving away or pressing).
     // NOTE: returns Widget& - in fluent chains, call base-class setters last
     // (pre-C++23 has no deducing-this, so Widget& can't know the leaf type).
+    // A tooltip that is showing follows changes (new text swaps it, "" closes it).
     Widget& set_tooltip(std::string t) { tooltip_ = std::move(t); return *this; }
     const std::string& tooltip() const { return tooltip_; }
+
+    // The tooltip text for the pointer at `pos` (logical px, inside this
+    // widget); "" = none. Defaults to set_tooltip's text. Widgets with parts
+    // override it for per-part tips - TreeView / ListView rows, Segmented
+    // segments. The Context asks each tick while the pointer hovers: new
+    // text swaps a showing tooltip, "" closes it.
+    virtual std::string tooltip_at(Vec2 pos) const {
+        (void)pos;
+        return tooltip_;
+    }
 
     // --- context menu ---
     //

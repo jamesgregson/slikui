@@ -29,10 +29,11 @@ Owned by the context; destroyed at the end of the event that closes them.
 
 | API | Notes |
 |-----|-------|
-| `push_popup(widget, pos)` | unique_ptr or borrowed reference overload |
+| `push_popup(widget, pos)` | unique_ptr or borrowed reference overload (Python: kept alive while open) |
 | `push_popup(widget, anchor, PopupDir)` | anchored popups (`Below`, `Right`, ...) |
 | `open_context_menu(widget, pos)` | open a `Menu` as a floating popup |
 | `close_popups()` / `close_topmost_popup()` / `close_popups_above(widget)` | dismissal |
+| `hold_while_open(widget, std::shared_ptr<void>)` | keep a token alive while a popup/dialog is open; released after it closes (the Python bindings pin borrowed widgets with it) |
 | `has_popups()` / `popup_count()` / `popup(i)` / `popup_open(w)` | inspection |
 
 ## Dialogs, toasts
@@ -43,7 +44,7 @@ The shell layer above popups - see
 | API | Notes |
 |-----|-------|
 | `open_dialog(unique_ptr<D>)` | owned dialog |
-| `open_dialog(D&)` | **borrowed** - keep the Python object alive |
+| `open_dialog(D&)` | borrowed; in Python the context keeps it alive while open |
 | `close_dialog(widget)` | explicit close |
 | `dialog_count()` / `dialog(i)` | inspection |
 | `push_toast(widget, seconds)` | auto-dismissing corner notice; returns the widget |
@@ -77,5 +78,6 @@ bottom-right corner, newest lowest.
 | `set_cursor_host(fn)` | map `set_cursor` requests to system cursors |
 | `next_texture_id()` | ids for custom `TexUpload`s - never reused for different content |
 
-Tooltips need no context API: any widget's `set_tooltip` makes the context
-show a popup after a ~0.6 s hover.
+Tooltips need no context API: any widget's `set_tooltip` (or `tooltip_at`
+override) makes the context show a popup after a ~0.6 s hover.
+`tooltip_text()` returns the text of the tooltip showing now (`""` if none).

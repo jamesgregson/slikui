@@ -69,8 +69,15 @@ middle color chip so the picker popup is open, and dumps the framebuffer.
 | `set_items` | `(std::vector<std::string>)` |
 | `set_selected` | `(long index, bool fire_callback = false)` |
 | `on_select` | `(std::function<void(size_t)>)` |
+| `set_fill` | `(bool on = true)` - span the parent instead of hugging the labels |
+| `segment_rect` | `(size_t index) -> Rect` - a segment's rect, e.g. to anchor a popover |
 
-## DragValue
+By default a Segmented hugs its labels. With `set_fill()` it spans the
+parent: the full width of a Column, or the leftover width in a Row. Its
+segments share the width as evenly as their labels allow; a label wider
+than an equal share keeps its natural width. When there isn't room for
+every label, short labels stay whole and long ones elide.
+
 
 `set_speed` scales drag sensitivity (value change per pixel), `set_step`
 quantizes, `set_int_mode` makes it an integer field, and

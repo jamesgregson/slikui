@@ -196,6 +196,109 @@ TEST(treeview_expand_collapse_select) {
     CHECK(tree.selected() == 3);
 }
 
+// Records the visible rect its paint() was handed.
+struct VisibleProbe : slikui::Widget {
+    mutable slikui::Rect seen{};
+    slikui::Size measure(const slikui::Constraints& c) override { return c.clamp({50, 40}); }
+    void paint(const slikui::PaintEnv& env) const override { seen = env.visible_rect; }
+};
+
+TEST(paint_env_visible_rect_narrows_to_scroll_viewport) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& top = root.add<VisibleProbe>();
+    auto& sa = root.add<slikui::ScrollArea>();
+    sa.set_expand(true);
+    auto& inner = sa.add<VisibleProbe>();
+    f.frame();
+    // The root sees the whole frame; the scrolled child only the viewport.
+    CHECK(top.seen.x == 0.f && top.seen.y == 0.f);
+    CHECK(top.seen.w == 320.f && top.seen.h == 240.f);
+    CHECK(inner.seen.y == sa.bounds.y);
+    CHECK(inner.seen.bottom() == sa.bounds.bottom());
+    CHECK(inner.seen.w == sa.bounds.w);
+}
+
+// Draw commands a widget's paint() emits for a given visible rect.
+static size_t paint_count(Fixture& f, const slikui::Widget& w, slikui::Rect visible) {
+    slikui::DrawList list;
+    slikui::PaintEnv env{list, f.ctx.theme(), f.ctx.font(), &f.ctx.fonts(), visible};
+    w.paint(env);
+    return list.size();
+}
+
+TEST(treeview_paints_only_rows_on_screen) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& sa = root.add<slikui::ScrollArea>();
+    sa.set_expand(true);
+    auto& tree = sa.add<slikui::TreeView>();
+    std::vector<slikui::TreeView::Row> rows;
+    for (int i = 0; i < 5000; ++i) rows.push_back({"row " + std::to_string(i), 0, false});
+    tree.set_rows(std::move(rows));
+    f.frame();
+    REQUIRE(f.has_font);
+    CHECK(tree.bounds.h == 5000.f * 24.f);
+
+    // Through the viewport: about ten rows, not 5000.
+    size_t on_screen = paint_count(f, tree, sa.bounds);
+    size_t ten_rows = paint_count(f, tree, {tree.bounds.x, tree.bounds.y, tree.bounds.w, 240.f});
+    size_t everything = paint_count(f, tree, {-1e9f, -1e9f, 2e9f, 2e9f});
+    CHECK(on_screen > 0);
+    CHECK(on_screen <= ten_rows + 20);
+    CHECK(everything > 100 * ten_rows);
+
+    // Scrolled to the end, the last rows draw (and nothing above them).
+    slikui::Rect last = tree.row_rect(4999);
+    CHECK(last.h == 24.f);
+    CHECK(paint_count(f, tree, last) > 0);
+    CHECK(paint_count(f, tree, {last.x, last.bottom() + 10, last.w, 50}) == 0);
+}
+
+TEST(treeview_lazy_width_initial_state_and_toggle) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& tree = root.add<slikui::TreeView>();
+    const std::string hidden_label = "a much longer label, only under a closed parent";
+    tree.set_rows({
+        {"Group", 0, true, false}, // starts collapsed
+        {hidden_label, 1},
+        {"Other", 0},
+    });
+    f.frame();
+    REQUIRE(f.has_font);
+    CHECK(!tree.expanded(0));
+    CHECK(tree.visible_count() == 2);
+    CHECK(tree.row_rect(1).empty());
+
+    // The hidden row's label doesn't widen the tree until it is shown.
+    auto natural = [&] {
+        return tree.measure(slikui::Constraints::loose({10000.f, 10000.f})).w;
+    };
+    float long_w = f.ctx.text_size(hidden_label).w;
+    CHECK(natural() < long_w);
+
+    // set_expanded changes state without on_toggle; an arrow click fires it.
+    std::vector<std::pair<size_t, bool>> toggles;
+    tree.on_toggle([&](size_t i, bool open) { toggles.push_back({i, open}); });
+    tree.set_expanded(0, true);
+    f.frame();
+    CHECK(toggles.empty());
+    CHECK(natural() >= long_w);
+    CHECK(tree.row_rect(1).y == tree.bounds.y + 24.f);
+
+    f.click(tree.bounds.x + 8, tree.bounds.y + 12);
+    f.frame();
+    CHECK(toggles.size() == 1);
+    CHECK(toggles[0].first == 0 && !toggles[0].second);
+    CHECK(tree.visible_count() == 2);
+    CHECK(tree.selected() == -1); // the arrow toggles, it doesn't select
+
+    // A fixed natural width skips measuring.
+    tree.set_natural_width(77.f);
+    CHECK(natural() == 77.f);
+}
+
 // ---------------------------------------------------------------------------
 // Table
 // ---------------------------------------------------------------------------

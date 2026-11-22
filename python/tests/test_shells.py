@@ -295,16 +295,31 @@ def test_filebrowser_lists_navigates_picks():
     ui.tick(1 / 60, 1 / 60)
     assert ui.ctx.dialog_count == 1
 
-    # Directory listing: "..", "sub/", then sorted files.
+    # Directory listing: "..", "sub/", then sorted files. Rows are scrolled
+    # into view before clicking (the list pane shrinks to fit the window);
+    # the clock stands still, so a repeat press is a double-click.
     listing = fb.list
-    click(ui, (listing.bounds.x + 30, listing.bounds.y + 1.5 * 24))
-    ui.tick(1 / 60, 1 / 60)  # navigated into "sub" (still open)
+
+    def click_row(i):
+        fb.list_scroll.scroll_to(listing.row_rect(i))
+        ui.tick(1 / 60, 1 / 60)
+        r = listing.row_rect(i)
+        click(ui, (r.x + 30, r.y + r.h / 2))
+
+    click_row(1)  # one click only selects a directory
+    ui.tick(1 / 60, 1 / 60)
+    assert fb.path == str(tmp)
+    click_row(1)  # double-click enters it
+    ui.tick(1 / 60, 1 / 60)
+    assert fb.path == str(tmp / "sub")
     assert ui.ctx.dialog_count == 1
 
     # Back up via "..", then pick the first file and commit with Open.
-    click(ui, (listing.bounds.x + 30, listing.bounds.y + 12))
+    click_row(0)
+    click_row(0)
     ui.tick(1 / 60, 1 / 60)
-    click(ui, (listing.bounds.x + 30, listing.bounds.y + 2 * 24 + 12))
+    assert fb.path == str(tmp)
+    click_row(2)
     ui.tick(1 / 60, 1 / 60)
     click(ui, center(fb.open_button))
     assert len(picked) == 1

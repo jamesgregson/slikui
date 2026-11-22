@@ -384,8 +384,9 @@ struct nb_inst_state {
     /// Does this instance use intrusive reference counting?
     uint8_t intrusive : 1;
 
-    /// Currently not used (but needed to pad to 8 bit)
-    uint8_t pad : 1;
+    /// [slikui patch] Was the instance unmapped from inst_c2p early, by
+    /// nb_inst_forget_refs()? (Upstream: an unused padding bit.)
+    uint8_t unmapped : 1;
 
     /// Does this instance hold references to others? (via internals.keep_alive)
     /// This may be accessed concurrently to the flag byte above, so it is kept

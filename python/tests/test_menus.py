@@ -326,6 +326,24 @@ def test_icon_button_and_toolbar():
     assert len(patch) > 2  # strokes vs fill vs background
 
 
+def test_every_icon_paints():
+    icons = list(slikui.Icon)
+    assert len(icons) == 156
+    # Values are stable: new icons are appended after Sun.
+    assert slikui.Icon.Play.value == 0 and slikui.Icon.Sun.value == 25
+    assert slikui.Icon.Pin.value > slikui.Icon.Sun.value
+    ui, root = make_ui(120, 120)
+    btn = root.add(slikui.IconButton, slikui.Icon.Play)
+    for icon in icons:
+        btn.set_icon(icon)
+        ui.tick(0.0, 1 / 60)
+        frame = ui.render()
+        r = btn.bounds
+        cx, cy = int(r.x + r.w / 2), int(r.y + r.h / 2)
+        patch = {frame[cy + dy, cx + dx] for dy in range(-9, 10) for dx in range(-9, 10)}
+        assert len(patch) > 1, icon  # something drew inside the button
+
+
 def test_shortcut_label_format():
     # Plain ASCII on every platform; MOD_SHORTCUT is Cmd on Apple, Ctrl elsewhere.
     name = "Cmd" if sys.platform == "darwin" else "Ctrl"
@@ -333,3 +351,26 @@ def test_shortcut_label_format():
     assert slikui.shortcut_label(slikui.Key.S, MOD_SHORTCUT | SHIFT) == f"{name}+Shift+S"
     assert slikui.shortcut_label(slikui.Key.F5, 0) == "F5"
     assert slikui.shortcut_label(slikui.Key.Left, 0).isascii()
+
+
+def test_icon_button_custom_painter():
+    # geetar #32: custom icons for IconButton. A painter that draws the
+    # built-in Pin matches set_icon(Pin) pixel for pixel - its drawing lands
+    # in the frame - and a painter can add to a built-in.
+    frames = []
+    for mode in ("builtin", "painter", "badge"):
+        ui, root = make_ui(120, 80)
+        btn = root.add(slikui.IconButton, slikui.Icon.Pin)
+        if mode != "builtin":
+            def painter(lst, area, color, badge=(mode == "badge")):
+                slikui.paint_icon(lst, slikui.Icon.Pin, area, color)
+                if badge:
+                    lst.circle(slikui.Vec2(area.x + area.w * .85, area.y + area.h * .15),
+                               area.w * .15, slikui.Color(255, 0, 0, 255))
+            btn.set_icon_painter(painter)
+            assert btn.has_icon_painter
+        ui.tick(0.0, 1 / 60)
+        frames.append(ui.render().copy())
+    assert (frames[0] == frames[1]).all()
+    assert (frames[0] != frames[2]).any()
+    assert slikui.icon_name(slikui.Icon.MoreHorizontal) == "more_horizontal"

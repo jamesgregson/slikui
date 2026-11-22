@@ -29,7 +29,7 @@ app and traps presses outside it. Escape or the X button closes.
     mb.set_modal(True)
     mb.add_button("Delete", lambda: remove_item())
     mb.add_button("Cancel", lambda: None)
-    ui.ctx.open_dialog(mb)            # borrowed - keep the Python object alive
+    ui.ctx.open_dialog(mb)            # kept alive by the context while open
     ```
 
 ![A modal MessageBox - the app behind it dims and presses outside are trapped](../images/dialog.png)
@@ -148,7 +148,15 @@ for `Spinner`s or scale indicators.
 ## FileBrowser
 
 Lists real directories for Open/Save flows. `set_path` starts it somewhere;
-`on_pick(path)` receives the result.
+`on_pick(path)` receives the result. Click a file to choose it; double-click
+a file to pick it at once, or a folder to enter it (Enter in the name field
+picks too). The list scrolls inside the dialog, which shrinks to fit the
+window, so the buttons stay reachable in big folders.
+
+`Mode::Folder` picks a directory instead. Only folders are listed, there is
+no name field, and the button reads **Choose**. Double-clicking a folder still
+enters it. Choose picks the selected folder, or the folder being shown when
+nothing (or `..`) is selected, so it always picks something.
 
 === "C++"
 
@@ -167,6 +175,17 @@ Lists real directories for Open/Save flows. `set_path` starts it somewhere;
     ```
 
 ![The FileBrowser dialog open on the shell layer over real directories](../images/browser.png)
+
+| API | Signature |
+|-----|-----------|
+| `set_path` / `path` | `(std::string)` / `() -> std::string` |
+| `set_filters` | `(std::vector<std::string>)` - globs (`*`, `?`, case-insensitive) a file must match one of; empty = all. Folders always show |
+| `set_show_hidden` | `(bool)` - dotfiles are hidden by default |
+| `selection` | `() -> std::string` - chosen file, `""` if none; follows `list().set_selected(i)` too. Folder mode: the chosen folder (never empty) |
+| `commit` | `() -> bool` - pick the selection, as the Open/Save/Choose button does |
+| `mode` | `() -> Mode` - `Open`, `Save` or `Folder` |
+| `on_pick` | `(std::function<void(std::string)>)` |
+| `list` / `list_scroll` / `name_field` / `open_button` | the parts |
 
 ## ImageView and CompareView
 

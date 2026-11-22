@@ -55,6 +55,12 @@ int main() {
            glfw::map_key(GLFW_KEY_BACKSLASH) == Key::Backslash &&
            glfw::map_key(GLFW_KEY_SEMICOLON) == Key::Semicolon &&
            glfw::map_key(GLFW_KEY_GRAVE_ACCENT) == Key::Grave);
+    EXPECT(glfw::map_key(GLFW_KEY_KP_0) == Key::Kp0 && glfw::map_key(GLFW_KEY_KP_9) == Key::Kp9 &&
+           glfw::map_key(GLFW_KEY_KP_ADD) == Key::KpAdd &&
+           glfw::map_key(GLFW_KEY_KP_SUBTRACT) == Key::KpSubtract &&
+           glfw::map_key(GLFW_KEY_KP_DECIMAL) == Key::KpDecimal &&
+           glfw::map_key(GLFW_KEY_KP_EQUAL) == Key::KpEqual &&
+           glfw::map_key(GLFW_KEY_KP_ENTER) == Key::Enter);
     {
         Event k = glfw::key_event(GLFW_KEY_A, 0, GLFW_REPEAT, GLFW_MOD_CONTROL);
         EXPECT(k.type == Event::Type::KeyPress && k.repeat && k.key == Key::A &&

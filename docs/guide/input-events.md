@@ -77,6 +77,13 @@ exactly these constructors through the real dispatch path](../images/views.png)
    <kbd>Escape</kbd> clears focus. Tab, Escape and shortcut chords are
    consumed by the Context. A `KeyRelease` is delivered only for a press the
    tree received.
+   A focused text widget (`TextField`, `SearchBox`, `TextArea`, a
+   `DragValue` being typed into) consumes the `KeyPress` of every key that
+   types a character: letters, digits, punctuation, Space and keypad keys,
+   unless <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> is held. So typing never triggers a
+   key handler further up the tree. The character itself arrives as
+   `TextInput`. Ctrl/Cmd chords and keys like the F-keys still bubble.
+   `is_text_key(key)` tells which keys count.
 5. **Popups** - clicking outside a popup dismisses it. Popups are owned by
    the context and destroyed at the end of `handle`, never during dispatch.
 6. **Mouse capture** - a widget calls `ctx->capture_mouse(this)` (Python:
@@ -123,6 +130,11 @@ modifier is required, so typing never triggers one). Full details and code:
     ctx.add_shortcut(slikui.Key.R, slikui.mods("ctrl"), render_fn)
     ```
 
+`Key` names physical keys: letters, top-row digits (`Num0`-`Num9`),
+punctuation, and the numeric keypad (`Kp0`-`Kp9`, `KpDecimal`, `KpDivide`,
+`KpMultiply`, `KpSubtract`, `KpAdd`, `KpEqual`; keypad Enter arrives as
+`Enter`). Bind both `Equal` and `KpAdd` to serve either zoom key.
+
 ![The View menu opened as a borrowed popup over a viewport - the capture calls
 `open_context_menu`, which is exactly what a right-click does](../images/contextmenu.png)
 
@@ -160,6 +172,30 @@ return `Widget&` (no deducing-this before C++23), base-class setters like
     ```
 
 ![tooltip](../images/tooltip.png)
+
+A tooltip that is showing follows changes. Calling `set_tooltip` with new
+text swaps it at once, and `""` closes it.
+
+**Different tips for different parts of a widget.** The context asks the
+hovered widget for its text at the pointer each tick, through
+`tooltip_at(pos)`. It defaults to the `set_tooltip` text. When the answer
+changes under a showing tooltip, the tooltip swaps without waiting for the
+delay again, so moving down a list reads row after row. The built-ins use
+this:
+
+- `TreeView`: a row's own `Row::tooltip`; otherwise its full label when the
+  row shows it cut off with "...".
+- `ListView` and `Segmented`: the full text of an item or segment drawn
+  cut off.
+- Otherwise each falls back to the widget's `set_tooltip` text.
+
+A custom widget can override `tooltip_at` (Python too):
+
+```python
+class Halves(slikui.Widget):
+    def tooltip_at(self, pos):
+        return "left" if pos.x < self.bounds.x + self.bounds.w / 2 else "right"
+```
 
 ## Cursor shapes
 

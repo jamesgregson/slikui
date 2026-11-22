@@ -44,6 +44,11 @@ inline std::string shortcut_label(Key key, unsigned mods) {
         out += char('0' + k - int(Key::Num0));
         return out;
     }
+    if (k >= int(Key::Kp0) && k <= int(Key::Kp9)) {
+        out += "Num";
+        out += char('0' + k - int(Key::Kp0));
+        return out;
+    }
     switch (key) {
     case Key::Enter: out += "Enter"; break;
     case Key::Escape: out += "Esc"; break;
@@ -71,6 +76,12 @@ inline std::string shortcut_label(Key key, unsigned mods) {
     case Key::Backslash: out += "\\"; break;
     case Key::Semicolon: out += ";"; break;
     case Key::Grave: out += "`"; break;
+    case Key::KpDecimal: out += "Num."; break;
+    case Key::KpDivide: out += "Num/"; break;
+    case Key::KpMultiply: out += "Num*"; break;
+    case Key::KpSubtract: out += "Num-"; break;
+    case Key::KpAdd: out += "Num+"; break;
+    case Key::KpEqual: out += "Num="; break;
     default:
         if (k >= int(Key::F1) && k <= int(Key::F12))
             out += "F" + std::to_string(k - int(Key::F1) + 1);
@@ -445,8 +456,12 @@ public:
         return c.clamp(s);
     }
 
+    // Fill behind the bar; transparent (the default) shows the window
+    // background, like Toolbar.
+    MenuBar& set_background(Color c) { background_ = c; return *this; }
+
     void paint(const PaintEnv& env) const override {
-        env.list.rect(bounds, env.theme.surface, 0);
+        if (background_.a > 0) env.list.rect(bounds, background_, 0);
         env.list.line({bounds.x, bounds.bottom() - 1},
                       {bounds.right(), bounds.bottom() - 1}, env.theme.border, 1);
     }
@@ -537,6 +552,7 @@ public:
     };
 
     std::vector<std::unique_ptr<Menu>> menus_;
+    Color background_ = Color::transparent();
 };
 
 } // namespace slikui

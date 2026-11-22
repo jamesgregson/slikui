@@ -128,7 +128,7 @@ PyObject *inst_new_int(PyTypeObject *tp, PyObject * /* args */,
             s.destruct = 0;
             s.cpp_delete = 0;
             s.intrusive = 0;
-            s.pad = 0;
+            s.unmapped = 0; // [slikui patch] was the padding bit
             s.clear_keep_alive = 0;
             s.unused = 0;
             nb_inst_state_write(self, s);
@@ -174,7 +174,7 @@ PyObject *inst_new_int(PyTypeObject *tp, PyObject * /* args */,
         s.cpp_delete = 0;
         s.clear_keep_alive = 0;
         s.intrusive = intrusive;
-        s.pad = 0;
+        s.unmapped = 0; // [slikui patch] was the padding bit
         s.unused = 0;
         nb_inst_state_write(self, s);
 
@@ -250,7 +250,7 @@ PyObject *inst_new_ext(PyTypeObject *tp, void *value) {
     s.cpp_delete = 0;
     s.clear_keep_alive = 0;
     s.intrusive = intrusive;
-    s.pad = 0;
+    s.unmapped = 0; // [slikui patch] was the padding bit
     s.unused = 0;
     nb_inst_state_write(self, s);
 
@@ -501,12 +501,13 @@ static void inst_dealloc(PyObject *self) {
             keep_alive.erase_fast(it);
         }
 
-        // Unmap 'inst' from inst_c2p
+        // Unmap 'inst' from inst_c2p ([slikui patch] unless
+        // nb_inst_forget_refs() already did)
         nb_ptr_map &inst_c2p = shard.inst_c2p;
         nb_ptr_map::iterator it = inst_c2p.find(p);
 
-        bool found = false;
-        if (NB_LIKELY(it != inst_c2p.end())) {
+        bool found = inst->state.unmapped;
+        if (NB_LIKELY(!found && it != inst_c2p.end())) {
             void *entry = it->second;
             if (NB_LIKELY(entry == inst)) {
                 // Fast path: a direct 'p -> inst' mapping.
@@ -2613,6 +2614,71 @@ uint32_t nb_inst_state_read(PyObject *o) noexcept {
     nb_inst *nbi = (nb_inst *) o;
     return (uint32_t) (nbi->state.state == nb_inst_state::state_ready) |
            ((uint32_t) nbi->state.destruct << 1);
+}
+
+/* [slikui patch] Detach every non-owning wrapper of 'ptr' (instances that
+   do not hold the object's storage), for when C++ destroys an object that
+   Python only borrowed. Each one is unlinked from inst_c2p, so a new object
+   allocated at the same address gets a fresh wrapper of the right type, and
+   marked uninitialized, so later use raises instead of reading freed memory.
+   Wrappers that own the object are left alone (their own dealloc is what
+   is destroying it). 'tp' is any bound type of the owning domain
+   (it supplies the internals). Requires the GIL. */
+void nb_inst_forget_refs(PyTypeObject *tp, void *ptr) noexcept {
+    if (!tp || !ptr)
+        return;
+    nb_internals *p = nb_type_data(tp)->internals;
+    nb_shard &shard = p->shard(ptr);
+    lock_shard guard(shard);
+
+    nb_ptr_map &inst_c2p = shard.inst_c2p;
+    nb_ptr_map::iterator it = inst_c2p.find(ptr);
+    if (it == inst_c2p.end())
+        return;
+
+    // Only pure references: an owning wrapper (co-located storage, or one
+    // that destructs/deletes the object) is what is destroying it right now.
+    auto is_ref = [](nb_inst *inst) {
+        return !inst->state.internal && !inst->state.destruct &&
+               !inst->state.cpp_delete;
+    };
+    auto forget = [](nb_inst *inst) {
+        nb_inst_state s = inst->state;
+        s.state = nb_inst_state::state_uninitialized;
+        s.destruct = false;
+        s.cpp_delete = false;
+        s.unmapped = true;
+        nb_inst_state_write(inst, s);
+    };
+
+    void *entry = it->second;
+    if (!nb_is_seq(entry)) {
+        nb_inst *inst = (nb_inst *) entry;
+        if (is_ref(inst)) {
+            forget(inst);
+            inst_c2p.erase_fast(it);
+        }
+        return;
+    }
+
+    nb_inst_seq *seq = nb_get_seq(entry), *pred = nullptr;
+    while (seq) {
+        nb_inst_seq *next = seq->next;
+        nb_inst *inst = (nb_inst *) seq->inst;
+        if (is_ref(inst)) {
+            forget(inst);
+            if (pred)
+                pred->next = next;
+            PyMem_Free(seq);
+        } else {
+            if (!pred)
+                it.value() = nb_mark_seq(seq);
+            pred = seq;
+        }
+        seq = next;
+    }
+    if (!pred)
+        inst_c2p.erase_fast(it);
 }
 
 void nb_inst_destruct(PyObject *o) noexcept {

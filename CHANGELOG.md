@@ -1,5 +1,166 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+
+- **Python subclasses of `Panel`, `Column` and `Row`** dispatch overrides
+  (`on_event`, `paint`, `measure`, ...) like `slikui.Widget` subclasses, and
+  `super()` reaches the built-in behaviour. A `Panel` subclass used as a popup
+  root now receives `PopupClosed`. `Column()` / `Row()` gain constructors for
+  this.
+- `FileBrowser::set_filters(globs)` (case-insensitive `*` / `?`; folders
+  always listed), `set_show_hidden(bool)`, `commit()` and `list_scroll()`.
+- `FileBrowser::Mode::Folder`: pick a directory. Only folders are listed,
+  there is no name field, and Choose picks the selected folder (or the one
+  being shown). `FileBrowser::mode()`.
+- `IconButton::set_icon_painter(fn(list, area, color))` draws a custom
+  icon in the tint a built-in would get. `set_icon` switches back. Python
+  also gains `slikui.paint_icon(list, icon, area, color)` and
+  `slikui.icon_name(icon)`.
+- `Context::hold_while_open(widget, std::shared_ptr<void>)`: keep a token
+  alive while a popup or dialog is open; it is released after the widget
+  closes.
+- **Per-part tooltips**: `Widget::tooltip_at(pos)` (overridable, Python
+  too) gives the tooltip text for the pointer position. `TreeView::Row`
+  gains `tooltip`, and `TreeView`, `ListView` and `Segmented` show the full
+  text of a row, item or segment drawn cut off with "...".
+  `Context::tooltip_text()` returns the text showing now.
+- `ListView::on_activate(fn)`: double-click on an item.
+- **Python: replayable `DrawList`s.** `slikui.DrawList()` can be created
+  from Python. `append(other, offset)` replays a recorded list in one call,
+  and `extend(array, offset)` appends from a `DRAWCMD_DTYPE` array. Both
+  check the commands and reject unbalanced clips. `reserve(n)` and
+  `clip_balanced` are also new. C++ gains
+  `DrawList::append(const DrawCmd*, n, offset)`, and `append`'s offset now
+  defaults to zero.
+- `PaintEnv::visible_rect` (Python: `env.visible_rect`): the part of the
+  frame a widget's drawing can show through, narrowed by every enclosing
+  clip, so `paint()` can skip off-screen parts.
+- `TreeView::on_toggle(fn(index, open))` for arrow clicks,
+  `Row::expanded` (initial state, default open) and
+  `set_natural_width(w)`.
+- `Label::set_align(TextAlign)` / `set_valign(TextVAlign)` (Python: enum
+  or `"center"` / `"middle"` / ...) place the text inside a label bigger
+  than its text. Each wrapped line is aligned on its own. Default left/top
+  as before.
+- `Segmented::set_fill(bool)`: span the parent (Column width, Row leftover)
+  with segments sharing the width evenly; `segment_rect(i)`.
+- `MenuBar::set_background(Color)`.
+- `TextField::scroll_x()`.
+- `is_text_key(Key)`: whether a key types a character (letters, digits,
+  punctuation, Space, keypad).
+- Python: `TextArea.text` property; until now the text could only be read
+  through `on_change`.
+- Keypad keys: `Key::Kp0`-`Kp9`, `KpDecimal`, `KpDivide`, `KpMultiply`,
+  `KpSubtract`, `KpAdd`, `KpEqual`, mapped by the GLFW and SDL backends (C++
+  and Python) and labelled `Num0`, `Num+`, ... by `shortcut_label`.
+- `Widget::destroy_hook`: a process-wide callback run from `~Widget` (null by
+  default; the Python bindings use it).
+- **130 new built-in icons** (156 in all), covering navigation (`ArrowLeft` -
+  `ArrowDown`, `Home`, `Menu`, `MoreHorizontal`, `MoreVertical`,
+  `ExternalLink`, `Maximize`, `Minimize`), editing (`Edit`, `Cut`, `Paste`,
+  `Undo`, `Redo`, `Link`, `Filter`, `Sort`, `DragHandle`), files (`File`,
+  `FolderOpen`, `Download`, `Upload`, `Share`, `Print`), view (`ZoomIn`,
+  `ZoomOut`, `List`, `EyeOff`, `Image`, `Sidebar`, `Layers`), status
+  (`Info`, `Warning`, `Error`, `Help`, `Bell`), marking (`Star`, `Heart`,
+  `Pin`, `Bookmark`, `Flag`, `Tag`), media (`FastForward`, `Rewind`,
+  `Repeat`, `Shuffle`, `Volume`, `Mute`, `Mic`, `Music`) and misc (`Unlock`,
+  `Moon`, `User`, `Mail`, `Calendar`, `Clock`, `Globe`, `Power`, `Code`,
+  `Terminal`) and 3D view manipulation (`Pan`, `RotateX`, `RotateY`,
+  `RotateZ`, `RotateFree`; zoom uses `ZoomIn` / `ZoomOut` / `Search`) and
+  3D editing (`Vertex`, `Edge`, `Face` selection modes; `Cube`, `Sphere`,
+  `Cylinder`, `Cone`, `Plane` primitives; `Mesh`, `Wireframe`, `Solid`,
+  `Texture`, `Material`, `UV`, `Normal`; `Modifier`, `Light`, `Bone`,
+  `Keyframe`, `Curve`, `Extrude`, `Scale`, `Axes`, `Snap`, `Pivot`,
+  `Hierarchy`, `Torus`), painting (`Brush`, `Eraser`, `Fill`, `Eyedropper`,
+  `Airbrush`, `Select`, `Lasso`, `MagicWand`, `Crop`, `Gradient`, `Palette`,
+  `Text`, `Stamp`, `Blur`) and vector drawing (`Pointer`, `DirectSelect`,
+  `Pen`, `Rectangle`, `Ellipse`, `Polygon`, `Line`, `Union`, `Subtract`,
+  `Intersect`, `AlignLeft` / `AlignCenter` / `AlignRight` / `AlignTop` /
+  `AlignMiddle` / `AlignBottom`, `Group`, `Ungroup`, `BringForward`,
+  `SendBackward`, `FlipH`, `FlipV`). Existing enum values are unchanged. `icon_count` gives the
+  size of the set, and the docs show all icons in one image
+  (`docs/images/icons.png`).
+
+### Changed
+
+- `Icon::Folder` and `Icon::Trash` are redrawn to be easier to recognise: a
+  single folder outline with its tab, and a lidded bin with a handle.
+- **`MenuBar` no longer fills `theme.surface`**: like `Toolbar`, it is
+  transparent by default, so the window background shows (in the Light theme
+  it used to be a white strip). `set_background` restores a fill.
+- **`FileBrowser`: a single click on a folder selects it; double-click enters
+  it** (it used to enter on one click). Double-clicking a file picks it, and
+  Enter in the name field or Open with a folder selected acts likewise.
+  Dotfiles are hidden by default.
+- Python: defining a protocol method (`on_event`, `paint`, `measure`, ...) on
+  a subclass of a built-in other than `Widget` / `Panel` / `Column` / `Row`
+  raises `TypeError` at class creation; such overrides were silently ignored.
+- Python: using a wrapper of a built-in widget after the tree destroyed it
+  (`remove`, `clear_children`, `App.close()`) raises `TypeError` with a
+  nanobind `RuntimeWarning`, instead of reading freed memory.
+- **Python: `Context.tick`, `render` and `handle` release the GIL** while the
+  C++ work runs, so other Python threads (audio callbacks, workers) keep
+  running during a frame. Python overrides, callbacks and Python render sinks
+  take the GIL back when called. Because the GIL no longer serialises other
+  threads against the frame, touching widgets from a non-UI thread is now a
+  real data race. It was never supported.
+- Python: a widget passed to `push_popup`, `open_context_menu` or
+  `open_dialog` is kept alive by the context while it is open. A temporary
+  (`ctx.push_popup(Panel(), ...)`) used to be freed at once, and the next
+  frame read freed memory. `set_context_menu` still borrows (keep the
+  Menu alive), and now accepts `None` to clear.
+- Python: `Context.set_cursor_host` takes a typed callable,
+  `Callable[[Cursor], None]`.
+- The vendored nanobind carries a small patch (`nb_inst_forget_refs`); see
+  `third_party/nanobind/SLIKUI_PATCHES.md`.
+
+### Fixed
+
+- **`TreeView` cost scales with the rows on screen.** It used to draw every
+  visible row each frame and measure every label (collapsed or not) on
+  `set_rows`. A 40k-row tree's first frame took about 10 s and now takes
+  about 20 ms. Paint skips rows outside `visible_rect`, and labels are
+  measured lazily as rows become visible. The natural width is now the
+  widest *visible* row, so it can change when rows are expanded or
+  collapsed. `ListView` and `Table` also skip off-screen rows when
+  painting.
+- Text measuring slowed down linearly with the number of distinct
+  strings: once the layout cache was full, every new string rescanned it.
+  New strings now cost the same no matter how many have been seen.
+- A focused `TextField`, `SearchBox`, `TextArea` or a `DragValue` being
+  typed into now consumes the `KeyPress` of the characters it types. Before,
+  the press bubbled up, so app shortcuts handled in an ancestor's
+  `on_event` fired while the user typed (typing "g" ran a G shortcut).
+  Ctrl/Cmd chords and keys like the F-keys still bubble.
+- A showing tooltip ignored `set_tooltip` (new text or `""`) until the
+  pointer left the widget. It now swaps or closes at once, and moving
+  between rows of a list swaps per-row tips without the hover delay.
+  Closing a tooltip no longer closes the app's other popups with it.
+- `TextField` and `TextArea` typed two spaces per Space keystroke: one from
+  the `KeyPress` and one from the `TextInput` the backends also send. Space
+  is now inserted from `TextInput` only.
+- `TextField` / `SearchBox`: text is clipped to the field. A long placeholder
+  elides with an ellipsis instead of drawing over neighbouring widgets, and typed text
+  wider than the field scrolls horizontally to keep the caret visible.
+  Password fields place the caret and selection by the shown `*` glyphs.
+- `Slider` and `Switch` no longer animate from the minimum / off position to
+  their initial state: state set before the first tick snaps (a `tick(dt=0)`
+  snapshot shows the real value). Later changes still animate.
+- `FileBrowser` in a big folder grew past the window and hid the name field
+  and Open/Cancel; the list now scrolls inside a dialog that fits the window.
+  `list().set_selected(i)` now updates `selection()`.
+- Python: `.children` (and any other widget-returning call) could hand back a
+  stale wrapper of a different type when a new widget reused a destroyed
+  one's address.
+- `Context::handle_event` raised a `-Wswitch` warning on Clang/GCC (no
+  `PopupClosed` case). No behaviour change.
+- The `FileBrowser` tests failed on Windows: they compared paths as strings
+  with `/` separators against native `\` paths, and used a hard-coded `/tmp`.
+- The `DrawList` replay speed test could fail on busy CI runners: it now
+  takes the best of several runs and asks for a 3x (not 10x) speedup.
+
 ## 0.5.0
 
 ### Added

@@ -132,6 +132,22 @@ inline Key map_key(int glfw_key) {
     case GLFW_KEY_7: return Key::Num7;
     case GLFW_KEY_8: return Key::Num8;
     case GLFW_KEY_9: return Key::Num9;
+    case GLFW_KEY_KP_0: return Key::Kp0;
+    case GLFW_KEY_KP_1: return Key::Kp1;
+    case GLFW_KEY_KP_2: return Key::Kp2;
+    case GLFW_KEY_KP_3: return Key::Kp3;
+    case GLFW_KEY_KP_4: return Key::Kp4;
+    case GLFW_KEY_KP_5: return Key::Kp5;
+    case GLFW_KEY_KP_6: return Key::Kp6;
+    case GLFW_KEY_KP_7: return Key::Kp7;
+    case GLFW_KEY_KP_8: return Key::Kp8;
+    case GLFW_KEY_KP_9: return Key::Kp9;
+    case GLFW_KEY_KP_DECIMAL: return Key::KpDecimal;
+    case GLFW_KEY_KP_DIVIDE: return Key::KpDivide;
+    case GLFW_KEY_KP_MULTIPLY: return Key::KpMultiply;
+    case GLFW_KEY_KP_SUBTRACT: return Key::KpSubtract;
+    case GLFW_KEY_KP_ADD: return Key::KpAdd;
+    case GLFW_KEY_KP_EQUAL: return Key::KpEqual;
     default: return Key::Unknown;
     }
 }

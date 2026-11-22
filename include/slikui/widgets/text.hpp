@@ -5,6 +5,7 @@
 #include "slikui/widgets/env.hpp"
 #include "slikui/widgets/widget.hpp"
 
+#include <cmath>
 #include <string>
 
 namespace slikui {
@@ -24,6 +25,16 @@ public:
     Label& set_font_size(float px) { font_px_ = px; valid_ = false; return *this; }
     Label& set_color(Color c) { color_ = c; return *this; } // alpha 0 = theme default
     Label& set_wrap_width(float w) { wrap_width_ = w; valid_ = false; return *this; }
+
+    // Placement inside the label's bounds, for a label laid out larger than
+    // its text (stretched across a Column, given a Row's height, ...).
+    // align: each line within the width (wrapped lines too). valign: the
+    // block within the height (Baseline behaves like Top); text taller than
+    // the label stays top-aligned. Defaults: Left, Top.
+    Label& set_align(TextAlign a) { align_ = a; return *this; }
+    Label& set_valign(TextVAlign v) { valign_ = v; return *this; }
+    TextAlign align() const { return align_; }
+    TextVAlign valign() const { return valign_; }
 
     // Style. Missing bold/italic faces are synthesized from the family's
     // closest face; set_font takes a family registered with
@@ -70,7 +81,14 @@ public:
 
     void paint(const PaintEnv& env) const override {
         Color col = color_.a > 0 ? color_ : env.theme.text;
-        paint_text(env, cached_, {bounds.x, bounds.y}, col, 1.f / sc());
+        float s = sc(), inv = 1.f / s;
+        float slack_y = std::fmax(bounds.h - cached_.size.h * inv, 0.f);
+        float y = bounds.y + (valign_ == TextVAlign::Middle   ? slack_y * .5f
+                              : valign_ == TextVAlign::Bottom ? slack_y
+                                                              : 0.f);
+        // Lines align within the bounds' width (raster px), each on its own.
+        text::emit_layout(env.list, cached_, {bounds.x, y}, inv, col, bounds.w * s,
+                          text_align_factor(align_));
     }
 
     const char* widget_type() const override { return "Label"; }
@@ -101,6 +119,8 @@ private:
     float font_px_ = 0;    // 0 = theme default (logical)
     float wrap_width_ = 0; // 0 = wrap to the available width (logical)
     Color color_ = Color::transparent();
+    TextAlign align_ = TextAlign::Left;
+    TextVAlign valign_ = TextVAlign::Top;
     std::string family_;   // "" = body
     text::TextLayout cached_;
     float cached_px_ = 0;

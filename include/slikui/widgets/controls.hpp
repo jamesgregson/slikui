@@ -334,6 +334,7 @@ public:
     Switch& set_checked(bool c, bool fire_callback = false) {
         checked_ = c;
         knob_.target = c ? 1.f : 0.f;
+        if (!ticked_) knob_.value = knob_.target; // initial state: no slide-in
         if (fire_callback && on_change_) on_change_(checked_);
         return *this;
     }
@@ -364,7 +365,10 @@ public:
         return false;
     }
 
-    void tick(Time t) override { knob_.advance(t.dt); }
+    void tick(Time t) override {
+        ticked_ = true;
+        knob_.advance(t.dt);
+    }
 
     const char* widget_type() const override { return "Switch"; }
 
@@ -372,6 +376,7 @@ public:
 
 private:
     bool checked_ = false;
+    bool ticked_ = false; // until the first tick, state changes snap
     Anim knob_{0, 0, 18};
     std::function<void(bool)> on_change_;
 };
@@ -397,6 +402,7 @@ public:
         if (v == value_) return *this;
         value_ = v;
         fraction_.target = fraction();
+        if (!ticked_) fraction_.value = fraction_.target; // initial value: no sweep
         label_valid_ = false;
         if (fire_callback && on_change_) on_change_(value_);
         return *this;
@@ -485,6 +491,8 @@ public:
 
     void tick(Time t) override {
         fraction_.target = fraction();
+        if (!ticked_) fraction_.value = fraction_.target; // range/log/step set before showing
+        ticked_ = true;
         fraction_.advance(t.dt);
     }
 
@@ -524,6 +532,7 @@ private:
     bool fmt_set_ = false, log_ = false;
     float step_ = 0;
     bool dragging_ = false;
+    bool ticked_ = false; // until the first tick, value changes snap
     Anim fraction_{0, 0, 20};
     std::function<void(float)> on_change_;
     mutable text::TextLayout label_lay_, value_lay_;
@@ -553,24 +562,48 @@ public:
     long selected() const { return selected_; }
     Segmented& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
 
-    bool stretch_cross() const override { return false; }
+    // Fill: span the parent (a Column's width, a Row's leftover space)
+    // instead of hugging the labels; segments then share the width as
+    // evenly as their labels allow. Default off.
+    Segmented& set_fill(bool on = true) { fill_ = on; return *this; }
+    bool fill() const { return fill_; }
+
+    // Absolute rect of segment `index` in the current layout (empty if out
+    // of range) - e.g. to anchor a popover under one segment.
+    Rect segment_rect(size_t index) const {
+        if (index >= widths_.size()) return {};
+        float x = bounds.x;
+        for (size_t i = 0; i < index; ++i) x += widths_[i];
+        return {x, bounds.y, widths_[index], bounds.h};
+    }
+
+    bool stretch_cross() const override { return fill_; }
+    bool expands_main() const override { return fill_ || Widget::expands_main(); }
 
     Size measure(const Constraints& c) override {
         float w = 0;
         for (const auto& it : items_) w += natural(it);
-        return c.clamp({std::fmax(w, 60.f), 26.f});
+        return c.clamp({std::fmax(w, 60.f), kHeight});
     }
 
     // Segments keep their natural width (text + padding) when they fit.
     // Narrower than that, the width is shared out so short labels stay
     // whole and the long ones shrink (their text elides with "...").
+    // With fill, spare width evens the segments out: ones narrower than an
+    // equal share grow to it, wider ones keep their natural width.
     void arrange(const Rect& area) override {
-        bounds = area;
+        // Fixed height, centered when stretched (fill in a Row).
+        float h = std::fmin(area.h, kHeight);
+        bounds = {area.x, area.y + (area.h - h) * .5f, area.w, h};
         size_t n = items_.size();
         widths_.assign(n, 0.f);
         float total = 0;
         for (size_t i = 0; i < n; ++i) total += (widths_[i] = natural(items_[i]));
-        if (n == 0 || total <= area.w) return;
+        if (n == 0) return;
+        if (total <= area.w) {
+            if (fill_) even_out(area.w);
+            return;
+        }
         // Water-fill: segments narrower than the fair share keep their width;
         // the rest split what's left equally.
         std::vector<bool> fixed(n, false);
@@ -640,7 +673,46 @@ public:
 
     const char* widget_type() const override { return "Segmented"; }
 
+    // A segment drawn cut off with "..." shows its full label; else the
+    // widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long i = bounds.contains(pos) ? index_at(pos.x) : -1;
+        if (i >= 0 && ctx) {
+            float w = widths_[size_t(i)];
+            float box = std::fmax(w - 2 * std::fmin(12.f, w * .2f), 0.f); // as in paint
+            const std::string& it = items_[size_t(i)];
+            if (ctx->text_size(it).w > box + 0.01f) return it;
+        }
+        return Widget::tooltip_at(pos);
+    }
+
 private:
+    static constexpr float kHeight = 26.f;
+
+    // Spread `width` (>= the natural total) so segments are as equal as
+    // possible: any segment wider than the fair share keeps its natural
+    // width; the others split the rest equally.
+    void even_out(float width) {
+        size_t n = widths_.size();
+        std::vector<bool> keep(n, false);
+        float avail = width;
+        size_t open = n;
+        for (bool changed = true; changed && open > 0;) {
+            changed = false;
+            float share = avail / float(open);
+            for (size_t i = 0; i < n; ++i) {
+                if (keep[i] || widths_[i] <= share) continue;
+                keep[i] = true;
+                avail -= widths_[i];
+                --open;
+                changed = true;
+            }
+        }
+        float share = open > 0 ? avail / float(open) : 0.f;
+        for (size_t i = 0; i < n; ++i)
+            if (!keep[i]) widths_[i] = share;
+    }
+
     // Text width + 12 px padding each side (logical px). Context caches the
     // layout per raster size, so this follows UI-scale changes.
     float natural(const std::string& item) const {
@@ -659,6 +731,7 @@ private:
     long selected_ = -1, hovered_ = -1;
     std::function<void(size_t)> on_select_;
     std::vector<float> widths_; // per segment, set by arrange
+    bool fill_ = false;
 };
 
 // ---------------------------------------------------------------------------

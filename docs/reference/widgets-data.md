@@ -46,6 +46,7 @@ click - the screenshot shows it after a simulated press:
 | `ListView::set_items` | `(std::vector<std::string>)` |
 | `ListView::set_selected` | `(long index)` |
 | `ListView::on_select` | `(std::function<void(size_t)>)` |
+| `ListView::on_activate` | `(std::function<void(size_t)>)` - double-click, after `on_select` |
 | `Tabs::set_tabs` | `(std::vector<std::string>)` |
 | `Tabs::set_selected` / `on_change` | tab index |
 | `Dropdown::set_items` / `set_placeholder` / `set_selected` / `on_select` | like ListView |
@@ -134,6 +135,21 @@ the widget, chevron clicks toggle, rows select.
         slikui.TreeView.Row("Rim", 1),
     ])
     ```
+
+Large trees stay fast. Paint draws only the rows on screen. The natural width
+measures each label once, when its row first becomes visible, so labels under
+collapsed parents cost nothing. `set_natural_width(w)` fixes the width and
+skips measuring entirely.
+
+| API | Notes |
+|-----|-------|
+| `Row{label, depth, expandable, expanded, tooltip}` | `expanded` (default true) is the row's initial state, read by `set_rows`; `tooltip` is the row's hover text (default: the full label when the row is cut off) |
+| `set_rows(rows)` | replaces the rows and their expansion state; clears the selection |
+| `set_expanded(i, open)` / `expanded(i)` | programmatic; doesn't fire `on_toggle` |
+| `on_select(fn(i))` | a row was clicked |
+| `on_toggle(fn(i, open))` | an arrow click opened or closed row `i` |
+| `set_natural_width(w)` | fixed natural width (logical px); 0 = widest visible row |
+| `visible_count()` / `row_rect(i)` | rows not under a collapsed parent; a row's rect for `scroll_to` |
 
 ## Table
 

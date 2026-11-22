@@ -10,6 +10,7 @@
 #include "slikui/text/system_fonts.hpp"
 #include "slikui/widgets/all.hpp"
 
+#include <cmath>
 #include <set>
 #include <string>
 #include <vector>
@@ -328,6 +329,77 @@ TEST(label_style_setters_draw_decorations) {
     list.clear();
     styled.paint(env);
     CHECK(count(list, DrawCmd::Type::Rect) == 0);
+}
+
+// Bounding box of the glyph quads a widget paints.
+Rect glyph_bbox(const Widget& w, TextFixture& f) {
+    DrawList list;
+    PaintEnv env{list, f.ctx.theme(), f.ctx.font(), &f.ctx.fonts()};
+    w.paint(env);
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    for (const auto& c : list.commands()) {
+        if (c.type != DrawCmd::Type::Glyph) continue;
+        x0 = std::fmin(x0, c.rect.x);
+        y0 = std::fmin(y0, c.rect.y);
+        x1 = std::fmax(x1, c.rect.right());
+        y1 = std::fmax(y1, c.rect.bottom());
+    }
+    return {x0, y0, x1 - x0, y1 - y0};
+}
+
+TEST(label_align_and_valign_place_text_in_its_bounds) {
+    TextFixture f;
+    REQUIRE(f.has_font);
+    auto& root = f.ctx.set_root<Column>();
+    auto& label = root.add<Label>("Hello");
+    f.frame();
+    const Rect box{20, 10, 280, 100}; // much bigger than the text
+    label.arrange(box);
+
+    Rect tl = glyph_bbox(label, f); // default: left, top
+    CHECK(label.align() == TextAlign::Left && label.valign() == TextVAlign::Top);
+    CHECK(tl.x - box.x < 4.f);
+    CHECK(tl.y - box.y < 8.f);
+
+    label.set_align(TextAlign::Center).set_valign(TextVAlign::Middle);
+    Rect mid = glyph_bbox(label, f);
+    CHECK(std::fabs((mid.x - box.x) - (box.right() - mid.right())) < 3.f);
+    CHECK(std::fabs((mid.y - box.y) - (box.bottom() - mid.bottom())) < 6.f);
+    CHECK(std::fabs(mid.w - tl.w) < 0.01f); // moved, not re-laid out
+
+    label.set_align(TextAlign::Right).set_valign(TextVAlign::Bottom);
+    Rect br = glyph_bbox(label, f);
+    CHECK(box.right() - br.right() < 4.f);
+    CHECK(box.bottom() - br.bottom() < 8.f);
+    CHECK(br.y > mid.y && mid.y > tl.y);
+
+    // Taller than its bounds: stays top-aligned instead of riding up.
+    label.arrange({20, 10, 280, 4});
+    CHECK(glyph_bbox(label, f).y >= tl.y - 0.01f);
+}
+
+TEST(label_align_centers_each_wrapped_line) {
+    TextFixture f;
+    REQUIRE(f.has_font);
+    auto& root = f.ctx.set_root<Column>();
+    auto& label = root.add<Label>("short\na much longer second line");
+    label.set_align(TextAlign::Center);
+    f.frame();
+    label.arrange({0, 0, 300, 80});
+    DrawList list;
+    PaintEnv env{list, f.ctx.theme(), f.ctx.font(), &f.ctx.fonts()};
+    label.paint(env);
+    // Per line: centers match the box center.
+    float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f}, first_y = -1;
+    for (const auto& c : list.commands()) {
+        if (c.type != DrawCmd::Type::Glyph) continue;
+        if (first_y < 0) first_y = c.rect.y;
+        int line = c.rect.y > first_y + 10 ? 1 : 0;
+        lo[line] = std::fmin(lo[line], c.rect.x);
+        hi[line] = std::fmax(hi[line], c.rect.right());
+    }
+    for (int l = 0; l < 2; ++l) CHECK(std::fabs((lo[l] + hi[l]) * .5f - 150.f) < 3.f);
+    CHECK(hi[1] - lo[1] > hi[0] - lo[0] + 50.f);
 }
 
 // --- env.text / text_in ---
