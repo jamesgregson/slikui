@@ -92,7 +92,7 @@ def context_set_root(self, cls, *args, **props):
 PROTOCOL = frozenset({
     "measure", "arrange", "paint", "paint_over", "clip_rect", "attached",
     "on_event", "tick", "theme_changed", "stretch_cross", "expands_main",
-    "mouse_transparent", "focusable", "widget_type",
+    "mouse_transparent", "focusable", "widget_type", "tooltip_at",
 })
 OVERRIDABLE = ("Widget", "Panel", "Column", "Row")
 

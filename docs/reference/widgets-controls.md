@@ -179,6 +179,13 @@ overrides the theme text color, `set_wrap_width` word-wraps. `set_bold`,
 | `set_wrap_width` | `(float px)` |
 | `set_bold` / `set_italic` / `set_underline` / `set_strike` | `(bool on = true)` |
 | `set_font` | `(std::string family)` - `"body"`, `"heading"`, `"mono"` or a registered name |
+| `set_align` | `(TextAlign)` - each line within the label's width; Python also takes `"left"` / `"center"` / `"right"` |
+| `set_valign` | `(TextVAlign)` - the text within the label's height; Python also takes `"top"` / `"middle"` / `"bottom"` |
+
+Alignment only shows when the label is bigger than its text, for example
+stretched across a Column (labels stretch by default) or given a Row's
+height. Wrapped lines are aligned one by one. Text taller than the label
+stays top-aligned.
 
 ## Widget base class
 

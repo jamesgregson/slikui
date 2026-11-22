@@ -297,6 +297,15 @@ enum class Key : std::uint32_t {
     KpDecimal, KpDivide, KpMultiply, KpSubtract, KpAdd, KpEqual,
 };
 
+// Keys that type a character (letters, digits, punctuation, Space, keypad).
+// A focused text field consumes their KeyPress - the character itself
+// arrives as TextInput - so typing never triggers a key handler above it.
+inline bool is_text_key(Key k) {
+    return k == Key::Space || (k >= Key::Apostrophe && k <= Key::Slash) ||
+           (k >= Key::A && k <= Key::Z) || (k >= Key::Num0 && k <= Key::Grave) ||
+           (k >= Key::Kp0 && k <= Key::KpEqual);
+}
+
 enum Mod : std::uint32_t {
     ModNone   = 0,
     ModShift  = 1 << 0,
@@ -654,10 +663,25 @@ public:
     void push_clip(Rect r) { push({DrawCmd::Type::ClipPush, r}); }
     void pop_clip() { push({DrawCmd::Type::ClipPop, {}}); }
 
-    // Appends `other`, offsetting geometry by `offset` (keeps one list per frame).
-    void append(const DrawList& other, Vec2 offset) {
-        for (const auto& c : other.commands()) {
-            DrawCmd copy = c;
+    // Appends `other`, offsetting geometry by `offset` (keeps one list per
+    // frame). Replaying a recorded list this way is how a widget whose
+    // drawing rarely changes avoids re-issuing it command by command.
+    void append(const DrawList& other, Vec2 offset = {}) {
+        append(other.cmds_.data(), other.cmds_.size(), offset);
+    }
+    // Appends `n` commands, offsetting geometry by `offset`. (Every
+    // command's position is rect.x/rect.y - a Line's start point too - so
+    // the offset moves the whole command.)
+    void append(const DrawCmd* cmds, size_t n, Vec2 offset = {}) {
+        if (n && cmds >= cmds_.data() && cmds < cmds_.data() + cmds_.size()) {
+            // Our own commands (list.append(list)): growing would move them.
+            std::vector<DrawCmd> own(cmds, cmds + n);
+            append(own.data(), n, offset);
+            return;
+        }
+        cmds_.reserve(cmds_.size() + n);
+        for (size_t i = 0; i < n; ++i) {
+            DrawCmd copy = cmds[i];
             copy.rect.x += offset.x;
             copy.rect.y += offset.y;
             cmds_.push_back(copy);
@@ -7925,7 +7949,13 @@ public:
         key.append(s);
         auto it = cache_.find(key);
         if (it == cache_.end()) {
-            if (cache_.size() >= kMaxCache) evict(frame_); // runaway text: drop all but this frame
+            if (cache_.size() >= evict_at_) {
+                evict(frame_); // runaway text: drop all but this frame
+                // Whatever survived was used this frame (e.g. a big list
+                // measured in one tick). Let the cache grow instead of
+                // rescanning it on every later miss: amortized O(1).
+                evict_at_ = std::max(kMaxCache, cache_.size() * 2);
+            }
             it = cache_.emplace(std::move(key),
                                 Entry{layout_fitted(*rq.font, s, rq.px, wrap, ellipsis_w, rq.flags), 0})
                      .first;
@@ -7938,6 +7968,7 @@ public:
     void end_frame() {
         ++frame_;
         if (frame_ > kKeepFrames) evict(frame_ - kKeepFrames);
+        evict_at_ = std::max(kMaxCache, cache_.size() * 2);
     }
     size_t cache_size() const { return cache_.size(); }
 
@@ -7991,6 +8022,7 @@ private:
     std::vector<Family> families_;
     std::function<std::uint32_t()> id_source_;
     std::unordered_map<std::string, Entry> cache_;
+    size_t evict_at_ = kMaxCache; // cache size that triggers a mid-frame evict
     std::uint64_t frame_ = 0;
 };
 
@@ -9833,6 +9865,19 @@ struct PaintEnv {
     const Theme& theme;
     const text::Font& font;            // body font, regular face
     text::FontLibrary* fonts = nullptr; // set by Context::render (null: hand-built env)
+    // The part of the frame this widget's drawing can show through: the
+    // window, narrowed by every clip pushed on the way down the tree (a
+    // ScrollArea's viewport, ...). Anything outside it is clipped away, so
+    // paint() can skip it - e.g. a long list drawing only its on-screen
+    // rows. Logical px, same space as bounds. Unbounded in a hand-built env.
+    Rect visible_rect{-1e9f, -1e9f, 2e9f, 2e9f};
+
+    // A copy whose visible_rect is narrowed to `clip`.
+    PaintEnv clipped(Rect clip) const {
+        PaintEnv e = *this;
+        e.visible_rect = visible_rect.intersect(clip);
+        return e;
+    }
 
     // Draws `s` anchored at `pos` (logical px) and returns the rect it
     // occupies. With default options `pos` is the top-left corner; align /
@@ -10024,11 +10069,16 @@ public:
         paint(env);
         std::optional<Rect> clip = clip_rect();
         if (clip) env.list.push_clip(*clip);
+        const PaintEnv inner = clip ? env.clipped(*clip) : env;
         for (const auto& c : children) {
             std::optional<Rect> child_clip = child_clip_rect(*c);
-            if (child_clip) env.list.push_clip(*child_clip);
-            c->paint_tree(env);
-            if (child_clip) env.list.pop_clip();
+            if (child_clip) {
+                env.list.push_clip(*child_clip);
+                c->paint_tree(inner.clipped(*child_clip));
+                env.list.pop_clip();
+            } else {
+                c->paint_tree(inner);
+            }
         }
         if (clip) env.list.pop_clip();
         paint_over(env);
@@ -10129,8 +10179,19 @@ public:
     // popup: 0.6 s hover delay, dismissed by moving away or pressing).
     // NOTE: returns Widget& - in fluent chains, call base-class setters last
     // (pre-C++23 has no deducing-this, so Widget& can't know the leaf type).
+    // A tooltip that is showing follows changes (new text swaps it, "" closes it).
     Widget& set_tooltip(std::string t) { tooltip_ = std::move(t); return *this; }
     const std::string& tooltip() const { return tooltip_; }
+
+    // The tooltip text for the pointer at `pos` (logical px, inside this
+    // widget); "" = none. Defaults to set_tooltip's text. Widgets with parts
+    // override it for per-part tips - TreeView / ListView rows, Segmented
+    // segments. The Context asks each tick while the pointer hovers: new
+    // text swaps a showing tooltip, "" closes it.
+    virtual std::string tooltip_at(Vec2 pos) const {
+        (void)pos;
+        return tooltip_;
+    }
 
     // --- context menu ---
     //
@@ -10251,9 +10312,9 @@ class Dialog; // widgets/shells.hpp - floating shell layer (see open_dialog)
 // and is then clamped fully inside the frame.
 enum class PopupDir : std::uint8_t { Below, Above, Right, Left };
 
-// Builds the tooltip popup for `w` at `pos`. Defined after Context (needs the
-// complete type); declared here so Context::show_tooltip can call it.
-void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos);
+// Pushes a tooltip popup showing `text` at `pos`; returns it. Defined after
+// Context (needs the complete type); declared here so Context can call it.
+Widget& show_tooltip_for(Context& ctx, const std::string& text, Vec2 pos);
 
 class Context {
 public:
@@ -10410,13 +10471,17 @@ public:
         hover_ = nullptr;
         reset_press_state();
         tooltip_open_ = false;
+        tooltip_popup_ = nullptr;
+        tooltip_text_.clear();
+        pending_tip_.clear();
+        tooltip_dismissed_ = false;
         hover_since_ = -1;
         inside_press_ = false;
         popups_.clear();  // popup widgets may hold callbacks
         dialogs_.clear(); // dialog entries (owned dialogs move to closing_)
         toasts_.clear();  // owned toast widgets
         root_.reset();    // the tree itself
-        closing_.clear(); // widgets deferred by close_popups()
+        flush_closing();  // widgets deferred by close_popups()
         shortcuts_.clear(); // may hold Python callables
     }
 
@@ -10429,7 +10494,7 @@ public:
             Busy busy(*this); // focus notifications flush when this closes
             handle_event(e);
         }
-        closing_.clear();
+        flush_closing();
     }
 
     Widget* focused() { return focused_; }
@@ -10461,7 +10526,7 @@ public:
             tick_pass(t);
         }
         // Widgets retired during the pass (Widget::remove, expired toasts).
-        if (busy_ == 0) closing_.clear();
+        if (busy_ == 0) flush_closing();
     }
 
 private:
@@ -10507,7 +10572,7 @@ public:
     void render(bool clear = true) {
         if (!sink_) return;
         DrawList list;
-        const PaintEnv env{list, theme_, fonts_.body(), &fonts_};
+        const PaintEnv env{list, theme_, fonts_.body(), &fonts_, {0, 0, frame_.x, frame_.y}};
         if (clear) list.rect({0, 0, frame_.x, frame_.y}, theme_.background);
         if (root_) root_->paint_tree(env);
         for (auto& p : popups_) p.widget->paint_tree(env);
@@ -10579,6 +10644,11 @@ public:
         popups_.clear();
     }
     bool has_popups() const { return !popups_.empty(); }
+    // The text of the tooltip showing now; "" when none is.
+    const std::string& tooltip_text() const {
+        static const std::string none;
+        return tooltip_open_ ? tooltip_text_ : none;
+    }
     size_t popup_count() const { return popups_.size(); }
     Widget* popup(size_t i) { return popups_[i].widget; }
     // Index of the popup whose widget is exactly `w`, or -1 (menus use this to
@@ -10638,11 +10708,34 @@ public:
                 focus_notes_.push_back({dialogs_[i].widget, Event::Type::PopupClosed});
                 if (dialogs_[i].owned)
                     closing_.push_back(std::move(dialogs_[i].owned));
+                if (dialogs_[i].hold)
+                    closing_holds_.push_back({dialogs_[i].widget, std::move(dialogs_[i].hold)});
                 dialogs_.erase(dialogs_.begin() + long(i));
             }
         }
     }
     size_t dialog_count() const { return dialogs_.size(); }
+
+    // Keep `hold` alive while `w` is open as a popup or dialog; it is
+    // released once `w` has closed (after its PopupClosed, at the same safe
+    // point owned popups are destroyed). For a borrowed widget whose
+    // lifetime something else manages - the Python bindings pin the
+    // widget's Python object this way, so a temporary passed to push_popup
+    // or open_dialog can't be freed while it is on screen. False when `w`
+    // isn't open.
+    bool hold_while_open(const Widget& w, std::shared_ptr<void> hold) {
+        for (size_t i = popups_.size(); i-- > 0;)
+            if (popups_[i].widget == &w) {
+                popups_[i].hold = std::move(hold);
+                return true;
+            }
+        for (auto& d : dialogs_)
+            if (d.widget == &w) {
+                d.hold = std::move(hold);
+                return true;
+            }
+        return false;
+    }
     Widget* dialog(size_t i) { return dialogs_[i].widget; }
 
     // --- toasts ---
@@ -10744,6 +10837,7 @@ private:
         Widget::WidgetPtr owned; // null for borrowed dialogs
         Widget* widget = nullptr;
         bool modal = false;
+        std::shared_ptr<void> hold; // see hold_while_open
         bool placed = false; // false until the first layout centers it
     };
     struct ToastEntry {
@@ -10772,6 +10866,7 @@ private:
         Widget* anchor = nullptr; // position beside this widget (null = at pos)
         Vec2 pos;
         PopupDir dir = PopupDir::Below;
+        std::shared_ptr<void> hold; // see hold_while_open
     };
 
     static bool inside(Widget* w, Widget* root) {
@@ -10945,6 +11040,24 @@ private:
         if (focused_ && inside(focused_, p.widget)) set_focus(nullptr);
         focus_notes_.push_back({p.widget, Event::Type::PopupClosed});
         if (p.owned) closing_.push_back(std::move(p.owned));
+        if (p.hold) closing_holds_.push_back({p.widget, std::move(p.hold)});
+    }
+
+    // Deferred destruction: retired widgets first, then the holds that kept
+    // borrowed ones alive (releasing one may destroy its widget). A widget
+    // closed and reopened in the same pass (a menu re-pushing itself) gets
+    // its hold back instead.
+    void flush_closing() {
+        closing_.clear();
+        auto holds = std::move(closing_holds_);
+        closing_holds_.clear();
+        for (auto& [w, hold] : holds) {
+            for (auto& p : popups_)
+                if (hold && p.widget == w && !p.hold) p.hold = std::move(hold);
+            for (auto& d : dialogs_)
+                if (hold && d.widget == w && !d.hold) d.hold = std::move(hold);
+        }
+        holds.clear(); // releases what wasn't handed back
     }
 
     // Dispatch an event up the chain from `w` to the root, until consumed.
@@ -10997,10 +11110,8 @@ private:
         Widget* old = hover_;
         hover_ = w;
         hover_since_ = -1;
-        if (tooltip_open_) {
-            close_popups();
-            tooltip_open_ = false;
-        }
+        tooltip_dismissed_ = false;
+        close_tooltip();
         Event ev{};
         ev.pos = pos;
         ev.type = Event::Type::MouseLeave;
@@ -11017,28 +11128,59 @@ private:
         }
     }
 
+    // Each tick: the hovered widget's tooltip text at the pointer decides.
+    // After a 0.6 s hover with the same text, it shows; while it shows, new
+    // text swaps it at once (moving between rows of a list), "" closes it.
     void update_tooltip(Time t) {
+        std::string want = hover_ && !inside_press_ ? hover_->tooltip_at(hover_pos_)
+                                                    : std::string();
         if (tooltip_open_) {
-            // Closed implicitly when the hover target changed (set_hover);
-            // also close if the widget lost its tooltip text.
-            if ((!hover_ || hover_->tooltip_.empty()) && popups_.empty())
+            if (popup_index(tooltip_popup_) < 0) {
+                // Closed by someone else (close_popups, a press): stay closed
+                // until the text changes or the pointer moves on.
                 tooltip_open_ = false;
+                tooltip_popup_ = nullptr;
+                tooltip_dismissed_ = true;
+                pending_tip_ = tooltip_text_;
+                return;
+            }
+            if (want == tooltip_text_) return;
+            close_tooltip();
+            if (!want.empty() && popups_.empty()) open_tooltip(std::move(want));
+            else hover_since_ = -1;
             return;
         }
-        if (!hover_ || hover_->tooltip_.empty() || !popups_.empty() || inside_press_) {
+        if (want.empty() || !popups_.empty()) {
             hover_since_ = -1;
+            pending_tip_.clear();
+            tooltip_dismissed_ = false;
             return;
         }
-        if (hover_since_ < 0) {
+        if (want == pending_tip_ && tooltip_dismissed_) return;
+        if (hover_since_ < 0 || want != pending_tip_) { // new text: restart the delay
             hover_since_ = t.now;
+            pending_tip_ = std::move(want);
+            tooltip_dismissed_ = false;
             return;
         }
-        if (t.now - hover_since_ >= 0.6) show_tooltip(*hover_);
+        if (t.now - hover_since_ >= 0.6) open_tooltip(std::move(want));
     }
 
-    void show_tooltip(Widget& w) {
-        show_tooltip_for(*this, w, {hover_pos_.x + 12, hover_pos_.y + 18});
+    void open_tooltip(std::string text) {
+        tooltip_popup_ =
+            &show_tooltip_for(*this, text, {hover_pos_.x + 12, hover_pos_.y + 18});
+        tooltip_text_ = std::move(text);
         tooltip_open_ = true;
+    }
+
+    // Close just the tooltip (and anything pushed above it).
+    void close_tooltip() {
+        if (!tooltip_open_) return;
+        long i = popup_index(tooltip_popup_);
+        if (i >= 0) close_popups_above_index(i - 1);
+        tooltip_open_ = false;
+        tooltip_popup_ = nullptr;
+        tooltip_text_.clear();
     }
 
     Widget* hit_test(Vec2 pos) {
@@ -11130,6 +11272,9 @@ private:
     std::uint32_t next_tex_id_ = 1;
     std::vector<Popup> popups_;
     std::vector<Widget::WidgetPtr> closing_; // deferred destruction
+    // Holds of closed popups/dialogs, released after closing_ (with the
+    // widget they kept alive, to hand back if it reopened).
+    std::vector<std::pair<const Widget*, std::shared_ptr<void>>> closing_holds_;
     bool inside_press_ = false; // mouse button held from a press inside the tree
     Widget* mouse_capture_ = nullptr;
 
@@ -11187,6 +11332,10 @@ private:
     Vec2 hover_pos_{};
     double hover_since_ = -1;
     bool tooltip_open_ = false;
+    Widget* tooltip_popup_ = nullptr; // the open tooltip (compared, never dereferenced)
+    std::string tooltip_text_;        // its text
+    std::string pending_tip_;         // text waiting out the hover delay
+    bool tooltip_dismissed_ = false;  // closed early; stays shut until the text changes
     std::vector<TexUpload> uploads_;
 };
 
@@ -11280,8 +11429,8 @@ public:
     const char* widget_type() const override { return "TooltipBox"; }
 };
 
-inline void show_tooltip_for(Context& ctx, Widget& w, Vec2 pos) {
-    ctx.push_popup(std::make_unique<TooltipBox>(w.tooltip()), pos);
+inline Widget& show_tooltip_for(Context& ctx, const std::string& text, Vec2 pos) {
+    return ctx.push_popup(std::make_unique<TooltipBox>(text), pos);
 }
 
 // --- input routing ---------------------------------------------------------
@@ -11400,8 +11549,7 @@ inline void Context::handle_press(const Event& in) {
     }
 
     if (tooltip_open_) {
-        close_popups();
-        tooltip_open_ = false;
+        close_tooltip();
         hover_since_ = -1;
     }
 
@@ -12576,24 +12724,48 @@ public:
     long selected() const { return selected_; }
     Segmented& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
 
-    bool stretch_cross() const override { return false; }
+    // Fill: span the parent (a Column's width, a Row's leftover space)
+    // instead of hugging the labels; segments then share the width as
+    // evenly as their labels allow. Default off.
+    Segmented& set_fill(bool on = true) { fill_ = on; return *this; }
+    bool fill() const { return fill_; }
+
+    // Absolute rect of segment `index` in the current layout (empty if out
+    // of range) - e.g. to anchor a popover under one segment.
+    Rect segment_rect(size_t index) const {
+        if (index >= widths_.size()) return {};
+        float x = bounds.x;
+        for (size_t i = 0; i < index; ++i) x += widths_[i];
+        return {x, bounds.y, widths_[index], bounds.h};
+    }
+
+    bool stretch_cross() const override { return fill_; }
+    bool expands_main() const override { return fill_ || Widget::expands_main(); }
 
     Size measure(const Constraints& c) override {
         float w = 0;
         for (const auto& it : items_) w += natural(it);
-        return c.clamp({std::fmax(w, 60.f), 26.f});
+        return c.clamp({std::fmax(w, 60.f), kHeight});
     }
 
     // Segments keep their natural width (text + padding) when they fit.
     // Narrower than that, the width is shared out so short labels stay
     // whole and the long ones shrink (their text elides with "...").
+    // With fill, spare width evens the segments out: ones narrower than an
+    // equal share grow to it, wider ones keep their natural width.
     void arrange(const Rect& area) override {
-        bounds = area;
+        // Fixed height, centered when stretched (fill in a Row).
+        float h = std::fmin(area.h, kHeight);
+        bounds = {area.x, area.y + (area.h - h) * .5f, area.w, h};
         size_t n = items_.size();
         widths_.assign(n, 0.f);
         float total = 0;
         for (size_t i = 0; i < n; ++i) total += (widths_[i] = natural(items_[i]));
-        if (n == 0 || total <= area.w) return;
+        if (n == 0) return;
+        if (total <= area.w) {
+            if (fill_) even_out(area.w);
+            return;
+        }
         // Water-fill: segments narrower than the fair share keep their width;
         // the rest split what's left equally.
         std::vector<bool> fixed(n, false);
@@ -12663,7 +12835,46 @@ public:
 
     const char* widget_type() const override { return "Segmented"; }
 
+    // A segment drawn cut off with "..." shows its full label; else the
+    // widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long i = bounds.contains(pos) ? index_at(pos.x) : -1;
+        if (i >= 0 && ctx) {
+            float w = widths_[size_t(i)];
+            float box = std::fmax(w - 2 * std::fmin(12.f, w * .2f), 0.f); // as in paint
+            const std::string& it = items_[size_t(i)];
+            if (ctx->text_size(it).w > box + 0.01f) return it;
+        }
+        return Widget::tooltip_at(pos);
+    }
+
 private:
+    static constexpr float kHeight = 26.f;
+
+    // Spread `width` (>= the natural total) so segments are as equal as
+    // possible: any segment wider than the fair share keeps its natural
+    // width; the others split the rest equally.
+    void even_out(float width) {
+        size_t n = widths_.size();
+        std::vector<bool> keep(n, false);
+        float avail = width;
+        size_t open = n;
+        for (bool changed = true; changed && open > 0;) {
+            changed = false;
+            float share = avail / float(open);
+            for (size_t i = 0; i < n; ++i) {
+                if (keep[i] || widths_[i] <= share) continue;
+                keep[i] = true;
+                avail -= widths_[i];
+                --open;
+                changed = true;
+            }
+        }
+        float share = open > 0 ? avail / float(open) : 0.f;
+        for (size_t i = 0; i < n; ++i)
+            if (!keep[i]) widths_[i] = share;
+    }
+
     // Text width + 12 px padding each side (logical px). Context caches the
     // layout per raster size, so this follows UI-scale changes.
     float natural(const std::string& item) const {
@@ -12682,6 +12893,7 @@ private:
     long selected_ = -1, hovered_ = -1;
     std::function<void(size_t)> on_select_;
     std::vector<float> widths_; // per segment, set by arrange
+    bool fill_ = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -12984,16 +13196,11 @@ public:
             case Key::Enter:
                 if (on_submit_) on_submit_(text_);
                 return true;
-            case Key::Space:
-                // Space arrives as TextInput in most backends; also accept here.
-                erase_selection();
-                text_.insert(caret_, " ");
-                ++caret_;
-                clear_sel();
-                if (on_change_) on_change_(text_);
-                return true;
             default:
-                return false;
+                // Typing keys are ours: the character arrives as TextInput
+                // (Space included - inserting it here too typed it twice),
+                // and the KeyPress must not reach shortcuts above the field.
+                return is_text_key(e.key);
             }
         }
         default:
@@ -13286,13 +13493,13 @@ public:
             case Key::Enter:
                 insert("\n");
                 return true;
-            case Key::Space:
-                insert(" ");
-                return true;
             case Key::Tab:
                 return false; // Tab keeps its focus-cycling meaning
             default:
-                return false;
+                // Typing keys (Space included) insert via TextInput; consume
+                // the KeyPress so it never reaches shortcuts above the area.
+                // Ctrl/Cmd chords still bubble.
+                return !e.shortcut_mod() && is_text_key(e.key);
             }
         }
         default:
@@ -13442,6 +13649,7 @@ private:
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
 
+#include <cmath>
 #include <string>
 
 namespace slikui {
@@ -13461,6 +13669,16 @@ public:
     Label& set_font_size(float px) { font_px_ = px; valid_ = false; return *this; }
     Label& set_color(Color c) { color_ = c; return *this; } // alpha 0 = theme default
     Label& set_wrap_width(float w) { wrap_width_ = w; valid_ = false; return *this; }
+
+    // Placement inside the label's bounds, for a label laid out larger than
+    // its text (stretched across a Column, given a Row's height, ...).
+    // align: each line within the width (wrapped lines too). valign: the
+    // block within the height (Baseline behaves like Top); text taller than
+    // the label stays top-aligned. Defaults: Left, Top.
+    Label& set_align(TextAlign a) { align_ = a; return *this; }
+    Label& set_valign(TextVAlign v) { valign_ = v; return *this; }
+    TextAlign align() const { return align_; }
+    TextVAlign valign() const { return valign_; }
 
     // Style. Missing bold/italic faces are synthesized from the family's
     // closest face; set_font takes a family registered with
@@ -13507,7 +13725,14 @@ public:
 
     void paint(const PaintEnv& env) const override {
         Color col = color_.a > 0 ? color_ : env.theme.text;
-        paint_text(env, cached_, {bounds.x, bounds.y}, col, 1.f / sc());
+        float s = sc(), inv = 1.f / s;
+        float slack_y = std::fmax(bounds.h - cached_.size.h * inv, 0.f);
+        float y = bounds.y + (valign_ == TextVAlign::Middle   ? slack_y * .5f
+                              : valign_ == TextVAlign::Bottom ? slack_y
+                                                              : 0.f);
+        // Lines align within the bounds' width (raster px), each on its own.
+        text::emit_layout(env.list, cached_, {bounds.x, y}, inv, col, bounds.w * s,
+                          text_align_factor(align_));
     }
 
     const char* widget_type() const override { return "Label"; }
@@ -13538,6 +13763,8 @@ private:
     float font_px_ = 0;    // 0 = theme default (logical)
     float wrap_width_ = 0; // 0 = wrap to the available width (logical)
     Color color_ = Color::transparent();
+    TextAlign align_ = TextAlign::Left;
+    TextVAlign valign_ = TextVAlign::Top;
     std::string family_;   // "" = body
     text::TextLayout cached_;
     float cached_px_ = 0;
@@ -13560,6 +13787,8 @@ private:
 // (already included above: slikui/widgets/env.hpp)
 // (already included above: slikui/widgets/widget.hpp)
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
@@ -13763,13 +13992,16 @@ public:
     void paint(const PaintEnv& env) const override {
         refresh_metrics();
         const Theme& t = env.theme;
-        float y = bounds.y;
         TextOpts o;
         o.color = t.text;
         o.valign = TextVAlign::Middle;
         o.overflow = TextOverflow::Ellipsis; // long items stay inside the list
-        for (size_t i = 0; i < items_.size(); ++i) {
-            Rect row{bounds.x, y, bounds.w, row_height()};
+        // Only the rows inside the visible rect (fixed height: a division).
+        float rh = row_height(), n = float(items_.size());
+        size_t first = size_t(std::clamp(std::floor((env.visible_rect.y - bounds.y) / rh), 0.f, n));
+        size_t last = size_t(std::clamp(std::ceil((env.visible_rect.bottom() - bounds.y) / rh), 0.f, n));
+        for (size_t i = first; i < last; ++i) {
+            Rect row{bounds.x, bounds.y + float(i) * rh, bounds.w, rh};
             if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
             else if (i == hovered_ && enabled)
                 env.list.rect(row, t.surface_alt, 4);
@@ -13777,7 +14009,6 @@ public:
             if (line_height_ > 0)
                 env.text_in({row.x + 8, row.y, std::fmax(row.w - 16.f, 0.f), row.h},
                             items_[i], o);
-            y += row_height();
         }
     }
 
@@ -13803,6 +14034,17 @@ public:
     }
 
     const char* widget_type() const override { return "ListView"; }
+
+    // An item drawn cut off with "..." shows its full text; else the
+    // widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long idx = bounds.contains(pos) ? row_at(pos.y) : -1;
+        if (idx >= 0 && ctx && line_height_ > 0) {
+            const std::string& it = items_[size_t(idx)];
+            if (ctx->text_size(it).w > bounds.w - 16.f + 0.01f) return it;
+        }
+        return Widget::tooltip_at(pos);
+    }
 
     void theme_changed() override { valid_ = false; } // scale/font may have changed
 
@@ -14371,6 +14613,11 @@ private:
 // TreeView - indented hierarchy with expand arrows and selection. Rows are a
 // flat (label, depth) list; expansion state lives here, descendants of a
 // collapsed row are hidden. Apps mutate rows and call set_rows again.
+//
+// Cost scales with the rows on screen, not the row count: paint draws only
+// rows inside PaintEnv::visible_rect, and the natural width measures each
+// label once, when its row first becomes visible (or never, with
+// set_natural_width).
 // ---------------------------------------------------------------------------
 class TreeView : public Widget {
 public:
@@ -14378,20 +14625,24 @@ public:
         std::string label;
         int depth = 0;
         bool expandable = false;
+        bool expanded = true; // initial state for expandable rows
+        std::string tooltip;  // hover text; "" = the full label when elided
     };
 
     explicit TreeView(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
 
     TreeView& set_rows(std::vector<Row> rows) {
         rows_ = std::move(rows);
-        expanded_.assign(rows_.size(), true);
+        expanded_.resize(rows_.size());
+        for (size_t i = 0; i < rows_.size(); ++i) expanded_[i] = rows_[i].expanded;
+        widths_.assign(rows_.size(), -1.f);
         selected_ = -1;
-        metrics_valid_ = false; // natural width
+        hovered_ = -1;
         visible_valid_ = false;
         return *this;
     }
     TreeView& set_expanded(size_t index, bool open) {
-        if (index < expanded_.size()) {
+        if (index < expanded_.size() && expanded_[index] != open) {
             expanded_[index] = open;
             visible_valid_ = false;
         }
@@ -14407,32 +14658,44 @@ public:
         return visible_.size();
     }
     TreeView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+    // An arrow click opened (true) or closed (false) row `index`. Not called
+    // for set_expanded / set_rows.
+    TreeView& on_toggle(std::function<void(size_t, bool)> f) { on_toggle_ = std::move(f); return *this; }
+
+    // Fixed natural width (logical px), so no label is measured; 0 (the
+    // default) = widest visible row, measured as rows first become visible.
+    TreeView& set_natural_width(float w) { fixed_w_ = w; return *this; }
+    float natural_width() const { return fixed_w_; }
 
     // Absolute rect of row `index` in the current layout; empty when it is
     // hidden under a collapsed ancestor or out of range - e.g.
     // ScrollArea::scroll_to(tree.row_rect(i)).
     Rect row_rect(size_t index) const {
         refresh_visible();
-        for (size_t vi = 0; vi < visible_.size(); ++vi)
-            if (visible_[vi] == index)
-                return {bounds.x, bounds.y + float(vi) * row_height(), bounds.w, row_height()};
-        return {};
+        if (index >= vis_pos_.size() || vis_pos_[index] < 0) return {};
+        return {bounds.x, bounds.y + float(vis_pos_[index]) * row_height(), bounds.w,
+                row_height()};
     }
 
     Size measure(const Constraints& c) override {
-        refresh_metrics();
         refresh_visible();
-        return c.clamp({natural_w_, float(visible_.size()) * row_height()});
+        return c.clamp({natural_w(), float(visible_.size()) * row_height()});
     }
 
     void paint(const PaintEnv& env) const override {
         refresh_visible();
         const Theme& t = env.theme;
-        float y = bounds.y;
-        for (size_t vi = 0; vi < visible_.size(); ++vi) {
+        // Rows are fixed-height: the on-screen range is a division.
+        const Rect& vis = env.visible_rect;
+        float rh = row_height();
+        size_t first = size_t(std::clamp(std::floor((vis.y - bounds.y) / rh), 0.f,
+                                         float(visible_.size())));
+        size_t last = size_t(std::clamp(std::ceil((vis.bottom() - bounds.y) / rh), 0.f,
+                                        float(visible_.size())));
+        for (size_t vi = first; vi < last; ++vi) {
             size_t i = visible_[vi];
             const Row& r = rows_[i];
-            Rect row{bounds.x, y, bounds.w, row_height()};
+            Rect row{bounds.x, bounds.y + float(vi) * rh, bounds.w, rh};
             if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
             else if (long(vi) == hovered_ && enabled)
                 env.list.rect(row, t.surface_alt, 4);
@@ -14440,7 +14703,7 @@ public:
             float indent = bounds.x + 6 + float(r.depth) * 16.f;
             if (r.expandable) {
                 // chevron right (closed) / down (open)
-                float cy = row.y + row_height() * .5f;
+                float cy = row.y + rh * .5f;
                 Color mark = t.text_dim;
                 if (expanded_[i]) { // chevron down: v
                     env.list.line({indent - 2, cy - 2}, {indent + 2, cy + 2}, mark, 2);
@@ -14452,13 +14715,12 @@ public:
             }
             float tx = indent + (r.expandable ? 16.f : 4.f);
             // Elide to the row: long labels must not run past the tree.
-            Rect box{tx, row.y, std::fmax(bounds.right() - 4.f - tx, 0.f), row_height()};
+            Rect box{tx, row.y, std::fmax(bounds.right() - 4.f - tx, 0.f), rh};
             TextOpts o;
             o.color = t.text;
             o.valign = TextVAlign::Middle;
             o.overflow = TextOverflow::Ellipsis;
             env.text_in(box, r.label, o);
-            y += row_height();
         }
     }
 
@@ -14477,8 +14739,10 @@ public:
             size_t i = visible_[size_t(vi)];
             float chev_x = bounds.x + 6 + float(rows_[i].depth) * 16.f;
             if (rows_[i].expandable && e.pos.x < chev_x + 14.f) {
-                expanded_[i] = !expanded_[i];
+                bool open = !expanded_[i];
+                expanded_[i] = open;
                 visible_valid_ = false;
+                if (on_toggle_) on_toggle_(i, open);
                 return true;
             }
             selected_ = long(i);
@@ -14490,58 +14754,100 @@ public:
 
     const char* widget_type() const override { return "TreeView"; }
 
-    void theme_changed() override { metrics_valid_ = false; } // scale/font may have changed
+    // Per row: the row's tooltip; else its full label when the row shows it
+    // cut off with "..."; else the widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long vi = bounds.contains(pos) ? row_at(pos.y) : -1;
+        if (vi < 0) return Widget::tooltip_at(pos);
+        size_t i = visible_[size_t(vi)];
+        const Row& r = rows_[i];
+        if (!r.tooltip.empty()) return r.tooltip;
+        if (label_elided(i)) return r.label;
+        return Widget::tooltip_at(pos);
+    }
+
+    void theme_changed() override { metrics_scale_ = 0; } // scale/font may have changed
 
 private:
     float row_height() const { return 24.f; }
     long row_at(float y) const {
+        refresh_visible();
         long r = long(std::floor((y - bounds.y) / row_height()));
         return (r >= 0 && r < long(visible_.size())) ? r : -1;
     }
 
-    // Natural width (logical px): widest indent + label. Recomputed when
-    // the rows or the UI scale change.
-    void refresh_metrics() const {
-        if (!ctx) return;
-        float sc = ui_scale();
-        if (metrics_valid_ && metrics_scale_ == sc) return;
-        natural_w_ = 40.f + (rows_.empty() ? 0.f
-                                           : float(rows_.back().depth) * 16.f);
-        for (const auto& r : rows_)
-            natural_w_ = std::fmax(natural_w_,
-                                   6.f + float(r.depth) * 16.f +
-                                       (r.expandable ? 16.f : 4.f) +
-                                       ctx->text_size(r.label).w);
-        metrics_valid_ = true;
-        metrics_scale_ = sc;
+    // Whether row i's label is wider than its box in paint (so drawn elided).
+    bool label_elided(size_t i) const {
+        if (!ctx) return false;
+        const Row& r = rows_[i];
+        float tx = 6.f + float(r.depth) * 16.f + (r.expandable ? 16.f : 4.f);
+        float avail = bounds.w - 4.f - tx;
+        float w = widths_[i] >= 0 && metrics_scale_ == ui_scale() ? widths_[i]
+                                                                  : ctx->text_size(r.label).w;
+        return w > avail + 0.01f;
     }
 
-    // Rows whose every ancestor is expanded, in display order.
+    // Natural width (logical px): the fixed width, or the widest visible
+    // row (indent + label). Each label is measured once - when its row is
+    // first visible - and again only after a UI scale change.
+    float natural_w() const {
+        if (fixed_w_ > 0) return fixed_w_;
+        if (!ctx) return 40.f;
+        float sc = ui_scale();
+        if (metrics_scale_ != sc) { // scale/font changed: re-measure
+            std::fill(widths_.begin(), widths_.end(), -1.f);
+            metrics_scale_ = sc;
+            natural_cache_ = -1;
+        }
+        if (natural_cache_ >= 0) return natural_cache_;
+        float w = 40.f;
+        for (size_t i : visible_) {
+            const Row& r = rows_[i];
+            if (widths_[i] < 0) widths_[i] = ctx->text_size(r.label).w;
+            w = std::fmax(w, 6.f + float(r.depth) * 16.f + (r.expandable ? 16.f : 4.f) +
+                                 widths_[i]);
+        }
+        natural_cache_ = w;
+        return w;
+    }
+
+    // Rows whose every ancestor is expanded, in display order, and each
+    // row's position among them (-1 = hidden).
     void refresh_visible() const {
         if (visible_valid_) return;
         visible_.clear();
+        vis_pos_.assign(rows_.size(), -1);
+        natural_cache_ = -1; // the widest visible row may have changed
         std::vector<bool> open_stack; // per-depth expansion of ancestors
         for (size_t i = 0; i < rows_.size(); ++i) {
-            int d = rows_[i].depth;
+            int d = std::max(rows_[i].depth, 0);
             if (size_t(d) > open_stack.size()) open_stack.resize(size_t(d), true);
             bool ancestors_open = true;
             for (int k = 0; k < d && ancestors_open; ++k)
                 ancestors_open = open_stack[size_t(k)];
             open_stack.resize(size_t(d));
             open_stack.push_back(expanded_[i]);
-            if (ancestors_open) visible_.push_back(i);
+            if (ancestors_open) {
+                vis_pos_[i] = long(visible_.size());
+                visible_.push_back(i);
+            }
         }
         visible_valid_ = true;
     }
 
     std::vector<Row> rows_;
     std::vector<bool> expanded_;
+    mutable std::vector<float> widths_; // measured label widths, -1 = not yet
     mutable std::vector<size_t> visible_;
-    mutable float natural_w_ = 0, metrics_scale_ = 0;
-    mutable bool metrics_valid_ = false, visible_valid_ = false;
+    mutable std::vector<long> vis_pos_;
+    mutable float metrics_scale_ = 0;
+    mutable float natural_cache_ = -1; // natural_w() result, -1 = stale
+    mutable bool visible_valid_ = false;
+    float fixed_w_ = 0;
     long selected_ = -1;
     long hovered_ = -1;
     std::function<void(size_t)> on_select_;
+    std::function<void(size_t, bool)> on_toggle_;
 };
 
 // ---------------------------------------------------------------------------
@@ -14590,8 +14896,12 @@ public:
                       {bounds.x + grid_w_, bounds.y + header_height()}, t.border, 1);
         paint_row(env, head_lays_, bounds.y, t.text_dim, true);
 
-        float y = bounds.y + header_height();
-        for (size_t r = 0; r < rows_.size(); ++r) {
+        // Only the rows inside the visible rect (fixed height: a division).
+        float top = bounds.y + header_height(), rh = row_height(), n = float(rows_.size());
+        size_t first = size_t(std::clamp(std::floor((env.visible_rect.y - top) / rh), 0.f, n));
+        size_t last = size_t(std::clamp(std::ceil((env.visible_rect.bottom() - top) / rh), 0.f, n));
+        for (size_t r = first; r < last; ++r) {
+            float y = top + float(r) * rh;
             if (long(r) == selected_) {
                 env.list.rect({bounds.x, y, grid_w_, row_height()},
                               t.accent.faded(.25f), 0);
@@ -14599,7 +14909,6 @@ public:
                 env.list.rect({bounds.x, y, grid_w_, row_height()}, t.surface_alt, 0);
             }
             paint_row(env, cell_lays_[r], y, t.text, false);
-            y += row_height();
         }
     }
 
@@ -14918,7 +15227,8 @@ public:
                         label_valid_ = false;
                     }
                     return true;
-                default: return false;
+                default: // typing keys: the text arrives as TextInput
+                    return !e.shortcut_mod() && is_text_key(e.key);
                 }
             }
             if (!focused) return false;
@@ -24916,16 +25226,37 @@ public:
 
 namespace slikui {
 
+// Draws a custom icon: `area` is the icon's square (logical px), `color` the
+// tint the button would give a built-in icon (theme / variant / disabled).
+using IconPainter = std::function<void(DrawList& list, Rect area, Color color)>;
+
 // ---------------------------------------------------------------------------
-// IconButton - small square button with an icon instead of text.
+// IconButton - small square button with an icon instead of text: a built-in
+// Icon, or any drawing via set_icon_painter.
 // ---------------------------------------------------------------------------
 class IconButton : public Widget {
 public:
     IconButton(Icon icon, std::string widget_id = {})
         : Widget(std::move(widget_id)), icon_(icon) {}
 
-    IconButton& set_icon(Icon i) { icon_ = i; return *this; }
+    // A built-in icon (drops a custom painter).
+    IconButton& set_icon(Icon i) {
+        icon_ = i;
+        painter_ = nullptr;
+        return *this;
+    }
     Icon icon() const { return icon_; }
+    // A custom icon, drawn instead of the built-in one - e.g. on the same
+    // 24x24 grid the built-ins use, scaled by area.w / 24:
+    //   btn.set_icon_painter([](DrawList& l, Rect a, Color c) {
+    //       paint_icon(l, Icon::Pin, a, c);           // reuse a built-in...
+    //       l.circle(a.center(), a.w * .1f, c);        // ...and add to it
+    //   });
+    IconButton& set_icon_painter(IconPainter p) {
+        painter_ = std::move(p);
+        return *this;
+    }
+    bool has_icon_painter() const { return bool(painter_); }
     IconButton& set_variant(Button::Variant v) { variant_ = v; return *this; }
     Button::Variant variant() const { return variant_; }
     IconButton& set_icon_px(float px) { icon_px_ = px; return *this; }
@@ -24952,10 +25283,10 @@ public:
             env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
 
         float side = std::fmin(bounds.w, bounds.h);
-        paint_icon(env.list, icon_,
-                   {bounds.center().x - side * .5f, bounds.center().y - side * .5f,
-                    side, side},
-                   enabled ? icon_color(t) : t.text_dim);
+        Rect area{bounds.center().x - side * .5f, bounds.center().y - side * .5f, side, side};
+        Color c = enabled ? icon_color(t) : t.text_dim;
+        if (painter_) painter_(env.list, area, c);
+        else paint_icon(env.list, icon_, area, c);
     }
 
     bool on_event(const Event& e) override {
@@ -25028,6 +25359,7 @@ private:
     }
 
     Icon icon_;
+    IconPainter painter_;
     Button::Variant variant_ = Button::Variant::Ghost;
     float icon_px_ = 16, pad_h_ = 7, pad_v_ = 5;
     Anim hover_{0, 0, 15}, pressed_{0, 0, 25};
@@ -25512,16 +25844,18 @@ private:
 
 // ---------------------------------------------------------------------------
 // FileBrowser - in-UI directory listing + name field on a Dialog shell.
-// Directories navigate on click; files land in the name field. Open/Save
-// commits through on_pick; Cancel closes. `..` navigates up.
+// Directories navigate on double-click; files land in the name field.
+// Open/Save commits through on_pick; Cancel closes. `..` navigates up.
+// Mode::Folder picks a directory instead: only folders are listed, there is
+// no name field, and Choose picks the selected folder (or, with none
+// selected, the one being shown).
 // ---------------------------------------------------------------------------
 class FileBrowser : public Dialog {
 public:
-    enum class Mode : std::uint8_t { Open, Save };
+    enum class Mode : std::uint8_t { Open, Save, Folder };
 
     FileBrowser(Mode mode, std::string title = {}, std::string widget_id = {})
-        : Dialog(title.empty() ? (mode == Mode::Open ? "Open" : "Save As")
-                               : std::move(title),
+        : Dialog(title.empty() ? default_title(mode) : std::move(title),
                  std::move(widget_id)),
           mode_(mode) {
         path_label_ = &content().add<Label>("");
@@ -25534,11 +25868,14 @@ public:
         name_ = &content().add<TextField>();
         name_->set_placeholder("file name");
         name_->on_submit([this](std::string_view) { commit(); });
+        name_->visible = mode_ != Mode::Folder; // a folder needs no name
         auto& buttons = content().add<Row>();
         buttons.set_gap(8);
         buttons.add<Spacer>();
         buttons.add<Button>("Cancel").on_click([this] { request_close(); });
-        open_button_ = &buttons.add<Button>(mode_ == Mode::Open ? "Open" : "Save");
+        open_button_ = &buttons.add<Button>(mode_ == Mode::Open   ? "Open"
+                                            : mode_ == Mode::Save ? "Save"
+                                                                  : "Choose");
         open_button_->set_variant(Button::Variant::Primary)
             .on_click([this] { commit(); });
         set_path(".");
@@ -25552,7 +25889,7 @@ public:
     std::string path() const { return path_.string(); }
     // Glob patterns (`*` and `?`, case-insensitive) a file name must match
     // one of, e.g. {"*.png", "*.jpg"}; empty (the default) lists every file.
-    // Directories are always listed.
+    // Directories are always listed (Folder mode lists nothing else).
     FileBrowser& set_filters(std::vector<std::string> patterns) {
         filters_ = std::move(patterns);
         refresh();
@@ -25568,11 +25905,22 @@ public:
     bool show_hidden() const { return show_hidden_; }
     // The selected file (path + name field); empty when nothing is chosen.
     // A file selected via list().set_selected() counts as chosen.
+    // Folder mode: the selected folder, or the folder being shown when none
+    // (or "..") is selected - never empty.
     std::string selection() const {
+        if (mode_ == Mode::Folder) {
+            long i = list_->selected();
+            if (i >= 0 && size_t(i) < entries_.size() && entries_[size_t(i)] != "..") {
+                const std::string& d = entries_[size_t(i)];
+                return (path_ / d.substr(0, d.size() - 1)).lexically_normal().string();
+            }
+            return path_.string();
+        }
         sync_from_list();
         if (name_->text().empty()) return {};
         return (path_ / name_->text()).lexically_normal().string();
     }
+    Mode mode() const { return mode_; }
     FileBrowser& on_pick(std::function<void(std::string)> f) {
         on_pick_ = std::move(f);
         return *this;
@@ -25583,7 +25931,14 @@ public:
     Button& open_button() { return *open_button_; }
     // Pick the current selection (as the Open/Save button does). False when
     // nothing is chosen; a selected directory is entered instead.
+    // Folder mode always picks (see selection()).
     bool commit() {
+        if (mode_ == Mode::Folder) {
+            std::string sel = selection();
+            if (on_pick_) on_pick_(sel);
+            request_close();
+            return true;
+        }
         sync_from_list();
         if (name_->text().empty()) {
             long i = list_->selected();
@@ -25637,6 +25992,10 @@ public:
 private:
     static constexpr float kListHeight = 320.f, kMinListHeight = 48.f;
 
+    static const char* default_title(Mode m) {
+        return m == Mode::Open ? "Open" : m == Mode::Save ? "Save As" : "Choose Folder";
+    }
+
     static bool glob_match(std::string_view pat, std::string_view name) {
         auto lower = [](char ch) {
             return (ch >= 'A' && ch <= 'Z') ? char(ch - 'A' + 'a') : ch;
@@ -25681,7 +26040,7 @@ private:
             if (!show_hidden_ && !name.empty() && name[0] == '.') continue;
             bool dir = it.is_directory(ec);
             if (dir) dirs.push_back(name + "/");
-            else if (passes_filter(name)) files.push_back(name);
+            else if (mode_ != Mode::Folder && passes_filter(name)) files.push_back(name);
         }
         std::sort(dirs.begin(), dirs.end());
         std::sort(files.begin(), files.end());
@@ -25702,6 +26061,7 @@ private:
     // A selected file fills the name field; a directory leaves it alone.
     void entry_selected(long i) {
         synced_sel_ = i;
+        if (mode_ == Mode::Folder) return; // no name field
         if (i < 0 || size_t(i) >= entries_.size() || is_dir_[size_t(i)]) return;
         name_->set_text(entries_[size_t(i)]);
     }
@@ -25724,6 +26084,7 @@ private:
     // Keep the name field in step with a selection made through list()
     // directly (set_selected does not fire on_select).
     void sync_from_list() const {
+        if (mode_ == Mode::Folder) return;
         long i = list_->selected();
         if (i == synced_sel_) return;
         synced_sel_ = i;
@@ -27705,7 +28066,7 @@ private:
 // Keep the three #define lines in this exact form: those parsers rely on it.
 
 #define SLIKUI_VERSION_MAJOR 0
-#define SLIKUI_VERSION_MINOR 5
+#define SLIKUI_VERSION_MINOR 6
 #define SLIKUI_VERSION_PATCH 0
 
 #define SLIKUI_VERSION_STR_(x) #x

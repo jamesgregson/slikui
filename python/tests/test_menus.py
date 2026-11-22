@@ -351,3 +351,26 @@ def test_shortcut_label_format():
     assert slikui.shortcut_label(slikui.Key.S, MOD_SHORTCUT | SHIFT) == f"{name}+Shift+S"
     assert slikui.shortcut_label(slikui.Key.F5, 0) == "F5"
     assert slikui.shortcut_label(slikui.Key.Left, 0).isascii()
+
+
+def test_icon_button_custom_painter():
+    # geetar #32: custom icons for IconButton. A painter that draws the
+    # built-in Pin matches set_icon(Pin) pixel for pixel - its drawing lands
+    # in the frame - and a painter can add to a built-in.
+    frames = []
+    for mode in ("builtin", "painter", "badge"):
+        ui, root = make_ui(120, 80)
+        btn = root.add(slikui.IconButton, slikui.Icon.Pin)
+        if mode != "builtin":
+            def painter(lst, area, color, badge=(mode == "badge")):
+                slikui.paint_icon(lst, slikui.Icon.Pin, area, color)
+                if badge:
+                    lst.circle(slikui.Vec2(area.x + area.w * .85, area.y + area.h * .15),
+                               area.w * .15, slikui.Color(255, 0, 0, 255))
+            btn.set_icon_painter(painter)
+            assert btn.has_icon_painter
+        ui.tick(0.0, 1 / 60)
+        frames.append(ui.render().copy())
+    assert (frames[0] == frames[1]).all()
+    assert (frames[0] != frames[2]).any()
+    assert slikui.icon_name(slikui.Icon.MoreHorizontal) == "more_horizontal"

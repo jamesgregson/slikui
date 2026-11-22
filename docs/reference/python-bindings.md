@@ -239,6 +239,13 @@ the tree destroys one (`remove`, `clear_children`, `App.close()`), using an
 old wrapper raises `TypeError` (with a "nanobind: attempted to access an
 uninitialized instance" `RuntimeWarning`) instead of touching freed memory.
 
+## Threads and the GIL
+
+`Context.tick`, `render` and `handle` release the GIL for the C++ part of the
+frame, so other Python threads aren't starved. Python overrides, callbacks and
+a Python `RenderSink` take the GIL back when they're called. Touch widgets
+only from the UI thread; see [Threading](../guide/core-concepts.md#threading).
+
 ## Versions, wheels, sources
 
 - PyPI: `pip install slikui-python` - wheels for Python 3.10-3.14 on Linux

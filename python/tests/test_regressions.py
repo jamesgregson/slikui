@@ -911,3 +911,454 @@ def test_keypad_keys():
     assert hits == ["+"]
     assert slikui.shortcut_label(K.Kp0, slikui.Mod.ModCtrl) == "Ctrl+Num0"
     ui.close()
+
+
+# --- #31: TreeView cost follows the rows on screen, not the row count --------
+
+def test_text_measure_cost_does_not_grow_with_distinct_strings():
+    # Issue #31: once the layout cache held 4096 entries, every new string
+    # rescanned it, so measuring cost grew linearly with the distinct strings
+    # seen (0.4 ms -> 70 ms per 200 labels). Loose bound: no timing flakes.
+    import time
+    R = slikui.TreeView.Row
+    ui = slikui.App(400, 300)
+    tv = ui.set_root(slikui.Column).add(slikui.TreeView)
+    ui.tick(0, 0.1)
+    batches = []
+    for k in range(6):
+        tv.set_rows([R(f"probe {k} {i}") for i in range(200)])
+        t = time.perf_counter()
+        ui.tick(0, 0.1)
+        batches.append(time.perf_counter() - t)
+        tv.set_rows([R(f"fill {k} {i}") for i in range(5000)])
+        ui.tick(0, 0.1)
+    assert min(batches[-2:]) < 10 * min(batches[:2]) + 0.005, batches
+    ui.close()
+
+
+def test_treeview_initial_expansion_toggle_and_natural_width():
+    # Issue #31: Row.expanded sets the initial state (rebuilds keep groups
+    # closed), arrow clicks report on_toggle, set_natural_width skips measuring.
+    R = slikui.TreeView.Row
+    ui = slikui.App(320, 240)
+    tv = ui.set_root(slikui.Column).add(slikui.TreeView)
+    tv.set_rows([R("Group", 0, True, expanded=False), R("child " * 20, 1), R("Other")])
+    toggles = []
+    tv.on_toggle(lambda i, is_open: toggles.append((i, is_open)))
+    ui.tick(0, 0.1)
+    assert not tv.expanded(0) and tv.visible_count == 2
+    tv.set_expanded(0, True)
+    assert toggles == []  # programmatic changes don't fire
+    ui.tick(0.1, 0.1)
+    pos = (tv.bounds.x + 8, tv.bounds.y + 12)
+    ui.handle(slikui.mouse_press(pos))
+    ui.handle(slikui.mouse_release(pos))
+    assert toggles == [(0, False)]
+    assert tv.set_natural_width(90).natural_width == 90
+    ui.close()
+
+
+def test_paint_env_visible_rect_and_big_tree_first_frame():
+    # Issue #31: a 40k-row tree (8k visible) took seconds on its first frame.
+    # PaintEnv.visible_rect also reaches Python paint() overrides.
+    import time
+
+    class Probe(slikui.Widget):
+        seen = None
+
+        def measure(self, c):
+            return c.clamp(slikui.Size(50, 40))
+
+        def paint(self, env):
+            Probe.seen = env.visible_rect
+
+    R = slikui.TreeView.Row
+    ui = slikui.App(800, 600)
+    sa = ui.set_root(slikui.Column).add(slikui.ScrollArea, expand=True)
+    sa.content.add(Probe)
+    tv = sa.content.add(slikui.TreeView)
+    rows = []
+    for a in range(8000):
+        rows.append(R(f"Artist {a} ({a % 7 + 1})", 0, True, expanded=False))
+        rows.extend(R(f"Piece {a}-{p}", 1) for p in range(4))
+    ui.tick(0, 0.1)
+    tv.set_rows(rows)
+    t = time.perf_counter()
+    ui.tick(0.1, 0.1)
+    ui.render()
+    assert time.perf_counter() - t < 1.0  # was ~10 s; now tens of ms
+    assert tv.visible_count == 8000
+    assert Probe.seen.y == sa.bounds.y and Probe.seen.h == sa.bounds.h
+    ui.close()
+
+
+# --- #33: a focused text field keeps the KeyPress of what it types -----------
+
+def test_focused_field_consumes_typing_keys_and_types_one_space():
+    # Issue #33: typing "g" in the library search also ran the app's G
+    # shortcut (mute). Also: one Space keystroke inserted two spaces.
+    K = slikui.Key
+    seen = []
+
+    class KeyRoot(slikui.Column):
+        def on_event(self, e):
+            if e.type == slikui.EventType.KeyPress:
+                seen.append(e.key)
+            return False
+
+    ui = slikui.App(320, 240)
+    root = ui.set_root(KeyRoot)
+    field = root.add(slikui.TextField)
+    area = root.add(slikui.TextArea)
+    ui.tick(0, 0.1)
+    for w in (field, area):
+        w.request_focus()
+        for key, ch in ((K.G, "g"), (K.Space, " "), (K.Period, ".")):
+            ui.handle(slikui.key_press(key))
+            ui.handle(slikui.text_input(ch))
+        assert seen == []
+        ui.handle(slikui.key_press(K.S, "ctrl"))  # chords still reach the app
+        assert seen == [K.S]
+        seen.clear()
+    assert field.text == "g ."
+    assert area.text == "g ."  # TextArea.text is readable from Python now
+    area.text = "reset"
+    assert area.text == "reset"
+    ui.close()
+
+
+# --- #27: tick / render / handle release the GIL --------------------------------
+
+def test_other_threads_run_during_a_long_frame():
+    # Issue #27: the bindings held the GIL for the whole frame, starving
+    # other Python threads (an audio callback dropped Bluetooth packets).
+    import threading
+    import time
+    R = slikui.TreeView.Row
+    ui = slikui.App(400, 300)
+    tv = ui.set_root(slikui.Column).add(slikui.TreeView)
+    ui.tick(0, 0.1)
+    tv.set_rows([R(f"label {i}") for i in range(100_000)])  # ~100k measures
+
+    counter = [0]
+    stop = threading.Event()
+
+    def spin():
+        while not stop.is_set():
+            counter[0] += 1
+
+    th = threading.Thread(target=spin)
+    th.start()
+    try:
+        time.sleep(0.02)  # let the thread get going
+        before = counter[0]
+        t = time.perf_counter()
+        ui.tick(0.1, 0.1)  # pure C++ work: measuring every visible label
+        elapsed = time.perf_counter() - t
+        during = counter[0] - before
+    finally:
+        stop.set()
+        th.join()
+    # With the GIL held the thread could not run at all during the tick.
+    assert during > 1000, (during, elapsed)
+    ui.close()
+
+
+def test_python_reentry_from_released_frame_under_thread_pressure():
+    # Every way a GIL-released frame calls back into Python - overrides,
+    # callbacks, a Python RenderSink, popups the tree destroys - while
+    # another thread churns the allocator and the GC.
+    import gc
+    import threading
+    from slikui._slikui import Context
+
+    class Sink(slikui.RenderSink):
+        frames = 0
+
+        def upload(self, up):
+            pass
+
+        def release(self, tex_id):
+            pass
+
+        def render(self, cmds, size):
+            Sink.frames += 1
+            cmds.as_array().copy()
+
+    class Probe(slikui.Widget):
+        painted = 0
+
+        def measure(self, c):
+            return c.clamp(slikui.Size(40, 20))
+
+        def paint(self, env):
+            Probe.painted += 1
+            env.list.rect(self.bounds, env.theme.accent)
+
+    class Pop(slikui.Panel):
+        def on_event(self, e):
+            return False
+
+    stop = threading.Event()
+
+    def churn():
+        while not stop.is_set():
+            [object() for _ in range(200)]
+            gc.collect(0)
+
+    sink = Sink()
+    ctx = Context(sink)
+    ctx.set_frame_size(200, 150)
+    ctx.load_default_font()
+    root = ctx.set_root(slikui.Column)
+    root.add(Probe)
+    clicks = []
+    btn = root.add(slikui.Button, "go", on_click=lambda: clicks.append(1))
+    th = threading.Thread(target=churn)
+    th.start()
+    try:
+        for i in range(60):
+            ctx.tick(i / 60, 1 / 60)
+            c = btn.bounds
+            pos = (c.x + c.w / 2, c.y + c.h / 2)
+            ctx.handle(slikui.mouse_press(pos))
+            ctx.handle(slikui.mouse_release(pos))
+            ctx.push_popup(Pop(), slikui.Vec2(5, 5))  # a temporary is fine now
+            ctx.render()
+            ctx.close_popups()  # Python-subclass popup destroyed by the tree
+    finally:
+        stop.set()
+        th.join()
+    assert len(clicks) == 60
+    assert Probe.painted >= 60 and Sink.frames == 60
+    ctx.clear_tree()
+
+
+# --- #28: record drawing once, replay it with one call ------------------------
+
+def _scene(lst, x, y, theme):
+    for i in range(40):  # a "static" drawing: grid lines and dots
+        lst.line(Vec2(x + i * 5, y), Vec2(x + i * 5, y + 60), theme.border, 1)
+        lst.circle(Vec2(x + i * 5, y + 30), 2, theme.accent)
+    lst.push_clip(Rect(x, y, 100, 20))
+    lst.rect(Rect(x, y, 300, 40), theme.text)  # clipped to 100x20
+    lst.pop_clip()
+
+
+def test_drawlist_replay_matches_direct_drawing():
+    # Issue #28: widgets with rarely-changing drawing re-issued every command
+    # through Python each frame. Now: record once, env.list.append(rec, offset).
+    class Direct(slikui.Widget):
+        def measure(self, c):
+            return c.clamp(slikui.Size(220, 70))
+
+        def paint(self, env):
+            _scene(env.list, self.bounds.x, self.bounds.y, env.theme)
+
+    class Replayed(Direct):
+        rec = None
+
+        def paint(self, env):
+            if Replayed.rec is None:  # record at the origin, once
+                Replayed.rec = slikui.DrawList()
+                _scene(Replayed.rec, 0, 0, env.theme)
+            env.list.append(Replayed.rec, Vec2(self.bounds.x, self.bounds.y))
+
+    frames = []
+    for cls in (Direct, Replayed):
+        ui = slikui.App(260, 100)
+        ui.set_root(slikui.Column, padding=12).add(cls)
+        frames.append(frame(ui))
+        ui.close()
+    assert (frames[0] == frames[1]).all()
+    assert len(np.unique(frames[0])) > 2  # it actually drew something
+
+
+def test_drawlist_extend_round_trips_and_validates():
+    theme = slikui.Theme()
+    rec = slikui.DrawList()
+    _scene(rec, 0, 0, theme)
+    arr = rec.as_array().copy()
+
+    out = slikui.DrawList()
+    out.extend(arr, Vec2(10, 20))
+    assert len(out) == len(rec) and out.clip_balanced
+    got = out.as_array()
+    assert np.allclose(got["rect"][:, :2], arr["rect"][:, :2] + [10, 20])
+    assert (got["rect"][:, 2:] == arr["rect"][:, 2:]).all()
+    assert (got["color"] == arr["color"]).all()
+
+    bad = arr.copy()
+    bad["type"][0] = 200
+    with pytest.raises(ValueError, match="command type"):
+        out.extend(bad)
+    with pytest.raises(ValueError, match="unbalanced"):
+        out.extend(arr[:-1])  # drops the final pop_clip
+    with pytest.raises(TypeError, match="DRAWCMD_DTYPE"):
+        out.extend(np.zeros(4, np.float32))
+    assert len(out) == len(rec)  # failed calls append nothing
+
+
+def test_drawlist_replay_is_much_faster_than_reissuing():
+    import time
+    theme = slikui.Theme()
+    rec = slikui.DrawList()
+    for _ in range(25):
+        _scene(rec, 0, 0, theme)  # ~2000 commands
+    t = time.perf_counter()
+    for _ in range(20):
+        lst = slikui.DrawList()
+        for _ in range(25):
+            _scene(lst, 5, 5, theme)
+    reissue = time.perf_counter() - t
+    t = time.perf_counter()
+    for _ in range(20):
+        lst = slikui.DrawList()
+        lst.append(rec, Vec2(5, 5))
+    replay = time.perf_counter() - t
+    assert replay * 10 < reissue, (replay, reissue)
+
+
+# --- Label alignment, Segmented fill ---------------------------------------------
+
+def test_label_align_valign_from_python():
+    ui = slikui.App(320, 200)
+    root = ui.set_root(slikui.Column)
+    lab = root.add(slikui.Label, "Hi", align="center", valign="middle")
+    ui.tick(0, 0.1)
+    assert lab.align == slikui.TextAlign.Center
+    assert lab.valign == slikui.TextVAlign.Middle
+    lab.set_align(slikui.TextAlign.Right)
+    assert lab.align == slikui.TextAlign.Right
+    with pytest.raises(ValueError, match="align must be one of"):
+        lab.set_align("middle")
+    ui.close()
+
+
+def test_segmented_fill_spans_the_sidebar():
+    # geetar: the sidebar's Curriculum/Library/Tools control hugged the left
+    # and couldn't fill the sidebar.
+    ui = slikui.App(400, 120)
+    root = ui.set_root(slikui.Column)
+    seg = root.add(slikui.Segmented, fill=True)
+    seg.set_items(["Curriculum", "Library", "Tools"])
+    ui.tick(0, 0.1)
+    assert seg.fill
+    assert seg.bounds.w == root.bounds.w
+    widths = [seg.segment_rect(i).w for i in range(3)]
+    assert max(widths) - min(widths) < 0.01
+    ui.close()
+
+
+def test_filebrowser_folder_mode(tmp_path):
+    # Issue #18: no folder mode, so File > Import folder... couldn't use it.
+    (tmp_path / "rock" / "live").mkdir(parents=True)
+    (tmp_path / "jazz").mkdir()
+    _touch(tmp_path, "a.gp5")
+    ui = slikui.App(640, 480)
+    ui.set_root(slikui.Column)
+    dlg = slikui.FileBrowser(slikui.FileBrowser.Mode.Folder)
+    dlg.set_path(str(tmp_path))
+    picks = []
+    dlg.on_pick(picks.append)
+    ui.ctx.open_dialog(dlg)
+    ui.tick(0, 0.1)
+    assert dlg.mode == slikui.FileBrowser.Mode.Folder
+    assert not dlg.name_field.visible
+    assert dlg.selection() == str(tmp_path)  # nothing selected: this folder
+    # "..", jazz/, rock/ - no files. Double-click rock/ to enter it.
+    lst = dlg.list
+    r = lst.row_rect(2)
+    pos = (r.x + 20, r.y + r.h / 2)
+    for _ in range(2):  # fixed clock: the second press is a double-click
+        ui.handle(slikui.mouse_press(pos))
+        ui.handle(slikui.mouse_release(pos))
+    ui.tick(0, 0.1)
+    assert dlg.path == str(tmp_path / "rock")
+    lst.set_selected(1)  # live/
+    assert dlg.commit()
+    assert picks == [str(tmp_path / "rock" / "live")]
+    ui.close()
+
+
+# --- push_popup / open_dialog with a temporary widget ------------------------
+
+def test_temporary_popup_and_dialog_stay_alive_while_open():
+    # push_popup used to borrow its widget: `ctx.push_popup(P(), ...)` - as in
+    # geetar's #29 repro - freed P at once and the next frame read freed
+    # memory. The context now keeps the widget alive while it is open.
+    import gc
+    freed = []
+
+    class Pop(slikui.Panel):
+        def __del__(self):
+            freed.append("popup")
+
+    class Dlg(slikui.Dialog):
+        def __del__(self):
+            freed.append("dialog")
+
+    ui = slikui.App(300, 200)
+    root = ui.set_root(slikui.Column)
+    btn = root.add(slikui.Button, "anchor")
+    ui.tick(0, 0.1)
+    ui.ctx.push_popup(Pop(), btn, slikui.PopupDir.Below)  # temporaries
+    ui.ctx.open_dialog(Dlg("title"))
+    for i in range(5):
+        gc.collect()
+        ui.tick(i * 0.1, 0.1)
+        ui.render()
+    assert freed == [] and ui.ctx.popup_count == 1 and ui.ctx.dialog_count == 1
+
+    ui.ctx.close_popups()
+    ui.ctx.close_dialog(ui.ctx.dialog(0))
+    ui.tick(1, 0.1)  # released at the next safe point
+    gc.collect()
+    assert sorted(freed) == ["dialog", "popup"]
+    ui.close()
+
+
+# --- #34: tooltips follow changes; per-row tooltips -----------------------------
+
+def _hover(ui, pos, t0, secs):
+    ui.handle(slikui.mouse_move(pos))
+    t = t0
+    while t < t0 + secs:
+        t += 0.05
+        ui.tick(t, 0.05)
+    return t
+
+
+def test_treeview_row_tooltips_and_python_tooltip_at():
+    R = slikui.TreeView.Row
+    long_label = "x" * 120
+    ui = slikui.App(320, 240)
+    root = ui.set_root(slikui.Column)
+    tv = root.add(slikui.TreeView)
+    tv.set_natural_width(100)
+    tv.set_rows([R("short", tooltip="explicit tip"), R(long_label), R("fits")])
+    ui.tick(0, 0.1)
+    row = lambda r: (tv.bounds.x + 60, tv.bounds.y + 24 * r + 12)
+    t = _hover(ui, row(0), 0, 0.8)
+    assert ui.ctx.tooltip_text == "explicit tip"
+    t = _hover(ui, row(1), t, 0.1)  # next row: swapped at once
+    assert ui.ctx.tooltip_text == long_label
+    t = _hover(ui, row(2), t, 0.1)  # fits, and no widget tooltip: closes
+    assert ui.ctx.tooltip_text == "" and ui.ctx.popup_count == 0
+    ui.close()
+
+    class Halves(slikui.Widget):
+        def measure(self, c):
+            return c.clamp(slikui.Size(200, 40))
+
+        def tooltip_at(self, pos):
+            return "left" if pos.x < self.bounds.x + self.bounds.w / 2 else "right"
+
+    ui = slikui.App(300, 100)
+    w = ui.set_root(slikui.Column).add(Halves)
+    ui.tick(0, 0.1)
+    t = _hover(ui, (w.bounds.x + 20, w.bounds.y + 20), 0, 0.8)
+    assert ui.ctx.tooltip_text == "left"
+    _hover(ui, (w.bounds.x + 180, w.bounds.y + 20), t, 0.1)
+    assert ui.ctx.tooltip_text == "right"
+    ui.close()

@@ -167,6 +167,114 @@ TEST(textfield_typing_and_editing) {
     CHECK(field.text() == "h");
 }
 
+// A root that records every KeyPress bubbling up to it - an app's
+// on_event-based shortcuts.
+struct KeyCatcher : slikui::Column {
+    std::vector<slikui::Key> seen;
+    bool on_event(const slikui::Event& e) override {
+        if (e.type == slikui::Event::Type::KeyPress) seen.push_back(e.key);
+        return false;
+    }
+};
+
+TEST(focused_text_widgets_consume_typing_keys) {
+    // geetar #33: typing "g" into a search field also ran the app's G
+    // shortcut, and a Space keystroke inserted two spaces (KeyPress + TextInput).
+    using slikui::Key;
+    Fixture f;
+    auto& root = f.ctx.set_root<KeyCatcher>();
+    auto& field = root.add<slikui::TextField>();
+    auto& area = root.add<slikui::TextArea>();
+    auto& drag = root.add<slikui::DragValue>(0.f);
+    f.frame();
+
+    // Each typed character arrives as KeyPress + TextInput, like the backends.
+    auto type = [&](Key k, char ch) {
+        f.ctx.handle(f.key(k));
+        slikui::Event t{};
+        t.type = slikui::Event::Type::TextInput;
+        t.codepoint = std::uint32_t(ch);
+        f.ctx.handle(t);
+    };
+
+    for (slikui::Widget* w : {static_cast<slikui::Widget*>(&field),
+                              static_cast<slikui::Widget*>(&area)}) {
+        f.ctx.set_focus(w);
+        root.seen.clear();
+        type(Key::G, 'g');
+        type(Key::Space, ' ');
+        type(Key::Minus, '-');
+        type(Key::Num1, '1');
+        f.ctx.handle(f.key(Key::Kp2)); // keypad, typing nothing here
+        CHECK(root.seen.empty());
+        // Chords and non-typing keys still reach the app.
+        f.ctx.handle(f.key(Key::S, slikui::ModCtrl));
+        f.ctx.handle(f.key(Key::F5));
+        CHECK(root.seen.size() == 2);
+    }
+    CHECK(field.text() == "g -1"); // one space per Space keystroke
+    CHECK(area.text() == "g -1");
+
+    // DragValue while editing its number: digits and '-' are typing too.
+    f.ctx.set_focus(nullptr);
+    slikui::Vec2 c = drag.bounds.center();
+    f.ctx.handle(f.mouse(slikui::Event::Type::MousePress, c.x, c.y));
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseRelease, c.x, c.y)); // click = edit
+    root.seen.clear();
+    type(Key::Minus, '-');
+    type(Key::Num2, '2');
+    CHECK(root.seen.empty());
+    f.ctx.handle(f.key(Key::Enter));
+    CHECK(drag.value() == -2.f);
+}
+
+TEST(segmented_fill_spans_the_parent_and_evens_out) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& hug = root.add<slikui::Segmented>();
+    hug.set_items({"Curriculum", "Library", "Tools"});
+    auto& fill = root.add<slikui::Segmented>();
+    fill.set_items({"Curriculum", "Library", "Tools"}).set_fill();
+    auto& row = root.add<slikui::Row>();
+    row.add<slikui::Button>("Go");
+    auto& in_row = row.add<slikui::Segmented>();
+    in_row.set_items({"A", "B"}).set_fill();
+    f.frame();
+
+    // Default: hugs its labels, each segment at its natural width.
+    CHECK(hug.bounds.w < 300.f);
+    CHECK(hug.segment_rect(0).w > hug.segment_rect(2).w);
+
+    // Fill: the column's whole width, shared equally (every label fits).
+    CHECK(fill.bounds.w == root.bounds.w);
+    float w0 = fill.segment_rect(0).w;
+    CHECK(std::fabs(fill.segment_rect(1).w - w0) < 0.01f);
+    CHECK(std::fabs(fill.segment_rect(2).w - w0) < 0.01f);
+    CHECK(std::fabs(fill.segment_rect(2).right() - fill.bounds.right()) < 0.01f);
+    CHECK(fill.bounds.h == 26.f);
+
+    // In a Row: takes the leftover width, keeps its height.
+    CHECK(in_row.bounds.right() > row.bounds.right() - 1.f);
+    CHECK(in_row.bounds.w > 150.f);
+    CHECK(in_row.bounds.h == 26.f);
+    CHECK(fill.segment_rect(3).empty());
+}
+
+TEST(segmented_fill_keeps_wide_labels_natural) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& seg = root.add<slikui::Segmented>();
+    seg.set_items({"A much longer segment label", "B", "C"}).set_fill();
+    f.frame();
+    // The long label needs more than a third: it keeps its natural width,
+    // the short ones split the rest equally.
+    float natural0 = f.ctx.text_size("A much longer segment label").w + 24.f;
+    CHECK(std::fabs(seg.segment_rect(0).w - natural0) < 0.5f);
+    CHECK(std::fabs(seg.segment_rect(1).w - seg.segment_rect(2).w) < 0.01f);
+    CHECK(seg.segment_rect(1).w > f.ctx.text_size("B").w + 24.f);
+    CHECK(std::fabs(seg.segment_rect(2).right() - seg.bounds.right()) < 0.01f);
+}
+
 TEST(dropdown_opens_and_dismisses) {
     Fixture f;
     auto& root = f.ctx.set_root<slikui::Column>();
@@ -609,6 +717,96 @@ TEST(tooltip_shows_after_hover_delay) {
     // Moving the pointer away dismisses it (bottom-left: outside the button).
     f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, 5.f, 200.f));
     CHECK(!f.ctx.has_popups());
+}
+
+TEST(shown_tooltip_follows_set_tooltip) {
+    // geetar #34: a showing tooltip ignored set_tooltip until the pointer left.
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& btn = root.add<slikui::Button>("hover me").set_tooltip("first");
+    f.frame();
+    slikui::Vec2 c = btn.bounds.center();
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, c.x, c.y));
+    double now = 0;
+    auto run = [&](double secs) {
+        for (double t = 0; t < secs; t += 0.016) {
+            now += 0.016;
+            f.ctx.tick(slikui::Time{now, 0.016});
+        }
+    };
+    run(0.8);
+    CHECK(f.ctx.tooltip_text() == "first");
+    btn.set_tooltip("second");
+    run(0.05);
+    CHECK(f.ctx.tooltip_text() == "second"); // swapped at once
+    CHECK(f.ctx.popup_count() == 1);
+    btn.set_tooltip("");
+    run(0.05);
+    CHECK(f.ctx.tooltip_text().empty());
+    CHECK(!f.ctx.has_popups());
+    btn.set_tooltip("third"); // no tooltip up: the delay applies again
+    run(0.3);
+    CHECK(!f.ctx.has_popups());
+    run(0.5);
+    CHECK(f.ctx.tooltip_text() == "third");
+    // Closed by the app: stays closed while the text is the same.
+    f.ctx.close_popups();
+    run(1.0);
+    CHECK(!f.ctx.has_popups());
+}
+
+TEST(treeview_row_tooltips_and_elided_labels) {
+    // geetar #34: per-row tooltips; an elided row shows its full label.
+    Fixture f; // 320 wide
+    auto& root = f.ctx.set_root<slikui::Column>();
+    auto& tree = root.add<slikui::TreeView>().set_natural_width(100);
+    tree.set_tooltip("the tree");
+    const std::string long_label =
+        "a very long row label that cannot possibly fit in a 320 px wide tree view";
+    slikui::TreeView::Row tipped{"short", 0};
+    tipped.tooltip = "explicit tip";
+    tree.set_rows({tipped, {long_label, 0}, {"fits", 0}});
+    f.frame();
+    auto at_row = [&](int r) {
+        return slikui::Vec2{tree.bounds.x + 60, tree.bounds.y + 24.f * float(r) + 12};
+    };
+    CHECK(tree.tooltip_at(at_row(0)) == "explicit tip");
+    CHECK(tree.tooltip_at(at_row(1)) == long_label);
+    CHECK(tree.tooltip_at(at_row(2)) == "the tree"); // fits: the widget's tip
+
+    // Moving between rows swaps the showing tooltip without the delay.
+    double now = 0;
+    auto run = [&](double secs) {
+        for (double t = 0; t < secs; t += 0.016) {
+            now += 0.016;
+            f.ctx.tick(slikui::Time{now, 0.016});
+        }
+    };
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, at_row(0).x, at_row(0).y));
+    run(0.8);
+    CHECK(f.ctx.tooltip_text() == "explicit tip");
+    f.ctx.handle(f.mouse(slikui::Event::Type::MouseMove, at_row(1).x, at_row(1).y));
+    run(0.05);
+    CHECK(f.ctx.tooltip_text() == long_label);
+    CHECK(f.ctx.popup_count() == 1);
+}
+
+TEST(listview_and_segmented_tip_elided_items) {
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Column>();
+    const std::string long_item =
+        "an item far too long for a list squeezed into a 320 pixel frame at all";
+    auto& list = root.add<slikui::ListView>().set_items({"fits", long_item});
+    auto& row = root.add<slikui::Row>();
+    auto& seg = row.add<slikui::Segmented>();
+    seg.set_items({"Curriculum", "Library", "Tools"});
+    f.frame();
+    CHECK(list.tooltip_at(list.row_rect(0).center()).empty());
+    CHECK(list.tooltip_at(list.row_rect(1).center()) == long_item);
+    CHECK(seg.tooltip_at(seg.segment_rect(0).center()).empty()); // natural width
+    // Squeezed: the long label elides and tips its full text.
+    seg.arrange({seg.bounds.x, seg.bounds.y, 120, seg.bounds.h});
+    CHECK(seg.tooltip_at(seg.segment_rect(0).center()) == "Curriculum");
 }
 
 TEST(single_paint_per_widget) {

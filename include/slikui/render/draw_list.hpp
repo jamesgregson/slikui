@@ -82,10 +82,25 @@ public:
     void push_clip(Rect r) { push({DrawCmd::Type::ClipPush, r}); }
     void pop_clip() { push({DrawCmd::Type::ClipPop, {}}); }
 
-    // Appends `other`, offsetting geometry by `offset` (keeps one list per frame).
-    void append(const DrawList& other, Vec2 offset) {
-        for (const auto& c : other.commands()) {
-            DrawCmd copy = c;
+    // Appends `other`, offsetting geometry by `offset` (keeps one list per
+    // frame). Replaying a recorded list this way is how a widget whose
+    // drawing rarely changes avoids re-issuing it command by command.
+    void append(const DrawList& other, Vec2 offset = {}) {
+        append(other.cmds_.data(), other.cmds_.size(), offset);
+    }
+    // Appends `n` commands, offsetting geometry by `offset`. (Every
+    // command's position is rect.x/rect.y - a Line's start point too - so
+    // the offset moves the whole command.)
+    void append(const DrawCmd* cmds, size_t n, Vec2 offset = {}) {
+        if (n && cmds >= cmds_.data() && cmds < cmds_.data() + cmds_.size()) {
+            // Our own commands (list.append(list)): growing would move them.
+            std::vector<DrawCmd> own(cmds, cmds + n);
+            append(own.data(), n, offset);
+            return;
+        }
+        cmds_.reserve(cmds_.size() + n);
+        for (size_t i = 0; i < n; ++i) {
+            DrawCmd copy = cmds[i];
             copy.rect.x += offset.x;
             copy.rect.y += offset.y;
             cmds_.push_back(copy);

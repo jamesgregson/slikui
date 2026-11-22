@@ -112,6 +112,45 @@ TEST(popup_anchor_flip_and_clamp) {
     f.ctx.close_popups();
 }
 
+TEST(hold_while_open_lives_until_the_popup_closes) {
+    // The Python bindings pin borrowed popups/dialogs with these holds, so a
+    // temporary passed to push_popup can't be freed while it is on screen.
+    Fixture f;
+    f.ctx.set_root<slikui::Column>();
+    slikui::Panel pop, dlg_body;
+    slikui::Dialog dlg("t");
+    auto token = std::make_shared<int>(1);
+    std::weak_ptr<int> alive = token;
+
+    f.ctx.push_popup(pop, slikui::Vec2{10, 10});
+    CHECK(f.ctx.hold_while_open(pop, std::move(token)));
+    CHECK(!f.ctx.hold_while_open(dlg_body, std::make_shared<int>(2))); // not open
+    f.frame();
+    CHECK(!alive.expired());
+
+    // Closed and re-pushed in the same pass (menus do this): handed back.
+    f.ctx.close_popups();
+    f.ctx.push_popup(pop, slikui::Vec2{10, 10});
+    f.frame();
+    CHECK(!alive.expired());
+
+    // Closed for real: released at the next safe point, not mid-call.
+    f.ctx.close_popups();
+    CHECK(!alive.expired());
+    f.frame();
+    CHECK(alive.expired());
+
+    // Dialogs too.
+    auto dtok = std::make_shared<int>(3);
+    std::weak_ptr<int> dalive = dtok;
+    f.ctx.open_dialog(dlg);
+    CHECK(f.ctx.hold_while_open(dlg, std::move(dtok)));
+    f.frame();
+    f.ctx.close_dialog(dlg);
+    f.frame();
+    CHECK(dalive.expired());
+}
+
 TEST(popup_stack_click_and_escape) {
     Fixture f;
     auto& root = f.ctx.set_root<slikui::Column>();
@@ -410,6 +449,37 @@ TEST(icon_painter_covers_all_icons) {
         CHECK(list.size() > 0); // every icon paints something
         CHECK(std::string(slikui::icon_name(icon)) != "unknown");
     }
+}
+
+TEST(icon_button_custom_painter) {
+    // geetar #32: no way to give an IconButton an icon outside the set.
+    Fixture f;
+    auto& root = f.ctx.set_root<slikui::Row>();
+    auto& btn = root.add<slikui::IconButton>(slikui::Icon::Play);
+    std::vector<std::pair<slikui::Rect, slikui::Color>> calls;
+    btn.set_icon_painter([&](slikui::DrawList& l, slikui::Rect a, slikui::Color c) {
+        calls.push_back({a, c});
+        l.circle(a.center(), a.w * .3f, c);
+    });
+    CHECK(btn.has_icon_painter());
+    f.frame();
+    REQUIRE(!calls.empty());
+    slikui::Rect a = calls.back().first;
+    CHECK(a.w == a.h && a.w > 0);
+    CHECK(std::fabs(a.center().x - btn.bounds.center().x) < 0.01f);
+    CHECK(calls.back().second == f.ctx.theme().text); // Ghost tint
+
+    // Disabled: the painter gets the dimmed color, like a built-in icon.
+    btn.enabled = false;
+    f.frame();
+    CHECK(calls.back().second == f.ctx.theme().text_dim);
+
+    // set_icon goes back to the built-in set.
+    size_t n = calls.size();
+    btn.set_icon(slikui::Icon::Stop);
+    f.frame();
+    CHECK(!btn.has_icon_painter());
+    CHECK(calls.size() == n);
 }
 
 TEST(icon_button_and_toolbar) {

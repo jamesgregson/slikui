@@ -431,16 +431,18 @@ private:
 
 // ---------------------------------------------------------------------------
 // FileBrowser - in-UI directory listing + name field on a Dialog shell.
-// Directories navigate on click; files land in the name field. Open/Save
-// commits through on_pick; Cancel closes. `..` navigates up.
+// Directories navigate on double-click; files land in the name field.
+// Open/Save commits through on_pick; Cancel closes. `..` navigates up.
+// Mode::Folder picks a directory instead: only folders are listed, there is
+// no name field, and Choose picks the selected folder (or, with none
+// selected, the one being shown).
 // ---------------------------------------------------------------------------
 class FileBrowser : public Dialog {
 public:
-    enum class Mode : std::uint8_t { Open, Save };
+    enum class Mode : std::uint8_t { Open, Save, Folder };
 
     FileBrowser(Mode mode, std::string title = {}, std::string widget_id = {})
-        : Dialog(title.empty() ? (mode == Mode::Open ? "Open" : "Save As")
-                               : std::move(title),
+        : Dialog(title.empty() ? default_title(mode) : std::move(title),
                  std::move(widget_id)),
           mode_(mode) {
         path_label_ = &content().add<Label>("");
@@ -453,11 +455,14 @@ public:
         name_ = &content().add<TextField>();
         name_->set_placeholder("file name");
         name_->on_submit([this](std::string_view) { commit(); });
+        name_->visible = mode_ != Mode::Folder; // a folder needs no name
         auto& buttons = content().add<Row>();
         buttons.set_gap(8);
         buttons.add<Spacer>();
         buttons.add<Button>("Cancel").on_click([this] { request_close(); });
-        open_button_ = &buttons.add<Button>(mode_ == Mode::Open ? "Open" : "Save");
+        open_button_ = &buttons.add<Button>(mode_ == Mode::Open   ? "Open"
+                                            : mode_ == Mode::Save ? "Save"
+                                                                  : "Choose");
         open_button_->set_variant(Button::Variant::Primary)
             .on_click([this] { commit(); });
         set_path(".");
@@ -471,7 +476,7 @@ public:
     std::string path() const { return path_.string(); }
     // Glob patterns (`*` and `?`, case-insensitive) a file name must match
     // one of, e.g. {"*.png", "*.jpg"}; empty (the default) lists every file.
-    // Directories are always listed.
+    // Directories are always listed (Folder mode lists nothing else).
     FileBrowser& set_filters(std::vector<std::string> patterns) {
         filters_ = std::move(patterns);
         refresh();
@@ -487,11 +492,22 @@ public:
     bool show_hidden() const { return show_hidden_; }
     // The selected file (path + name field); empty when nothing is chosen.
     // A file selected via list().set_selected() counts as chosen.
+    // Folder mode: the selected folder, or the folder being shown when none
+    // (or "..") is selected - never empty.
     std::string selection() const {
+        if (mode_ == Mode::Folder) {
+            long i = list_->selected();
+            if (i >= 0 && size_t(i) < entries_.size() && entries_[size_t(i)] != "..") {
+                const std::string& d = entries_[size_t(i)];
+                return (path_ / d.substr(0, d.size() - 1)).lexically_normal().string();
+            }
+            return path_.string();
+        }
         sync_from_list();
         if (name_->text().empty()) return {};
         return (path_ / name_->text()).lexically_normal().string();
     }
+    Mode mode() const { return mode_; }
     FileBrowser& on_pick(std::function<void(std::string)> f) {
         on_pick_ = std::move(f);
         return *this;
@@ -502,7 +518,14 @@ public:
     Button& open_button() { return *open_button_; }
     // Pick the current selection (as the Open/Save button does). False when
     // nothing is chosen; a selected directory is entered instead.
+    // Folder mode always picks (see selection()).
     bool commit() {
+        if (mode_ == Mode::Folder) {
+            std::string sel = selection();
+            if (on_pick_) on_pick_(sel);
+            request_close();
+            return true;
+        }
         sync_from_list();
         if (name_->text().empty()) {
             long i = list_->selected();
@@ -556,6 +579,10 @@ public:
 private:
     static constexpr float kListHeight = 320.f, kMinListHeight = 48.f;
 
+    static const char* default_title(Mode m) {
+        return m == Mode::Open ? "Open" : m == Mode::Save ? "Save As" : "Choose Folder";
+    }
+
     static bool glob_match(std::string_view pat, std::string_view name) {
         auto lower = [](char ch) {
             return (ch >= 'A' && ch <= 'Z') ? char(ch - 'A' + 'a') : ch;
@@ -600,7 +627,7 @@ private:
             if (!show_hidden_ && !name.empty() && name[0] == '.') continue;
             bool dir = it.is_directory(ec);
             if (dir) dirs.push_back(name + "/");
-            else if (passes_filter(name)) files.push_back(name);
+            else if (mode_ != Mode::Folder && passes_filter(name)) files.push_back(name);
         }
         std::sort(dirs.begin(), dirs.end());
         std::sort(files.begin(), files.end());
@@ -621,6 +648,7 @@ private:
     // A selected file fills the name field; a directory leaves it alone.
     void entry_selected(long i) {
         synced_sel_ = i;
+        if (mode_ == Mode::Folder) return; // no name field
         if (i < 0 || size_t(i) >= entries_.size() || is_dir_[size_t(i)]) return;
         name_->set_text(entries_[size_t(i)]);
     }
@@ -643,6 +671,7 @@ private:
     // Keep the name field in step with a selection made through list()
     // directly (set_selected does not fire on_select).
     void sync_from_list() const {
+        if (mode_ == Mode::Folder) return;
         long i = list_->selected();
         if (i == synced_sel_) return;
         synced_sel_ = i;

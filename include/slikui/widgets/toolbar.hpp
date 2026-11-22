@@ -19,16 +19,37 @@
 
 namespace slikui {
 
+// Draws a custom icon: `area` is the icon's square (logical px), `color` the
+// tint the button would give a built-in icon (theme / variant / disabled).
+using IconPainter = std::function<void(DrawList& list, Rect area, Color color)>;
+
 // ---------------------------------------------------------------------------
-// IconButton - small square button with an icon instead of text.
+// IconButton - small square button with an icon instead of text: a built-in
+// Icon, or any drawing via set_icon_painter.
 // ---------------------------------------------------------------------------
 class IconButton : public Widget {
 public:
     IconButton(Icon icon, std::string widget_id = {})
         : Widget(std::move(widget_id)), icon_(icon) {}
 
-    IconButton& set_icon(Icon i) { icon_ = i; return *this; }
+    // A built-in icon (drops a custom painter).
+    IconButton& set_icon(Icon i) {
+        icon_ = i;
+        painter_ = nullptr;
+        return *this;
+    }
     Icon icon() const { return icon_; }
+    // A custom icon, drawn instead of the built-in one - e.g. on the same
+    // 24x24 grid the built-ins use, scaled by area.w / 24:
+    //   btn.set_icon_painter([](DrawList& l, Rect a, Color c) {
+    //       paint_icon(l, Icon::Pin, a, c);           // reuse a built-in...
+    //       l.circle(a.center(), a.w * .1f, c);        // ...and add to it
+    //   });
+    IconButton& set_icon_painter(IconPainter p) {
+        painter_ = std::move(p);
+        return *this;
+    }
+    bool has_icon_painter() const { return bool(painter_); }
     IconButton& set_variant(Button::Variant v) { variant_ = v; return *this; }
     Button::Variant variant() const { return variant_; }
     IconButton& set_icon_px(float px) { icon_px_ = px; return *this; }
@@ -55,10 +76,10 @@ public:
             env.list.hollow_rect(bounds, t.border, t.border_width, t.radius);
 
         float side = std::fmin(bounds.w, bounds.h);
-        paint_icon(env.list, icon_,
-                   {bounds.center().x - side * .5f, bounds.center().y - side * .5f,
-                    side, side},
-                   enabled ? icon_color(t) : t.text_dim);
+        Rect area{bounds.center().x - side * .5f, bounds.center().y - side * .5f, side, side};
+        Color c = enabled ? icon_color(t) : t.text_dim;
+        if (painter_) painter_(env.list, area, c);
+        else paint_icon(env.list, icon_, area, c);
     }
 
     bool on_event(const Event& e) override {
@@ -131,6 +152,7 @@ private:
     }
 
     Icon icon_;
+    IconPainter painter_;
     Button::Variant variant_ = Button::Variant::Ghost;
     float icon_px_ = 16, pad_h_ = 7, pad_v_ = 5;
     Anim hover_{0, 0, 15}, pressed_{0, 0, 25};

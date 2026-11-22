@@ -936,6 +936,11 @@ class DrawCmd:
     def uv(self) -> Rect: ...
 
 class DrawList:
+    def __init__(self) -> None:
+        """
+        An empty list: record drawing into it once, then replay it each frame with env.list.append(recorded, offset).
+        """
+
     def rect(self, rect: Rect, color: Color, radius: float = 0.0) -> None: ...
 
     def hollow_rect(self, rect: Rect, color: Color, width: float, radius: float = 0.0) -> None: ...
@@ -953,6 +958,22 @@ class DrawList:
     def pop_clip(self) -> None: ...
 
     def clear(self) -> None: ...
+
+    def reserve(self, n: int) -> None: ...
+
+    @property
+    def clip_balanced(self) -> bool:
+        """Every push_clip has its pop_clip."""
+
+    def append(self, other: DrawList, offset: Vec2 = ...) -> None:
+        """
+        Append every command of `other`, moved by `offset` - one call to replay a recorded list (e.g. cached static drawing).
+        """
+
+    def extend(self, array: NDArray[numpy.void], offset: Vec2 = ...) -> None:
+        """
+        Append commands from a DRAWCMD_DTYPE array (as_array()'s format), moved by `offset`. Validated: command types, flags, clip balance.
+        """
 
     def as_array(self) -> NDArray[numpy.void]: ...
 
@@ -1072,6 +1093,12 @@ class PaintEnv:
 
     @property
     def list(self) -> DrawList: ...
+
+    @property
+    def visible_rect(self) -> Rect:
+        """
+        The part of the frame this widget's drawing can show through (window narrowed by enclosing clips, e.g. a ScrollArea viewport). Skip drawing outside it.
+        """
 
     @property
     def theme(self) -> Theme: ...
@@ -1244,11 +1271,15 @@ class Context:
 
     @overload
     def push_popup(self, widget: Widget, pos: Vec2) -> Widget:
-        """Borrowed popup at a screen position; keep the widget alive."""
+        """
+        Popup at a screen position. The context keeps the widget alive while it is open.
+        """
 
     @overload
     def push_popup(self, widget: Widget, anchor: Widget, dir: PopupDir) -> Widget:
-        """Borrowed popup anchored beside a widget (flips + clamps)."""
+        """
+        Popup anchored beside a widget (flips + clamps). The context keeps the widget alive while it is open.
+        """
 
     def open_context_menu(self, menu: Menu, pos: Vec2) -> Widget:
         """
@@ -1285,16 +1316,20 @@ class Context:
     @property
     def popup_count(self) -> int: ...
 
+    @property
+    def tooltip_text(self) -> str:
+        """Text of the tooltip showing now; '' when none is."""
+
     def popup(self, index: int) -> Widget: ...
 
-    def set_cursor_host(self, host: object) -> Context:
+    def set_cursor_host(self, host: Callable[[Cursor], None]) -> Context:
         """
         Host callback receiving a Cursor whenever the hovered widget requests a shape (GLFW attach sets the real cursor in C++).
         """
 
     def open_dialog(self, dialog: Dialog) -> Dialog:
         """
-        Put a Dialog on the floating shell layer (borrowed: keep the Python object alive). Modal dialogs dim the app and trap outside presses. Default position is centered.
+        Put a Dialog on the floating shell layer; the context keeps it alive while it is open. Modal dialogs dim the app and trap outside presses. Default position is centered.
         """
 
     def close_dialog(self, dialog: Dialog) -> None: ...
@@ -1377,6 +1412,11 @@ class Widget:
 
     def focusable(self) -> bool: ...
 
+    def tooltip_at(self, pos: Vec2) -> str:
+        """
+        Override: tooltip text for the pointer at `pos` ('' = none); default the set_tooltip text. Asked each tick while hovered - new text swaps a showing tooltip, '' closes it.
+        """
+
     def widget_type(self) -> str: ...
 
     @property
@@ -1441,9 +1481,9 @@ class Widget:
     def clear_children(self) -> None:
         """remove() every child."""
 
-    def set_context_menu(self, menu: Menu) -> Widget:
+    def set_context_menu(self, menu: Menu | None) -> Widget:
         """
-        Right-click target for this widget and its subtree. Borrowed: keep the Menu alive on the Python side.
+        Right-click target for this widget and its subtree (None clears it). Borrowed: keep the Menu alive on the Python side.
         """
 
     def set_tooltip(self, text: str) -> Widget: ...
@@ -1636,6 +1676,22 @@ class Label(Widget):
     @property
     def font(self) -> str: ...
 
+    def set_align(self, value: TextAlign | str) -> Label:
+        """
+        Each line's place within the label's width: TextAlign or 'left' / 'center' / 'right'.
+        """
+
+    def set_valign(self, value: TextVAlign | str) -> Label:
+        """
+        The text's place within the label's height: TextVAlign or 'top' / 'middle' / 'bottom' ('baseline' acts like 'top').
+        """
+
+    @property
+    def align(self) -> TextAlign: ...
+
+    @property
+    def valign(self) -> TextVAlign: ...
+
 class Button(Widget):
     def set_text(self, value: str) -> Button: ...
 
@@ -1773,6 +1829,19 @@ class Segmented(Widget):
 
     def on_select(self, value: Callable[[int], None]) -> Segmented: ...
 
+    def set_fill(self, value: bool = True) -> Segmented:
+        """
+        Span the parent instead of hugging the labels; segments share the width as evenly as their labels allow.
+        """
+
+    @property
+    def fill(self) -> bool: ...
+
+    def segment_rect(self, index: int) -> Rect:
+        """
+        Absolute rect of segment `index` (current layout); empty if out of range.
+        """
+
     def set_selected(self, index: int, fire_callback: bool = True) -> Segmented: ...
 
     @property
@@ -1821,6 +1890,14 @@ class IconButton(Widget):
 
     def set_icon_px(self, px: float) -> IconButton: ...
 
+    def set_icon_painter(self, painter: Callable[[DrawList, Rect, Color], None]) -> IconButton:
+        """
+        Custom icon: painter(list, area, color) draws into `list` inside the square `area` in `color` (the tint a built-in icon would get). `list` is valid only during the call. set_icon() switches back.
+        """
+
+    @property
+    def has_icon_painter(self) -> bool: ...
+
     @property
     def icon(self) -> Icon: ...
 
@@ -1864,7 +1941,7 @@ class TreeView(Widget):
     def __init__(self, id: str = '') -> None: ...
 
     class Row:
-        def __init__(self, label: str, depth: int = 0, expandable: bool = False) -> None: ...
+        def __init__(self, label: str, depth: int = 0, expandable: bool = False, expanded: bool = True, tooltip: str = '') -> None: ...
 
         @property
         def label(self) -> str: ...
@@ -1884,7 +1961,31 @@ class TreeView(Widget):
         @expandable.setter
         def expandable(self, arg: bool, /) -> None: ...
 
+        @property
+        def expanded(self) -> bool:
+            """Initial open state of an expandable row (set_rows reads it)."""
+
+        @expanded.setter
+        def expanded(self, arg: bool, /) -> None: ...
+
+        @property
+        def tooltip(self) -> str:
+            """Hover text; '' = the full label when the row shows it elided."""
+
+        @tooltip.setter
+        def tooltip(self, arg: str, /) -> None: ...
+
     def on_select(self, value: Callable[[int], None]) -> TreeView: ...
+
+    def on_toggle(self, value: Callable[[int, bool], None]) -> TreeView: ...
+
+    def set_natural_width(self, width: float) -> TreeView:
+        """
+        Fixed natural width (logical px): no label is measured. 0 = widest visible row.
+        """
+
+    @property
+    def natural_width(self) -> float: ...
 
     def row_rect(self, index: int) -> Rect:
         """
@@ -2168,6 +2269,12 @@ class TextField(Widget):
 
 class TextArea(Widget):
     def set_text(self, value: str) -> TextArea: ...
+
+    @property
+    def text(self) -> str: ...
+
+    @text.setter
+    def text(self, arg: str, /) -> None: ...
 
     def set_placeholder(self, value: str) -> TextArea: ...
 
@@ -2761,6 +2868,8 @@ class FileBrowser(Dialog):
 
         Save = 1
 
+        Folder = 2
+
     def on_pick(self, value: Callable[[str], None]) -> FileBrowser: ...
 
     def set_filters(self, value: Sequence[str]) -> FileBrowser: ...
@@ -2782,6 +2891,9 @@ class FileBrowser(Dialog):
 
     @property
     def show_hidden(self) -> bool: ...
+
+    @property
+    def mode(self) -> FileBrowser.Mode: ...
 
     def commit(self) -> bool:
         """
@@ -2991,6 +3103,14 @@ def shortcut_label(key: Key, mods: int, context: Context | None = None) -> str:
     Menu hint text: "Ctrl+Shift+S", "Cmd+S", "Alt+Left" -- plain ASCII
     on every platform. ``context`` is accepted for compatibility and unused.
     """
+
+def paint_icon(list: DrawList, icon: Icon, area: Rect, color: Color, thickness: float = 0.0) -> None:
+    """
+    Draw built-in `icon` centered in `area` in `color` (thickness 0 = legible default) - in a custom widget's paint() or an icon painter.
+    """
+
+def icon_name(icon: Icon) -> str:
+    """The icon's snake_case name, e.g. 'more_horizontal'."""
 
 def find_system_font() -> str:
     """First system TTF that opens (best-effort; '' if none)."""

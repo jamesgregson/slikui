@@ -18,6 +18,7 @@ A widget implements whichever of these it needs:
 | `on_event(const Event&)` | return `true` to consume an event |
 | `tick(Time)` | animation / per-frame state |
 | `focusable()`, `expands_main()`, `stretch_cross()` | opt-in layout/focus behavior |
+| `tooltip_at(Vec2)` | tooltip text for the pointer position (per-part tips); default the `set_tooltip` text |
 | `clip_rect()` | container clipping for its subtree (painting and hit-testing) |
 | `child_clip_rect(const Widget&)` | C++ only: extra clip for one child's subtree (e.g. per pane) |
 | `scroll_into_view(const Rect&)` | C++ only: scrolling containers bring a keyboard-focused descendant into view |
@@ -38,6 +39,60 @@ overrides `measure`/`arrange` keeps its subtree fully live.
 Painting emits into `env.list` (`rect`, `hollow_rect`, `line`, `circle`,
 `image`, `glyph`, clip stack) using `env.theme` colors - the same
 [DrawList commands](backends.md#drawlist-semantics) every backend receives.
+
+`env.visible_rect` is the part of the window your drawing can show
+through: the frame, narrowed by every clip above the widget (a ScrollArea's
+viewport, a Splitter pane). It's in the same coordinates as `bounds`.
+Anything outside it is clipped away, so a long widget can skip it. For
+example, a list with fixed-height rows draws only rows
+`floor((visible.y - bounds.y) / row_h)` to
+`ceil((visible.bottom() - bounds.y) / row_h)`. `TreeView`, `ListView` and
+`Table` do this.
+
+### Record once, replay every frame
+
+A widget whose drawing rarely changes (a chart, a score, a diagram) doesn't
+need to re-issue every command each frame. Record the drawing into your own
+`DrawList` at the origin, then append the recording to `env.list` with one
+call, moved to where the widget is. Appending copies commands in C++, so in
+Python it costs one call however long the recording is. Replaying 2,000
+commands is about 40x faster than drawing them again.
+
+=== "C++"
+
+    ```cpp
+    void paint(const slikui::PaintEnv& env) const override {
+        if (dirty_) {                       // contents changed
+            cache_.clear();
+            draw_static(cache_);            // at (0, 0)
+            dirty_ = false;
+        }
+        env.list.append(cache_, {bounds.x, bounds.y});
+    }
+    void theme_changed() override { dirty_ = true; }
+    ```
+
+=== "Python"
+
+    ```python
+    def paint(self, env):
+        if self.cache is None:              # contents changed -> set to None
+            self.cache = slikui.DrawList()
+            self.draw_static(self.cache)    # at (0, 0)
+        env.list.append(self.cache, slikui.Vec2(self.bounds.x, self.bounds.y))
+
+    def theme_changed(self):
+        self.cache = None
+    ```
+
+- **Re-record in `theme_changed`.** A recording holds theme colors and, for
+  text, glyph positions in the font atlas, which are only valid at the scale
+  and font it was recorded with.
+- **Start from an array.** `DrawList.extend(array, offset)` appends from a
+  `DRAWCMD_DTYPE` array, the format `as_array()` returns. Commands are
+  checked first.
+- **Keep clips balanced.** Both calls reject a list whose
+  `push_clip`/`pop_clip` don't match.
 
 ## Drawing text
 

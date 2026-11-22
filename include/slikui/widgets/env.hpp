@@ -15,6 +15,19 @@ struct PaintEnv {
     const Theme& theme;
     const text::Font& font;            // body font, regular face
     text::FontLibrary* fonts = nullptr; // set by Context::render (null: hand-built env)
+    // The part of the frame this widget's drawing can show through: the
+    // window, narrowed by every clip pushed on the way down the tree (a
+    // ScrollArea's viewport, ...). Anything outside it is clipped away, so
+    // paint() can skip it - e.g. a long list drawing only its on-screen
+    // rows. Logical px, same space as bounds. Unbounded in a hand-built env.
+    Rect visible_rect{-1e9f, -1e9f, 2e9f, 2e9f};
+
+    // A copy whose visible_rect is narrowed to `clip`.
+    PaintEnv clipped(Rect clip) const {
+        PaintEnv e = *this;
+        e.visible_rect = visible_rect.intersect(clip);
+        return e;
+    }
 
     // Draws `s` anchored at `pos` (logical px) and returns the rect it
     // occupies. With default options `pos` is the top-left corner; align /

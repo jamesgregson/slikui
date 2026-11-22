@@ -303,6 +303,11 @@ private:
 // TreeView - indented hierarchy with expand arrows and selection. Rows are a
 // flat (label, depth) list; expansion state lives here, descendants of a
 // collapsed row are hidden. Apps mutate rows and call set_rows again.
+//
+// Cost scales with the rows on screen, not the row count: paint draws only
+// rows inside PaintEnv::visible_rect, and the natural width measures each
+// label once, when its row first becomes visible (or never, with
+// set_natural_width).
 // ---------------------------------------------------------------------------
 class TreeView : public Widget {
 public:
@@ -310,20 +315,24 @@ public:
         std::string label;
         int depth = 0;
         bool expandable = false;
+        bool expanded = true; // initial state for expandable rows
+        std::string tooltip;  // hover text; "" = the full label when elided
     };
 
     explicit TreeView(std::string widget_id = {}) : Widget(std::move(widget_id)) {}
 
     TreeView& set_rows(std::vector<Row> rows) {
         rows_ = std::move(rows);
-        expanded_.assign(rows_.size(), true);
+        expanded_.resize(rows_.size());
+        for (size_t i = 0; i < rows_.size(); ++i) expanded_[i] = rows_[i].expanded;
+        widths_.assign(rows_.size(), -1.f);
         selected_ = -1;
-        metrics_valid_ = false; // natural width
+        hovered_ = -1;
         visible_valid_ = false;
         return *this;
     }
     TreeView& set_expanded(size_t index, bool open) {
-        if (index < expanded_.size()) {
+        if (index < expanded_.size() && expanded_[index] != open) {
             expanded_[index] = open;
             visible_valid_ = false;
         }
@@ -339,32 +348,44 @@ public:
         return visible_.size();
     }
     TreeView& on_select(std::function<void(size_t)> f) { on_select_ = std::move(f); return *this; }
+    // An arrow click opened (true) or closed (false) row `index`. Not called
+    // for set_expanded / set_rows.
+    TreeView& on_toggle(std::function<void(size_t, bool)> f) { on_toggle_ = std::move(f); return *this; }
+
+    // Fixed natural width (logical px), so no label is measured; 0 (the
+    // default) = widest visible row, measured as rows first become visible.
+    TreeView& set_natural_width(float w) { fixed_w_ = w; return *this; }
+    float natural_width() const { return fixed_w_; }
 
     // Absolute rect of row `index` in the current layout; empty when it is
     // hidden under a collapsed ancestor or out of range - e.g.
     // ScrollArea::scroll_to(tree.row_rect(i)).
     Rect row_rect(size_t index) const {
         refresh_visible();
-        for (size_t vi = 0; vi < visible_.size(); ++vi)
-            if (visible_[vi] == index)
-                return {bounds.x, bounds.y + float(vi) * row_height(), bounds.w, row_height()};
-        return {};
+        if (index >= vis_pos_.size() || vis_pos_[index] < 0) return {};
+        return {bounds.x, bounds.y + float(vis_pos_[index]) * row_height(), bounds.w,
+                row_height()};
     }
 
     Size measure(const Constraints& c) override {
-        refresh_metrics();
         refresh_visible();
-        return c.clamp({natural_w_, float(visible_.size()) * row_height()});
+        return c.clamp({natural_w(), float(visible_.size()) * row_height()});
     }
 
     void paint(const PaintEnv& env) const override {
         refresh_visible();
         const Theme& t = env.theme;
-        float y = bounds.y;
-        for (size_t vi = 0; vi < visible_.size(); ++vi) {
+        // Rows are fixed-height: the on-screen range is a division.
+        const Rect& vis = env.visible_rect;
+        float rh = row_height();
+        size_t first = size_t(std::clamp(std::floor((vis.y - bounds.y) / rh), 0.f,
+                                         float(visible_.size())));
+        size_t last = size_t(std::clamp(std::ceil((vis.bottom() - bounds.y) / rh), 0.f,
+                                        float(visible_.size())));
+        for (size_t vi = first; vi < last; ++vi) {
             size_t i = visible_[vi];
             const Row& r = rows_[i];
-            Rect row{bounds.x, y, bounds.w, row_height()};
+            Rect row{bounds.x, bounds.y + float(vi) * rh, bounds.w, rh};
             if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
             else if (long(vi) == hovered_ && enabled)
                 env.list.rect(row, t.surface_alt, 4);
@@ -372,7 +393,7 @@ public:
             float indent = bounds.x + 6 + float(r.depth) * 16.f;
             if (r.expandable) {
                 // chevron right (closed) / down (open)
-                float cy = row.y + row_height() * .5f;
+                float cy = row.y + rh * .5f;
                 Color mark = t.text_dim;
                 if (expanded_[i]) { // chevron down: v
                     env.list.line({indent - 2, cy - 2}, {indent + 2, cy + 2}, mark, 2);
@@ -384,13 +405,12 @@ public:
             }
             float tx = indent + (r.expandable ? 16.f : 4.f);
             // Elide to the row: long labels must not run past the tree.
-            Rect box{tx, row.y, std::fmax(bounds.right() - 4.f - tx, 0.f), row_height()};
+            Rect box{tx, row.y, std::fmax(bounds.right() - 4.f - tx, 0.f), rh};
             TextOpts o;
             o.color = t.text;
             o.valign = TextVAlign::Middle;
             o.overflow = TextOverflow::Ellipsis;
             env.text_in(box, r.label, o);
-            y += row_height();
         }
     }
 
@@ -409,8 +429,10 @@ public:
             size_t i = visible_[size_t(vi)];
             float chev_x = bounds.x + 6 + float(rows_[i].depth) * 16.f;
             if (rows_[i].expandable && e.pos.x < chev_x + 14.f) {
-                expanded_[i] = !expanded_[i];
+                bool open = !expanded_[i];
+                expanded_[i] = open;
                 visible_valid_ = false;
+                if (on_toggle_) on_toggle_(i, open);
                 return true;
             }
             selected_ = long(i);
@@ -422,58 +444,100 @@ public:
 
     const char* widget_type() const override { return "TreeView"; }
 
-    void theme_changed() override { metrics_valid_ = false; } // scale/font may have changed
+    // Per row: the row's tooltip; else its full label when the row shows it
+    // cut off with "..."; else the widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long vi = bounds.contains(pos) ? row_at(pos.y) : -1;
+        if (vi < 0) return Widget::tooltip_at(pos);
+        size_t i = visible_[size_t(vi)];
+        const Row& r = rows_[i];
+        if (!r.tooltip.empty()) return r.tooltip;
+        if (label_elided(i)) return r.label;
+        return Widget::tooltip_at(pos);
+    }
+
+    void theme_changed() override { metrics_scale_ = 0; } // scale/font may have changed
 
 private:
     float row_height() const { return 24.f; }
     long row_at(float y) const {
+        refresh_visible();
         long r = long(std::floor((y - bounds.y) / row_height()));
         return (r >= 0 && r < long(visible_.size())) ? r : -1;
     }
 
-    // Natural width (logical px): widest indent + label. Recomputed when
-    // the rows or the UI scale change.
-    void refresh_metrics() const {
-        if (!ctx) return;
-        float sc = ui_scale();
-        if (metrics_valid_ && metrics_scale_ == sc) return;
-        natural_w_ = 40.f + (rows_.empty() ? 0.f
-                                           : float(rows_.back().depth) * 16.f);
-        for (const auto& r : rows_)
-            natural_w_ = std::fmax(natural_w_,
-                                   6.f + float(r.depth) * 16.f +
-                                       (r.expandable ? 16.f : 4.f) +
-                                       ctx->text_size(r.label).w);
-        metrics_valid_ = true;
-        metrics_scale_ = sc;
+    // Whether row i's label is wider than its box in paint (so drawn elided).
+    bool label_elided(size_t i) const {
+        if (!ctx) return false;
+        const Row& r = rows_[i];
+        float tx = 6.f + float(r.depth) * 16.f + (r.expandable ? 16.f : 4.f);
+        float avail = bounds.w - 4.f - tx;
+        float w = widths_[i] >= 0 && metrics_scale_ == ui_scale() ? widths_[i]
+                                                                  : ctx->text_size(r.label).w;
+        return w > avail + 0.01f;
     }
 
-    // Rows whose every ancestor is expanded, in display order.
+    // Natural width (logical px): the fixed width, or the widest visible
+    // row (indent + label). Each label is measured once - when its row is
+    // first visible - and again only after a UI scale change.
+    float natural_w() const {
+        if (fixed_w_ > 0) return fixed_w_;
+        if (!ctx) return 40.f;
+        float sc = ui_scale();
+        if (metrics_scale_ != sc) { // scale/font changed: re-measure
+            std::fill(widths_.begin(), widths_.end(), -1.f);
+            metrics_scale_ = sc;
+            natural_cache_ = -1;
+        }
+        if (natural_cache_ >= 0) return natural_cache_;
+        float w = 40.f;
+        for (size_t i : visible_) {
+            const Row& r = rows_[i];
+            if (widths_[i] < 0) widths_[i] = ctx->text_size(r.label).w;
+            w = std::fmax(w, 6.f + float(r.depth) * 16.f + (r.expandable ? 16.f : 4.f) +
+                                 widths_[i]);
+        }
+        natural_cache_ = w;
+        return w;
+    }
+
+    // Rows whose every ancestor is expanded, in display order, and each
+    // row's position among them (-1 = hidden).
     void refresh_visible() const {
         if (visible_valid_) return;
         visible_.clear();
+        vis_pos_.assign(rows_.size(), -1);
+        natural_cache_ = -1; // the widest visible row may have changed
         std::vector<bool> open_stack; // per-depth expansion of ancestors
         for (size_t i = 0; i < rows_.size(); ++i) {
-            int d = rows_[i].depth;
+            int d = std::max(rows_[i].depth, 0);
             if (size_t(d) > open_stack.size()) open_stack.resize(size_t(d), true);
             bool ancestors_open = true;
             for (int k = 0; k < d && ancestors_open; ++k)
                 ancestors_open = open_stack[size_t(k)];
             open_stack.resize(size_t(d));
             open_stack.push_back(expanded_[i]);
-            if (ancestors_open) visible_.push_back(i);
+            if (ancestors_open) {
+                vis_pos_[i] = long(visible_.size());
+                visible_.push_back(i);
+            }
         }
         visible_valid_ = true;
     }
 
     std::vector<Row> rows_;
     std::vector<bool> expanded_;
+    mutable std::vector<float> widths_; // measured label widths, -1 = not yet
     mutable std::vector<size_t> visible_;
-    mutable float natural_w_ = 0, metrics_scale_ = 0;
-    mutable bool metrics_valid_ = false, visible_valid_ = false;
+    mutable std::vector<long> vis_pos_;
+    mutable float metrics_scale_ = 0;
+    mutable float natural_cache_ = -1; // natural_w() result, -1 = stale
+    mutable bool visible_valid_ = false;
+    float fixed_w_ = 0;
     long selected_ = -1;
     long hovered_ = -1;
     std::function<void(size_t)> on_select_;
+    std::function<void(size_t, bool)> on_toggle_;
 };
 
 // ---------------------------------------------------------------------------
@@ -522,8 +586,12 @@ public:
                       {bounds.x + grid_w_, bounds.y + header_height()}, t.border, 1);
         paint_row(env, head_lays_, bounds.y, t.text_dim, true);
 
-        float y = bounds.y + header_height();
-        for (size_t r = 0; r < rows_.size(); ++r) {
+        // Only the rows inside the visible rect (fixed height: a division).
+        float top = bounds.y + header_height(), rh = row_height(), n = float(rows_.size());
+        size_t first = size_t(std::clamp(std::floor((env.visible_rect.y - top) / rh), 0.f, n));
+        size_t last = size_t(std::clamp(std::ceil((env.visible_rect.bottom() - top) / rh), 0.f, n));
+        for (size_t r = first; r < last; ++r) {
+            float y = top + float(r) * rh;
             if (long(r) == selected_) {
                 env.list.rect({bounds.x, y, grid_w_, row_height()},
                               t.accent.faded(.25f), 0);
@@ -531,7 +599,6 @@ public:
                 env.list.rect({bounds.x, y, grid_w_, row_height()}, t.surface_alt, 0);
             }
             paint_row(env, cell_lays_[r], y, t.text, false);
-            y += row_height();
         }
     }
 

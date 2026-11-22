@@ -7,6 +7,8 @@
 #include "slikui/widgets/env.hpp"
 #include "slikui/widgets/widget.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
@@ -210,13 +212,16 @@ public:
     void paint(const PaintEnv& env) const override {
         refresh_metrics();
         const Theme& t = env.theme;
-        float y = bounds.y;
         TextOpts o;
         o.color = t.text;
         o.valign = TextVAlign::Middle;
         o.overflow = TextOverflow::Ellipsis; // long items stay inside the list
-        for (size_t i = 0; i < items_.size(); ++i) {
-            Rect row{bounds.x, y, bounds.w, row_height()};
+        // Only the rows inside the visible rect (fixed height: a division).
+        float rh = row_height(), n = float(items_.size());
+        size_t first = size_t(std::clamp(std::floor((env.visible_rect.y - bounds.y) / rh), 0.f, n));
+        size_t last = size_t(std::clamp(std::ceil((env.visible_rect.bottom() - bounds.y) / rh), 0.f, n));
+        for (size_t i = first; i < last; ++i) {
+            Rect row{bounds.x, bounds.y + float(i) * rh, bounds.w, rh};
             if (long(i) == selected_) env.list.rect(row, t.accent.faded(.25f), 4);
             else if (i == hovered_ && enabled)
                 env.list.rect(row, t.surface_alt, 4);
@@ -224,7 +229,6 @@ public:
             if (line_height_ > 0)
                 env.text_in({row.x + 8, row.y, std::fmax(row.w - 16.f, 0.f), row.h},
                             items_[i], o);
-            y += row_height();
         }
     }
 
@@ -250,6 +254,17 @@ public:
     }
 
     const char* widget_type() const override { return "ListView"; }
+
+    // An item drawn cut off with "..." shows its full text; else the
+    // widget's own tooltip.
+    std::string tooltip_at(Vec2 pos) const override {
+        long idx = bounds.contains(pos) ? row_at(pos.y) : -1;
+        if (idx >= 0 && ctx && line_height_ > 0) {
+            const std::string& it = items_[size_t(idx)];
+            if (ctx->text_size(it).w > bounds.w - 16.f + 0.01f) return it;
+        }
+        return Widget::tooltip_at(pos);
+    }
 
     void theme_changed() override { valid_ = false; } // scale/font may have changed
 

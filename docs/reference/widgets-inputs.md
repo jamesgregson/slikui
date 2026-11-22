@@ -50,7 +50,7 @@ suggests a height in lines.
 
 | API (both) | Signature |
 |------------|-----------|
-| `set_text` | `(std::string)` |
+| `set_text` | `(std::string)` - Python: also the `text` property |
 | `set_placeholder` | `(std::string)` - elided with an ellipsis when wider than the field |
 | `on_change` | `(std::function<void(const std::string&)>)` |
 | `set_password` | TextField only - `(bool)` |

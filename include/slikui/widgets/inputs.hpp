@@ -235,16 +235,11 @@ public:
             case Key::Enter:
                 if (on_submit_) on_submit_(text_);
                 return true;
-            case Key::Space:
-                // Space arrives as TextInput in most backends; also accept here.
-                erase_selection();
-                text_.insert(caret_, " ");
-                ++caret_;
-                clear_sel();
-                if (on_change_) on_change_(text_);
-                return true;
             default:
-                return false;
+                // Typing keys are ours: the character arrives as TextInput
+                // (Space included - inserting it here too typed it twice),
+                // and the KeyPress must not reach shortcuts above the field.
+                return is_text_key(e.key);
             }
         }
         default:
@@ -537,13 +532,13 @@ public:
             case Key::Enter:
                 insert("\n");
                 return true;
-            case Key::Space:
-                insert(" ");
-                return true;
             case Key::Tab:
                 return false; // Tab keeps its focus-cycling meaning
             default:
-                return false;
+                // Typing keys (Space included) insert via TextInput; consume
+                // the KeyPress so it never reaches shortcuts above the area.
+                // Ctrl/Cmd chords still bubble.
+                return !e.shortcut_mod() && is_text_key(e.key);
             }
         }
         default:

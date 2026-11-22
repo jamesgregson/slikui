@@ -99,14 +99,28 @@ resizes reflow automatically - see [Layout](layout.md) and the full
   once and open many times.
 - In Python the bindings are non-owning wrappers over the C++ tree;
   `App.close()` (also run by `with App(...)`) destroys the tree and releases
-  the Python callbacks it holds. Keep the Python object alive for as long as
-  the widget exists - for `ctx.open_dialog(mb)`, that means keeping `mb`.
+  the Python callbacks it holds. A widget you pass to `push_popup`,
+  `open_context_menu` or `open_dialog` is kept alive by the context while
+  it is open, so a temporary is fine. A `Menu` given to `set_context_menu` is
+  not: keep that Python object alive yourself, typically as an attribute of
+  the widget it belongs to.
 
 ## Threading
 
 Single-threaded. One `Context` per thread; never touch a context from another
 thread. Drive everything from the main thread (or the thread that owns the
 window).
+
+In Python, `Context.tick`, `render` and `handle` (and the `App` methods that
+call them) release the GIL while the C++ work runs. Other Python threads,
+such as an audio callback or a worker, keep running during a frame. Your
+`paint` / `on_event` overrides, callbacks and a Python `RenderSink` still run
+with the GIL, on the UI thread.
+
+That also means the GIL no longer stops another thread from changing the
+widget tree mid-frame, so the single-thread rule matters more. A worker
+thread must not touch widgets. Send its results to the UI thread (a
+`queue.Queue` you drain each frame, say) and update widgets there.
 
 ## Where to go next
 

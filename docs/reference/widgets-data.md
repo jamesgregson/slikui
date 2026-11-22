@@ -136,6 +136,21 @@ the widget, chevron clicks toggle, rows select.
     ])
     ```
 
+Large trees stay fast. Paint draws only the rows on screen. The natural width
+measures each label once, when its row first becomes visible, so labels under
+collapsed parents cost nothing. `set_natural_width(w)` fixes the width and
+skips measuring entirely.
+
+| API | Notes |
+|-----|-------|
+| `Row{label, depth, expandable, expanded, tooltip}` | `expanded` (default true) is the row's initial state, read by `set_rows`; `tooltip` is the row's hover text (default: the full label when the row is cut off) |
+| `set_rows(rows)` | replaces the rows and their expansion state; clears the selection |
+| `set_expanded(i, open)` / `expanded(i)` | programmatic; doesn't fire `on_toggle` |
+| `on_select(fn(i))` | a row was clicked |
+| `on_toggle(fn(i, open))` | an arrow click opened or closed row `i` |
+| `set_natural_width(w)` | fixed natural width (logical px); 0 = widest visible row |
+| `visible_count()` / `row_rect(i)` | rows not under a collapsed parent; a row's rect for `scroll_to` |
+
 ## Table
 
 Columns + header + selectable rows with per-column alignment and cell

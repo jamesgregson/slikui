@@ -456,6 +456,47 @@ TEST(filebrowser_lists_navigates_picks) {
     std::filesystem::remove_all(dir);
 }
 
+// Mode::Folder (geetar #18): folders only, no name field, Choose picks the
+// selected folder - or the one being shown.
+TEST(filebrowser_folder_mode_picks_directories) {
+    Fixture f;
+    std::string dir = "/tmp/slikui_fbtest_folder";
+    std::filesystem::create_directories(dir + "/beta");
+    std::filesystem::create_directories(dir + "/alpha/inner");
+    { std::FILE* fp = std::fopen((dir + "/song.gp5").c_str(), "wb"); if (fp) std::fclose(fp); }
+
+    f.ctx.set_root<slikui::Column>();
+    auto fb = std::make_unique<slikui::FileBrowser>(slikui::FileBrowser::Mode::Folder);
+    fb->set_path(dir);
+    std::vector<std::string> picks;
+    fb->on_pick([&](std::string p) { picks.push_back(p); });
+    auto& ref = static_cast<slikui::FileBrowser&>(f.ctx.open_dialog(std::move(fb)));
+    f.frame();
+    REQUIRE(f.has_font);
+    CHECK(ref.mode() == slikui::FileBrowser::Mode::Folder);
+    CHECK(ref.open_button().text() == "Choose");
+    CHECK(!ref.name_field().visible);
+
+    // Only "..", alpha/, beta/ - the file is not listed.
+    auto& list = ref.list();
+    CHECK(list.row_rect(2).h > 0);
+    CHECK(list.row_rect(3).empty());
+
+    // Nothing selected (or ".."): the folder being shown.
+    CHECK(ref.selection() == dir);
+    list.set_selected(0);
+    CHECK(ref.selection() == dir);
+    // A selected folder is the pick (Choose doesn't enter it).
+    list.set_selected(1);
+    CHECK(ref.selection() == dir + "/alpha");
+    f.click(ref.open_button().bounds.center().x, ref.open_button().bounds.center().y);
+    REQUIRE(picks.size() == 1);
+    CHECK(picks[0] == dir + "/alpha");
+    CHECK(f.ctx.dialog_count() == 0);
+
+    std::filesystem::remove_all(dir);
+}
+
 // Regression: a big folder grew the dialog past the window, pushing the name
 // field and Open/Cancel off-screen. The list now scrolls inside the dialog.
 TEST(filebrowser_big_folder_keeps_buttons_on_screen) {

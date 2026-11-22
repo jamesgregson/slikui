@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 ### Added
 
@@ -11,9 +11,47 @@
   this.
 - `FileBrowser::set_filters(globs)` (case-insensitive `*` / `?`; folders
   always listed), `set_show_hidden(bool)`, `commit()` and `list_scroll()`.
+- `FileBrowser::Mode::Folder`: pick a directory. Only folders are listed,
+  there is no name field, and Choose picks the selected folder (or the one
+  being shown). `FileBrowser::mode()`.
+- `IconButton::set_icon_painter(fn(list, area, color))` draws a custom
+  icon in the tint a built-in would get. `set_icon` switches back. Python
+  also gains `slikui.paint_icon(list, icon, area, color)` and
+  `slikui.icon_name(icon)`.
+- `Context::hold_while_open(widget, std::shared_ptr<void>)`: keep a token
+  alive while a popup or dialog is open; it is released after the widget
+  closes.
+- **Per-part tooltips**: `Widget::tooltip_at(pos)` (overridable, Python
+  too) gives the tooltip text for the pointer position. `TreeView::Row`
+  gains `tooltip`, and `TreeView`, `ListView` and `Segmented` show the full
+  text of a row, item or segment drawn cut off with "...".
+  `Context::tooltip_text()` returns the text showing now.
 - `ListView::on_activate(fn)`: double-click on an item.
+- **Python: replayable `DrawList`s.** `slikui.DrawList()` can be created
+  from Python. `append(other, offset)` replays a recorded list in one call,
+  and `extend(array, offset)` appends from a `DRAWCMD_DTYPE` array. Both
+  check the commands and reject unbalanced clips. `reserve(n)` and
+  `clip_balanced` are also new. C++ gains
+  `DrawList::append(const DrawCmd*, n, offset)`, and `append`'s offset now
+  defaults to zero.
+- `PaintEnv::visible_rect` (Python: `env.visible_rect`): the part of the
+  frame a widget's drawing can show through, narrowed by every enclosing
+  clip, so `paint()` can skip off-screen parts.
+- `TreeView::on_toggle(fn(index, open))` for arrow clicks,
+  `Row::expanded` (initial state, default open) and
+  `set_natural_width(w)`.
+- `Label::set_align(TextAlign)` / `set_valign(TextVAlign)` (Python: enum
+  or `"center"` / `"middle"` / ...) place the text inside a label bigger
+  than its text. Each wrapped line is aligned on its own. Default left/top
+  as before.
+- `Segmented::set_fill(bool)`: span the parent (Column width, Row leftover)
+  with segments sharing the width evenly; `segment_rect(i)`.
 - `MenuBar::set_background(Color)`.
 - `TextField::scroll_x()`.
+- `is_text_key(Key)`: whether a key types a character (letters, digits,
+  punctuation, Space, keypad).
+- Python: `TextArea.text` property; until now the text could only be read
+  through `on_change`.
 - Keypad keys: `Key::Kp0`-`Kp9`, `KpDecimal`, `KpDivide`, `KpMultiply`,
   `KpSubtract`, `KpAdd`, `KpEqual`, mapped by the GLFW and SDL backends (C++
   and Python) and labelled `Num0`, `Num+`, ... by `shortcut_label`.
@@ -62,11 +100,47 @@
 - Python: using a wrapper of a built-in widget after the tree destroyed it
   (`remove`, `clear_children`, `App.close()`) raises `TypeError` with a
   nanobind `RuntimeWarning`, instead of reading freed memory.
+- **Python: `Context.tick`, `render` and `handle` release the GIL** while the
+  C++ work runs, so other Python threads (audio callbacks, workers) keep
+  running during a frame. Python overrides, callbacks and Python render sinks
+  take the GIL back when called. Because the GIL no longer serialises other
+  threads against the frame, touching widgets from a non-UI thread is now a
+  real data race. It was never supported.
+- Python: a widget passed to `push_popup`, `open_context_menu` or
+  `open_dialog` is kept alive by the context while it is open. A temporary
+  (`ctx.push_popup(Panel(), ...)`) used to be freed at once, and the next
+  frame read freed memory. `set_context_menu` still borrows (keep the
+  Menu alive), and now accepts `None` to clear.
+- Python: `Context.set_cursor_host` takes a typed callable,
+  `Callable[[Cursor], None]`.
 - The vendored nanobind carries a small patch (`nb_inst_forget_refs`); see
   `third_party/nanobind/SLIKUI_PATCHES.md`.
 
 ### Fixed
 
+- **`TreeView` cost scales with the rows on screen.** It used to draw every
+  visible row each frame and measure every label (collapsed or not) on
+  `set_rows`. A 40k-row tree's first frame took about 10 s and now takes
+  about 20 ms. Paint skips rows outside `visible_rect`, and labels are
+  measured lazily as rows become visible. The natural width is now the
+  widest *visible* row, so it can change when rows are expanded or
+  collapsed. `ListView` and `Table` also skip off-screen rows when
+  painting.
+- Text measuring slowed down linearly with the number of distinct
+  strings: once the layout cache was full, every new string rescanned it.
+  New strings now cost the same no matter how many have been seen.
+- A focused `TextField`, `SearchBox`, `TextArea` or a `DragValue` being
+  typed into now consumes the `KeyPress` of the characters it types. Before,
+  the press bubbled up, so app shortcuts handled in an ancestor's
+  `on_event` fired while the user typed (typing "g" ran a G shortcut).
+  Ctrl/Cmd chords and keys like the F-keys still bubble.
+- A showing tooltip ignored `set_tooltip` (new text or `""`) until the
+  pointer left the widget. It now swaps or closes at once, and moving
+  between rows of a list swaps per-row tips without the hover delay.
+  Closing a tooltip no longer closes the app's other popups with it.
+- `TextField` and `TextArea` typed two spaces per Space keystroke: one from
+  the `KeyPress` and one from the `TextInput` the backends also send. Space
+  is now inserted from `TextInput` only.
 - `TextField` / `SearchBox`: text is clipped to the field. A long placeholder
   elides with an ellipsis instead of drawing over neighbouring widgets, and typed text
   wider than the field scrolls horizontally to keep the caret visible.

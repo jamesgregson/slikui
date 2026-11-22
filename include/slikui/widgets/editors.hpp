@@ -154,7 +154,8 @@ public:
                         label_valid_ = false;
                     }
                     return true;
-                default: return false;
+                default: // typing keys: the text arrives as TextInput
+                    return !e.shortcut_mod() && is_text_key(e.key);
                 }
             }
             if (!focused) return false;

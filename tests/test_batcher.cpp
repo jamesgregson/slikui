@@ -154,3 +154,28 @@ TEST(batcher_reuse_clears_previous_frame) {
     b.build(l2, {100, 50}, 1.f);
     CHECK(b.instances().size() == 1 && b.batches().size() == 1 && b.batches()[0].count == 1);
 }
+
+// DrawList::append - replaying a recorded list (geetar #28).
+TEST(drawlist_append_offsets_every_command) {
+    slikui::DrawList rec;
+    rec.rect({1, 2, 10, 10}, slikui::Color::white());
+    rec.push_clip({0, 0, 5, 5});
+    rec.line({1, 1}, {4, 6}, slikui::Color::white(), 2);
+    rec.pop_clip();
+
+    slikui::DrawList out;
+    out.append(rec, {100, 50});
+    REQUIRE(out.size() == 4);
+    const auto& c = out.commands();
+    CHECK(c[0].rect.x == 101 && c[0].rect.y == 52 && c[0].rect.w == 10);
+    CHECK(c[1].type == slikui::DrawCmd::Type::ClipPush && c[1].rect.x == 100);
+    // A Line keeps its delta: only the start point moves.
+    CHECK(c[2].rect.x == 101 && c[2].rect.y == 51 && c[2].rect.w == 3 && c[2].rect.h == 5);
+    CHECK(out.clip_balanced());
+
+    // Appending a list to itself copies first (growing would move the source).
+    out.append(out, {1, 1});
+    REQUIRE(out.size() == 8);
+    CHECK(out.commands()[4].rect.x == 102 && out.commands()[4].rect.y == 53);
+    CHECK(out.commands()[0].rect.x == 101); // originals untouched
+}

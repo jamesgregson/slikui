@@ -33,6 +33,15 @@ enum class Key : std::uint32_t {
     KpDecimal, KpDivide, KpMultiply, KpSubtract, KpAdd, KpEqual,
 };
 
+// Keys that type a character (letters, digits, punctuation, Space, keypad).
+// A focused text field consumes their KeyPress - the character itself
+// arrives as TextInput - so typing never triggers a key handler above it.
+inline bool is_text_key(Key k) {
+    return k == Key::Space || (k >= Key::Apostrophe && k <= Key::Slash) ||
+           (k >= Key::A && k <= Key::Z) || (k >= Key::Num0 && k <= Key::Grave) ||
+           (k >= Key::Kp0 && k <= Key::KpEqual);
+}
+
 enum Mod : std::uint32_t {
     ModNone   = 0,
     ModShift  = 1 << 0,
