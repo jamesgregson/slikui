@@ -1200,23 +1200,35 @@ def test_drawlist_extend_round_trips_and_validates():
 
 
 def test_drawlist_replay_is_much_faster_than_reissuing():
+    # A timing test on shared CI runners (some emulated): best-of-N for each
+    # side, and a 3x bar where ~40x is typical, so a scheduler hiccup or GC
+    # pause can't fail it but losing the C++-side replay would.
     import time
     theme = slikui.Theme()
     rec = slikui.DrawList()
     for _ in range(25):
         _scene(rec, 0, 0, theme)  # ~2000 commands
-    t = time.perf_counter()
-    for _ in range(20):
+
+    def reissue():
         lst = slikui.DrawList()
         for _ in range(25):
             _scene(lst, 5, 5, theme)
-    reissue = time.perf_counter() - t
-    t = time.perf_counter()
-    for _ in range(20):
+
+    def replay():
         lst = slikui.DrawList()
         lst.append(rec, Vec2(5, 5))
-    replay = time.perf_counter() - t
-    assert replay * 10 < reissue, (replay, reissue)
+
+    def best(fn, reps=7):
+        times = []
+        for _ in range(reps):
+            t = time.perf_counter()
+            for _ in range(5):
+                fn()
+            times.append(time.perf_counter() - t)
+        return min(times)
+
+    replay_t, reissue_t = best(replay), best(reissue)
+    assert replay_t * 3 < reissue_t, (replay_t, reissue_t)
 
 
 # --- Label alignment, Segmented fill ---------------------------------------------

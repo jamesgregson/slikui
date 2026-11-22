@@ -141,7 +141,9 @@ def test_skipped_super_init_rejected():
             self.calls = 0  # no super().__init__() - C++ object uninitialized
 
     ui, root = make_ui()
-    with pytest.raises(TypeError):
+    # nanobind also warns about the uninitialized instance; expect both.
+    with pytest.raises(TypeError), \
+            pytest.warns(RuntimeWarning, match="uninitialized instance"):
         root.add(Bad)
     ui.close()
 

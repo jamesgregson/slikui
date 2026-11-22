@@ -158,6 +158,8 @@
   `PopupClosed` case). No behaviour change.
 - The `FileBrowser` tests failed on Windows: they compared paths as strings
   with `/` separators against native `\` paths, and used a hard-coded `/tmp`.
+- The `DrawList` replay speed test could fail on busy CI runners: it now
+  takes the best of several runs and asks for a 3x (not 10x) speedup.
 
 ## 0.5.0
 
